@@ -289,9 +289,9 @@ function place(b, placed) {
   const L = layer(), a = anchorOf(b.seat), el = b.el;
   if (!L || !a) { el.style.visibility = 'hidden'; return; }
   // 幅はその席のプレートくらいまで（隣の席の上に広がらない。長い文は 3 行まで折り返す）。
-  // 上に余白が足りない席（横向きの上の段など）は横に広げて行を減らす（一度広げたらその吹き出しの間はそのまま）
+  // 上に余白が足りない席（上の段など）は画面の幅まで広げて行を減らす（一度広げたらその吹き出しの間はそのまま）
   const R = L.getBoundingClientRect(), room = a.top - R.top - TAIL - 2 - M;
-  const fitCap = () => { const cap = Math.round(b.wide ? Math.min(R.width - 2 * M, Math.max(a.pw * 2.4, 200)) : Math.max(a.pw * 1.15, 104, b.seat === (S.v && S.v.seat) ? Math.min(R.width * .62, 260) : 0));
+  const fitCap = () => { const cap = Math.round(b.wide ? R.width - 2 * M : Math.max(a.pw * 1.15, 104, b.seat === (S.v && S.v.seat) && !b.narrow ? Math.min(R.width * .62, 260) : 0));
     if (Math.abs((b.cap || 0) - cap) > 1) { b.cap = cap; el.style.setProperty('--cbw', cap + 'px'); } };
   fitCap();
   if (!b.wide && el.offsetHeight > room) { b.wide = true; fitCap(); }
@@ -309,6 +309,8 @@ function place(b, placed) {
       const cost = X => obs.reduce((sum, o) => sum + o.k * Math.max(0, Math.min(o.r, X + w) - Math.max(o.l, X)) * Math.max(0, Math.min(o.b, y + h + TAIL) - Math.max(o.t, y)), 0);
       let best = cost(mid);
       if (best > 0) for (let X = lo; X <= hi; X += 4) { const c = cost(X); if (c < best - 1 || (Math.abs(c - best) <= 1 && Math.abs(X - mid) < Math.abs(x - mid))) { best = c; x = X; } }
+      // 自分の吹き出しは広めにしてあるので、それでもぶつかるなら席の幅まで細くする（以後そのまま）
+      if (best > 0 && !b.narrow && !b.wide && b.seat === (S.v && S.v.seat)) { b.narrow = true; return place(b, placed); }
     }
   }
   x = Math.round(x);
