@@ -636,3 +636,9 @@ body.land .you-act{display:none}
 :root:not([data-theme="dark"]) .sl-tag{color:#A8330A}
 @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .slots li.on{--muted:#8B919D} :root:not([data-theme="light"]) .sl-tag{color:var(--cpu)} }
 .hs-grid .hs-stat:nth-child(5){grid-column:span 2}
+/* idle dock: in landscape the name gets its own line (Check/Fold and 離席 below); at 320 the title may shrink further */
+body.land .dock.idle{flex-wrap:wrap;align-content:center;gap:8px}
+body.land .dock.idle .dk-title{flex:1 1 calc(100% - 40px);min-width:0}
+body.land .dock.idle .dots{margin-left:0}
+body.land .pre,body.land .pre.away-btn{margin-left:0}
+@media (max-width:340px){.dock.idle{gap:8px;padding-inline:10px}.dock.idle .dk-title{min-width:2.5em;flex:1 1 0}.pre.away-btn{margin-left:0}}
