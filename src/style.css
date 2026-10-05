@@ -153,7 +153,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .btn{flex:1 1 0;min-width:0;border:1px solid var(--hair-2);background:var(--glass-hi);font-weight:700;font-size:14px;cursor:pointer;display:grid;place-content:center;gap:1px;line-height:1.2;white-space:nowrap;padding:6px 8px;transition:transform .1s,filter .15s}
 .btn:hover:not(:disabled){filter:brightness(1.07)}
 .btn:active:not(:disabled){transform:scale(.98)}
-.btn small{font-family:var(--f-num);font-size:11px;font-weight:500;opacity:.8}
+.btn small{font-family:var(--f-num);font-size:11px;font-weight:500}
 .btn.primary{background:var(--ink);color:var(--bg);border-color:transparent}
 .btn.accent{background:linear-gradient(135deg,#3F7894,#2E6480);color:#fff;border-color:transparent}
 .btn.ghost{background:transparent}
@@ -191,7 +191,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .tinfo .pz b{font-family:var(--f-num);font-weight:600;font-size:15px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 
 .table{grid-area:table;position:relative;min-height:0;width:100%;height:100%;max-height:min(760px,calc(100vw * 1.9));align-self:center;
-  --hole:calc(var(--cw)*.6);--mine:calc(var(--cw)*1.06);--pw:max(104px,calc(var(--cw)*1.9))}
+  --hole:calc(var(--cw)*.6);--mine:calc(var(--cw)*1.06);--pw:max(108px,calc(var(--cw)*2.05))}
 #seats{position:absolute;inset:0}
 /* the table surface: an oval (the only rounded shape in the UI), glass like the rest, with an inner ring */
 .felt{position:absolute;inset:9% 6%;border-radius:50%!important;pointer-events:none;
@@ -411,7 +411,8 @@ body.land .dk-top .secs{margin-left:auto}
 body.land .tinfo{grid-template-columns:1fr auto}
 /* the raise sheet covers the whole right column (info + dock) instead of growing above the centred dock */
 body.land .dock{position:static}
-body.land .rsheet{left:auto;right:10px;top:4px;bottom:auto;width:min(250px,calc(100% - 20px));max-height:calc(100% - 8px);overflow:auto;padding:8px 10px;gap:6px;z-index:7}
+body.land .dock{-webkit-backdrop-filter:none;backdrop-filter:none}  /* backdrop-filter would make the dock the sheet's containing block */
+body.land .rsheet{left:auto;right:10px;top:56px;bottom:auto;width:min(250px,calc(100% - 20px));max-height:calc(100% - 60px);overflow:auto;padding:8px 10px;gap:6px;z-index:7}
 body.land .rsheet .rs-top b{font-size:26px}
 body.land .quick{flex-wrap:wrap}
 body.land .quick button{flex:1 1 30%}
@@ -422,7 +423,7 @@ body.land[data-screen="game"] .top{position:absolute;z-index:6;top:env(safe-area
   width:250px;max-width:calc(100% - 20px);grid-template-columns:auto auto;justify-content:space-between;padding:6px 0;gap:6px}
 body.land[data-screen="game"] .brand{display:none}
 body.land .stage{grid-template-areas:"table info" "table dock";padding:4px 10px 4px}
-body.land[data-screen="game"] .tinfo{margin-top:44px}
+body.land[data-screen="game"] .tinfo{margin-top:58px}
 body.land .seat.me{flex-direction:row;align-items:flex-end;gap:6px;--pw:max(120px,calc(var(--cw)*2.6))}
 body.land .seat.me .hole{margin:0}
 /* ===== small screens ===== */
@@ -496,7 +497,7 @@ body.land .seat.me .hole{margin:0}
 .code-big small{font-size:10px;letter-spacing:.2em;color:var(--muted)}
 .invite{display:flex;gap:6px;align-items:stretch;width:100%}
 .inv-url{flex:1;min-width:0;display:flex;align-items:center;padding:0 10px;border:1px solid var(--hair-2);background:var(--glass-lo);font-family:var(--f-num);font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all;-webkit-user-select:all}
-.invite .btn{flex:none;min-height:38px;padding:6px 12px}
+.invite .btn{flex:none;min-height:40px;padding:6px 12px}
 .slots{list-style:none;margin:0;padding:0;width:100%;display:grid;gap:4px}
 .slots li{display:grid;grid-template-columns:1.6em minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 12px;border:1.5px dashed var(--hair-2);font-size:14px;text-align:left;color:var(--muted)}
 .slots li.on{border:1.5px solid var(--you);background:var(--you-soft);color:var(--ink)}
@@ -603,20 +604,35 @@ body.land .seat.me .hole{margin:0}
 
 /* ===== QA: touch targets, small screens, contrast ===== */
 @media (pointer:coarse){
-  .nbtn{min-height:40px}
+  .nbtn{min-height:40px;min-width:40px}
+  .acct .who-me{min-height:40px}
   .theme-toggle{width:40px;height:40px}
   .pre{min-height:40px}
   .seg button{min-height:40px}
-  .back{padding:12px 0}
+  .back{padding:13px 0}
   .dock .btn{min-height:40px}
   input[type=range]{height:40px}
 }
-@media (max-width:340px){ .brand{display:none} }
+@media (max-width:340px){ .brand{display:none} .table{--pw:92px} .opp-s .stk small{display:none} }
 .note .hn{font-size:.92em}
-:root:not([data-theme="dark"]) .sl-tag{color:#C2410C}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .sl-tag{color:var(--cpu)} }
 .hs-stat{align-content:start}
 .hs-grid .hs-stat:last-child{grid-column:1/-1}
 .hg-cfg{display:flex;gap:4px}
 .hg-cfg-t{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .hg-cfg-n{flex:none}
+/* seat plates: room for "19,850 99.8 BB" */
+.sp{padding-inline:6px}
+.stk{gap:4px}
+.stk small{letter-spacing:0}
+.sp.opp-s .stk b{font-size:max(15px,calc(var(--cw)*.34))}
+.dock.idle .dk-title{min-width:4em;flex:1 1 4em}
+body.land .you-act{display:none}
+/* the opponent orange as text on light backgrounds needs a darker shade for contrast */
+:root{--cpu-text:#B8430F}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--cpu-text:var(--cpu)} }
+:root[data-theme="dark"]{--cpu-text:var(--cpu)}
+.secs.low,.note .ai,.err,.loss,.tinfo .nx.soon b{color:var(--cpu-text)}
+:root:not([data-theme="dark"]) .slots li.on{--muted:#4B5361}
+:root:not([data-theme="dark"]) .sl-tag{color:#A8330A}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .slots li.on{--muted:#8B919D} :root:not([data-theme="light"]) .sl-tag{color:var(--cpu)} }
+.hs-grid .hs-stat:nth-child(5){grid-column:span 2}
