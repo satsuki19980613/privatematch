@@ -475,7 +475,7 @@ export function fitTable(force, glide) {
   if (!b.classList.contains('kb')) b.classList.toggle('land', vw > vh * 1.25 && vh < 600);   // キーボードの間は向きの判定を変えない
   const c = chat.fitLane(key + (b.classList.contains('land') ? 'L' : ''), () => largest(14, b.classList.contains('land') ? 50 : 80, x => st.style.setProperty('--cw', x + 'px')));
   st.style.setProperty('--cw', c + 'px');
-  if (b.classList.contains('chat')) fits();   // レーンの幅をこの大きさで決め直す
+  if (b.classList.contains('chat')) chat.settle(fits);   // レーンの幅をこの大きさで決め直す
   chat.afterFit();
 }
 viewportHooks({

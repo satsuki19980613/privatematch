@@ -331,10 +331,23 @@ function ghosts(add) {
     s.appendChild(g);
   });
 }
+/** 測る間だけ、席のベットチップの入場アニメ（translateY・scale）を終わりの位置に置く（transform 込みの矩形で判定しないため） */
+export function settle(fn) {
+  if (!S.on) return fn();
+  const run = [];
+  for (const e of document.querySelectorAll('#seats .bchip')) for (const a of e.getAnimations()) {
+    const end = a.effect && a.effect.getComputedTiming().endTime;
+    if (a.playState === 'running' && end != null && isFinite(end)) { run.push([a, a.currentTime]); a.currentTime = end - 1; }
+  }
+  try { return fn(); } finally { for (const [a, t] of run) { try { a.currentTime = t; } catch (e) { /* 終わっていた */ } } }
+}
 /** fitTable の二分探索を包む。search() は今のレーンの状態で入る最大の --cw を返す */
 export function fitLane(key, search) {
   placeBtn();   // 向きで置き場所（卓の中 / 右の列）が変わる
   if (!S.on || !$('#chatLane')) return search();
+  return settle(() => fitLane1(key, search));
+}
+function fitLane1(key, search) {
   ghosts(true);
   try {
     if (key === modeKey) {
@@ -350,7 +363,9 @@ export function fitLane(key, search) {
       setMode('l1'); const c1 = search();
       // 卓を小さくしすぎるなら、卓の中には置かず上の情報の行に 1 つずつ出す（小さい画面の 5〜6 人）
       const ok = c => c >= Math.max(20, c0 * .72);
-      mode = ok(c1) ? 'l1' : ok(c2) ? 'l2' : 'top';
+      // キーボードの開閉の間は卓の中のレーンを保つ（情報の行へ切り替えると吹き出しが 1 フレームで飛ぶ）。小さすぎれば viewport.js が卓を縮小表示にする
+      if (document.body.classList.contains('kb') && mode !== 'top') mode = c1 > c2 ? 'l1' : 'l2';
+      else mode = ok(c1) ? 'l1' : ok(c2) ? 'l2' : 'top';
       setMode(mode);
       return mode === 'l1' ? c1 : mode === 'l2' ? c2 : search();
     }
