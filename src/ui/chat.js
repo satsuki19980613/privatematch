@@ -270,50 +270,61 @@ function anchorOf(seat) {
   const s = document.getElementById('seat' + seat); if (!s) return null;
   const h = rect(s.querySelector('.hole .card') && s.querySelector('.hole')), p = rect(s.querySelector('.sp'));
   if (!h && !p) return null;
-  const pw = p ? p.width : h.width;
-  if (!h || !p) { const r = h || p; return { left: r.left, right: r.right, top: r.top, pw }; }
-  return { left: Math.min(h.left, p.left), right: Math.max(h.right, p.right), top: Math.min(h.top, p.top), pw };
+  const pw = p ? p.width : h.width, hh = h && p && h.bottom <= p.top + 2 ? h.height : 0;   // 札の高さ（札がプレートの上にあるとき）
+  if (!h || !p) { const r = h || p; return { left: r.left, right: r.right, top: r.top, pw, hh }; }
+  return { left: Math.min(h.left, p.left), right: Math.max(h.right, p.right), top: Math.min(h.top, p.top), pw, hh };
 }
-// よけたいもの：ほかの席（札・プレート・ベット・ディーラーボタン）とポット・ボード
+// よけたいもの（重み）：ほかの席の札・ベット・ディーラーボタン（1）とプレート（名前とスタック。2）、ポット・ボード（1）、ドック（6）
 function obstacles(seat) {
   const out = [];
   document.querySelectorAll('#seats .seat').forEach(s => {
     if (s.id === 'seat' + seat) return;
-    for (const c of s.children) { const r = rect(c); if (r) out.push(r); }
+    for (const c of s.children) { const r = rect(c); if (r) out.push([r, c.classList.contains('sp') ? 2 : 1]); }
   });
-  for (const id of ['pot', 'boardC']) { const r = rect(document.getElementById(id)); if (r) out.push(r); }
+  for (const id of ['pot', 'boardC']) { const r = rect(document.getElementById(id)); if (r) out.push([r, 1]); }
+  const d = rect($('#dock')); if (d) out.push([d, 6]);
   return out;
 }
 const M = 4, TAIL = 7;
 function place(b, placed) {
   const L = layer(), a = anchorOf(b.seat), el = b.el;
   if (!L || !a) { el.style.visibility = 'hidden'; return; }
-  // 幅はその席のプレートくらいまで（隣の席の上に広がらない。長い文は 3 行まで折り返す）。
-  // 上に余白が足りない席（上の段など）は画面の幅まで広げて行を減らす（一度広げたらその吹き出しの間はそのまま）
-  const R = L.getBoundingClientRect(), room = a.top - R.top - TAIL - 2 - M;
-  const fitCap = () => { const cap = Math.round(b.wide ? R.width - 2 * M : Math.max(a.pw * 1.15, 104, b.seat === (S.v && S.v.seat) && !b.narrow ? Math.min(R.width * .62, 260) : 0));
-    if (Math.abs((b.cap || 0) - cap) > 1) { b.cap = cap; el.style.setProperty('--cbw', cap + 'px'); } };
+  const R = L.getBoundingClientRect(), tb = $('#table'), ti = $('#tInfo'), land = document.body.classList.contains('land');
+  // 置ける範囲：横向きは卓の列だけ（右の列のドック・情報に出ない）。縦向きは情報の行より下
+  const BL = land && tb ? Math.max(M, tb.offsetLeft) : M, BR = land && tb ? Math.min(R.width - M, tb.offsetLeft + tb.offsetWidth) : R.width - M;
+  const TOP = !land && ti && ti.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M;
+  // 幅はその席のプレートくらいまで（長い文は 4 行まで折り返す）。自分の吹き出しは卓の真ん中が空いているので広め。
+  // 上に余白が足りない席（上の段など）は横に広げて行を減らす。ぶつかるなら席の幅まで細くする（どちらも一度決めたらその吹き出しの間はそのまま）
+  const mine = b.seat === (S.v && S.v.seat);
+  const fitCap = () => {
+    const cap = Math.round(Math.min(BR - BL, b.wide ? Math.max(a.pw * 1.6, 170) : b.narrow ? Math.max(a.pw * .95, 120) : Math.max(a.pw * 1.15, 104, mine ? Math.min(R.width * .62, 260) : 0)));
+    if (Math.abs((b.cap || 0) - cap) > 1) { b.cap = cap; el.style.setProperty('--cbw', cap + 'px'); }
+  };
   fitCap();
-  if (!b.wide && el.offsetHeight > room) { b.wide = true; fitCap(); }
+  if (!b.wide && !b.narrow && el.offsetHeight > a.top - R.top - TAIL - 2 - TOP) { b.wide = true; fitCap(); }
   const w = el.offsetWidth, h = el.offsetHeight;
   const cx = (a.left + a.right) / 2 - R.left;
-  const y = Math.round(Math.max(M, a.top - R.top - h - TAIL - 2));
-  // 横の位置：しっぽが席を指せる範囲で、ほかの物との重なりが一番少ないところ（同じなら真ん中に近いところ）
-  const lo = Math.max(M, cx - w + 14), hi = Math.min(R.width - M - w, cx - 14), mid = Math.max(M, Math.min(R.width - M - w, cx - w / 2));
-  let x = mid;
-  if (hi > lo) {
-    // ほかの吹き出しとの重なりは席の物より重く見る
-    const obs = obstacles(b.seat).map(r => ({ l: r.left - R.left, r: r.right - R.left, t: r.top - R.top, b: r.bottom - R.top, k: 1 }))
-      .concat(placed || []).filter(o => o.b > y && o.t < y + h + TAIL);
-    if (obs.length) {
-      const cost = X => obs.reduce((sum, o) => sum + o.k * Math.max(0, Math.min(o.r, X + w) - Math.max(o.l, X)) * Math.max(0, Math.min(o.b, y + h + TAIL) - Math.max(o.t, y)), 0);
-      let best = cost(mid);
-      if (best > 0) for (let X = lo; X <= hi; X += 4) { const c = cost(X); if (c < best - 1 || (Math.abs(c - best) <= 1 && Math.abs(X - mid) < Math.abs(x - mid))) { best = c; x = X; } }
-      // 自分の吹き出しは広めにしてあるので、それでもぶつかるなら席の幅まで細くする（以後そのまま）
-      if (best > 0 && !b.narrow && !b.wide && b.seat === (S.v && S.v.seat)) { b.narrow = true; return place(b, placed); }
+  // 上に入りきらなければ、その人の札の上にかぶせる（情報の行やほかの席には出ない）
+  const y0 = Math.round(Math.max(TOP, a.top - R.top - h - TAIL - 2));
+  // 位置：しっぽが席を指せる範囲で、ほかの物との重なりが一番少ないところ。横にずらすのを先に、足りなければ少し上へ、
+  // 相手の吹き出しはその人の札の上まで下げてもよい（自分の札は隠さない）。同じなら元の位置に近いところ
+  const lo = Math.max(BL, cx - w + 14), hi = Math.min(BR - w, cx - 14), mid = Math.max(BL, Math.min(BR - w, cx - w / 2));
+  let x = mid, y = y0;
+  const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left, r: r.right - R.left, t: r.top - R.top, b: r.bottom - R.top, k })).concat(placed || []);
+  const cost = (X, Y) => obs.reduce((sum, o) => sum + o.k * Math.max(0, Math.min(o.r, X + w) - Math.max(o.l, X)) * Math.max(0, Math.min(o.b, Y + h + TAIL) - Math.max(o.t, Y)), 0);
+  let best = cost(mid, y0);
+  if (best > 0) {
+    const ys = [y0];
+    for (let d = 4; d <= 32 && y0 - d >= TOP; d += 4) ys.push(y0 - d);
+    if (!mine) for (let d = 4; d <= a.hh * .8; d += 4) ys.push(y0 + d);
+    let bestScore = best;
+    for (const Y of ys) for (let X = lo; X <= Math.max(lo, hi); X += 4) {
+      const c = cost(X, Y), score = c + Math.abs(Y - y0) * 24 + Math.abs(X - mid) * .5;
+      if (score < bestScore) { bestScore = score; best = c; x = X; y = Y; }
     }
+    if (best > 0 && !b.narrow && !b.wide) { b.narrow = true; return place(b, placed); }
   }
-  x = Math.round(x);
+  x = Math.round(Math.max(BL, Math.min(BR - w, x)));
   el.style.visibility = '';
   el.style.translate = `${x}px ${y}px`;
   el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(w - 10, cx - x))) + 'px');
