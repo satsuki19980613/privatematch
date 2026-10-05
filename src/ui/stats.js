@@ -64,7 +64,6 @@ function statsHTML() {
     <div class="panel hs-panel">
       ${chartHTML(pts)}
       <div class="hs-period"><span class="hs-period-lbl">期間</span><div class="seg">${PERIODS.map(p => `<button type="button" data-p="${p.key}" aria-pressed="${period === p.key}">${p.label}</button>`).join('')}</div></div>
-      ${all.length ? '' : '<p class="hs-empty">まだ試合がありません。PrivateMatch / FreeMatch を最後まで打つと、ここに貯まります。</p>'}
     </div>
     <div class="io"><button class="back" id="expBtn" type="button">EXPORT</button><label class="back" for="impIn">IMPORT</label><input id="impIn" type="file" accept="application/json" hidden></div>`;
 }
@@ -82,7 +81,7 @@ function chartHTML(points) {
   const g = geo(points), n = g.n;
   const path = points.map((p, i) => `${i ? 'L' : 'M'}${g.x(i).toFixed(1)} ${g.y(p.y).toFixed(1)}`).join(' ');
   const xt = []; if (n) { const c = Math.min(5, n); for (let k = 0; k < c; k++) xt.push(Math.round((k * (n - 1)) / Math.max(1, c - 1))); }
-  return `<div class="hc"><div class="hc-read" id="hcRead">${n ? '<span class="hc-read-hint">なぞると各試合時点の値</span>' : ''}</div>
+  return `<div class="hc"><div class="hc-read" id="hcRead"></div>
     <svg class="hc-svg" id="hcSvg" viewBox="0 0 ${CW} ${CH}" role="img" aria-label="累計 pt のグラフ">
       ${g.ticks.map(t => `<line class="hc-grid${t === 0 ? ' zero' : ''}" x1="${CPL}" x2="${CW - CPR}" y1="${g.y(t)}" y2="${g.y(t)}"/><text class="hc-ylbl" x="${CPL - 5}" y="${g.y(t) + 3}">${t}</text>`).join('')}
       ${xt.map((i, k) => `<text class="hc-xlbl" x="${g.x(i)}" y="${CH - 6}" text-anchor="${k === 0 ? 'start' : k === xt.length - 1 ? 'end' : 'middle'}">${i + 1}</text>`).join('')}
@@ -104,7 +103,7 @@ function bindStats(el) {
     el.querySelector('#hcRead').innerHTML = `<span class="hc-read-v"><i></i>#${i + 1} ${fmtPt(pts[i].y)}pt</span>`;
   };
   svg.onpointermove = move; svg.onpointerdown = move;
-  svg.onpointerleave = () => { el.querySelector('#hcCur').innerHTML = ''; el.querySelector('#hcRead').innerHTML = g.n ? '<span class="hc-read-hint">なぞると各試合時点の値</span>' : ''; };
+  svg.onpointerleave = () => { el.querySelector('#hcCur').innerHTML = ''; el.querySelector('#hcRead').innerHTML = ''; };
   el.querySelector('#expBtn').onclick = async () => {
     try {
       const data = await store.exportAll();
@@ -150,7 +149,7 @@ function gameRow(g) {
     }
     return `<li class="hg${open ? ' open' : ''}"><button class="hg-head" type="button" data-game="${esc(g.roomId)}">
       <span class="hg-top"><span class="hg-date">${g.startedAt ? fmtTime(g.startedAt) : ''}</span><span class="hg-kind">${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}</span><span class="hg-res">${status}</span></span>
-      <span class="hg-cfg">${esc(configSummary(g.config))} ・ ${+g.hands || 0} hands</span>
+      <span class="hg-cfg"><span class="hg-cfg-t">${esc(configSummary(g.config))}</span><span class="hg-cfg-n">・ ${+g.hands || 0} hands</span></span>
       <span class="hg-opp">${g.players.map((p, s) => s === g.seat ? '' : esc(p.name)).filter(Boolean).join(' / ')}</span></button>${body}</li>`;
 }
 function bindHistory(el) {
@@ -197,8 +196,7 @@ export function openHand(g, h) {
     `<table class="tbl hd-tbl"><thead><tr><th>POS</th><th>NAME</th><th>STACK</th><th>CARDS</th><th>NET</th></tr></thead><tbody>${players}</tbody></table>
     ${streets.join('')}
     <div class="hd-sh"><b>Result</b></div><ul class="hd-acts">${res}</ul>
-    ${h.eliminated.length ? `<p class="hint">${h.eliminated.map(e => `${name(e.seat)} ${+e.place || 0}位で脱落`).join(' ・ ')}</p>` : ''}
-    <p class="hint">STACK・NET・POT の単位は BB（このハンドの BB = ${fmt(bb)}）。Bet / Raise / All-in の数字はそのストリートの合計額、Call は払った額（チップ）。</p>`;
+    ${h.eliminated.length ? `<p class="hint">${h.eliminated.map(e => `${name(e.seat)} ${+e.place || 0}位で脱落`).join(' ・ ')}</p>` : ''}`;
   openDlg('#handDlg');
 }
 

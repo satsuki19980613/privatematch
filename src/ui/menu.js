@@ -20,6 +20,7 @@ const root = () => $('#menuIn');
 
 export const currentPane = () => pane;
 export function setPane(p, opts = {}) {
+  const m = $('#menu'); if (m) m.scrollTop = 0;
   if (pane === 'room' && p !== 'room') room.stop();
   if (pane === 'free' && p !== 'free') stopFree();
   pane = p;
@@ -171,7 +172,7 @@ function bindJoin(el) {
   bindBack(el);
   const inp = el.querySelector('#codeIn'), go = el.querySelector('#codeGo');
   inp.oninput = () => { inp.value = inp.value.replace(/\D/g, '').slice(0, 6); go.disabled = inp.value.length !== 6; };
-  inp.onkeydown = e => { if (e.key === 'Enter' && !go.disabled) go.click(); };
+  inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!go.disabled) go.click(); } };
   go.onclick = () => openJoin(inp.value);
   setTimeout(() => inp.focus(), 50);
 }

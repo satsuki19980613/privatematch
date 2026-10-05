@@ -60,7 +60,7 @@ export function render(el) {
       <div class="q-n"><b>${v.members.length}</b> / ${n}</div>
       <ol class="slots">${slots}</ol>
       <div class="cfg-sum">${esc(configSummary(rm.config))}</div>
-      <div class="q-exp">${v.members.length < n ? `満席で自動的に始まります ・ 募集の残り ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'まもなく始まります'}</div>
+      <div class="q-exp">${v.members.length < n ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'START'}</div>
       <button class="btn ghost" id="roomLeave" type="button" style="min-height:44px;min-width:160px;flex:none">${isHost ? '部屋を閉じる' : '退出する'}</button>
     </div>`, bind);
 }

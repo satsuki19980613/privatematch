@@ -324,7 +324,7 @@ function renderDock() {
   } else if (p.status === 'out') {
     html = `<span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
   } else if (p.status === 'sitout' || v.status === 'paused') {
-    html = `<span class="eyebrow">${v.status === 'paused' ? 'PAUSED' : 'SITTING OUT'}</span><span class="dk-title">${v.status === 'paused' ? '全員が離席中 <b class="secs" id="pauseLeft"></b>' : '手番は自動で処理されます'}</span>${p.status === 'sitout' ? '<button class="btn accent" data-act="sitin" type="button" style="flex:0 0 36%">I\'m back</button>' : ''}`;
+    html = `<span class="eyebrow">${v.status === 'paused' ? 'PAUSED' : 'SITTING OUT'}</span><span class="dk-title">${v.status === 'paused' ? '<b class="secs" id="pauseLeft"></b>' : ''}</span>${p.status === 'sitout' ? '<button class="btn accent" data-act="sitin" type="button" style="flex:0 0 36%">I\'m back</button>' : ''}`;
   } else if (h && h.phase === 'settled') {
     const ws = h.won.map((_, s) => s).filter(s => isWinner(h, s));
     const w = ws.length === 1 ? ws[0] : null;
@@ -418,17 +418,19 @@ function openSheet() {
   host.innerHTML = `<div class="rs-top"><div class="rs-cards">${mine}</div><div class="grow"><span class="eyebrow">${bet ? 'BET' : 'RAISE TO'}</span><span class="sub">POT ${fmt(l.pot)}</span></div><b id="rsv">${fmt(lo)}</b></div>
     <input type="range" id="rsr" min="0" max="${vals.length - 1}" step="1" value="0" ${vals.length < 2 ? 'disabled' : ''} aria-label="${bet ? 'Bet' : 'Raise'} amount">
     <div class="quick">${q.map(([k, x]) => `<button type="button" data-q="${x}" aria-pressed="false">${k}<b>${fmtBb(x, bb)}<i>BB</i></b></button>`).join('')}</div>
-    <div class="rs-btns"><button class="btn ghost" data-act="rs-close" type="button">Back</button><button class="btn accent" data-act="rs-ok" type="button">${bet ? 'Bet' : 'Raise'}<small id="rsv2">${fmt(lo)}</small></button></div>`;
+    <div class="rs-btns"><button class="btn ghost" data-act="rs-close" type="button">Back</button><button class="btn accent" data-act="rs-ok" type="button"><span id="rsk">${bet ? 'Bet' : 'Raise'}</span><small id="rsv2">${fmt(lo)}</small></button></div>`;
   $('#dock').appendChild(host);
   const r = $('#rsr');
   const sync = () => {
     $('#rsv').textContent = fmt(t.rs.to); $('#rsv2').textContent = fmt(t.rs.to) + ' · ' + fmtBb(t.rs.to, bb) + ' BB';
+    $('#rsk').textContent = t.rs.to === hi ? 'All-in' : bet ? 'Bet' : 'Raise';
     r.value = t.rs.vals.indexOf(t.rs.to); r.style.setProperty('--fill', (t.rs.vals.length > 1 ? r.value / (t.rs.vals.length - 1) * 100 : 100) + '%');
     host.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.q === t.rs.to)));
   };
   r.oninput = () => { t.rs.to = t.rs.vals[+r.value]; sync(); };
   host.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { t.rs.to = +b.dataset.q; sync(); });
-  sync();
+  host.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeSheet(); } });
+  sync(); r.focus({ preventScroll: true });
 }
 function closeSheet() { if (T) T.rs = null; const h = $('#rsheet'); if (h) h.remove(); }
 

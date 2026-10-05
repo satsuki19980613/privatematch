@@ -1,7 +1,7 @@
 /* ===== tokens : crystal / square (same family as Grid Poker) ===== */
 :root{
   --bg:#E9EAED;
-  --ink:#0D0F13; --ink-2:#3A3F4A; --muted:#7A808C;
+  --ink:#0D0F13; --ink-2:#3A3F4A; --muted:#5F6672;
   --hair:rgba(13,15,19,.08); --hair-2:rgba(13,15,19,.16);
   --glass-hi:rgba(255,255,255,.74); --glass:rgba(255,255,255,.5); --glass-lo:rgba(255,255,255,.3);
   --edge:rgba(255,255,255,.9);
@@ -155,7 +155,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .btn:active:not(:disabled){transform:scale(.98)}
 .btn small{font-family:var(--f-num);font-size:11px;font-weight:500;opacity:.8}
 .btn.primary{background:var(--ink);color:var(--bg);border-color:transparent}
-.btn.accent{background:linear-gradient(135deg,#4C88A6,var(--you));color:#fff;border-color:transparent}
+.btn.accent{background:linear-gradient(135deg,#3F7894,#2E6480);color:#fff;border-color:transparent}
 .btn.ghost{background:transparent}
 .btn.danger{background:var(--cpu);color:var(--cpu-ink);border-color:transparent}
 .btn:disabled{opacity:.35;cursor:default}
@@ -191,7 +191,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .tinfo .pz b{font-family:var(--f-num);font-weight:600;font-size:15px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 
 .table{grid-area:table;position:relative;min-height:0;width:100%;height:100%;max-height:min(760px,calc(100vw * 1.9));align-self:center;
-  --hole:calc(var(--cw)*.6);--mine:calc(var(--cw)*1.06);--pw:max(88px,calc(var(--cw)*1.9))}
+  --hole:calc(var(--cw)*.6);--mine:calc(var(--cw)*1.06);--pw:max(104px,calc(var(--cw)*1.9))}
 #seats{position:absolute;inset:0}
 /* the table surface: an oval (the only rounded shape in the UI), glass like the rest, with an inner ring */
 .felt{position:absolute;inset:9% 6%;border-radius:50%!important;pointer-events:none;
@@ -269,7 +269,8 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .dock.idle{display:flex;align-items:center;gap:12px;padding:10px 16px}
 .dk-top{display:flex;align-items:center;gap:10px;min-width:0;white-space:nowrap;overflow:hidden}
 .dk-top .eyebrow{flex:none}
-.dk-title{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dk-title{display:block;white-space:nowrap;font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dk-title .secs{margin-left:8px}
 .dk-title.y{color:var(--you-text)}.dk-title.c{color:var(--cpu)}
 .dock.idle .dk-title{font-size:16px}
 .you-act{font-family:var(--f-num);font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--you-text)}
@@ -408,7 +409,12 @@ body.land .you-act{font-size:11px;letter-spacing:.06em}
 body.land .dk-stats b{margin-right:2px}
 body.land .dk-top .secs{margin-left:auto}
 body.land .tinfo{grid-template-columns:1fr auto}
-body.land .rsheet{bottom:auto;top:auto;position:absolute;left:0;right:0;bottom:calc(100% + 6px)}
+/* the raise sheet covers the whole right column (info + dock) instead of growing above the centred dock */
+body.land .dock{position:static}
+body.land .rsheet{left:auto;right:10px;top:4px;bottom:auto;width:min(250px,calc(100% - 20px));max-height:calc(100% - 8px);overflow:auto;padding:8px 10px;gap:6px;z-index:7}
+body.land .rsheet .rs-top b{font-size:26px}
+body.land .quick{flex-wrap:wrap}
+body.land .quick button{flex:1 1 30%}
 /* landscape phones in play : the header moves to the top of the right column so the table gets the full
    height; the hero's cards sit beside the plate instead of above it */
 body.land[data-screen="game"] .app{position:relative;grid-template-rows:minmax(0,1fr)}
@@ -594,3 +600,23 @@ body.land .seat.me .hole{margin:0}
 .hd-acts small{font-size:10px;color:var(--muted)}
 .me{color:var(--you-text);font-weight:700}
 @media (max-width:420px){.hs-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hh-row{grid-template-columns:2.6em 2.8em 4em minmax(0,1fr) auto}}
+
+/* ===== QA: touch targets, small screens, contrast ===== */
+@media (pointer:coarse){
+  .nbtn{min-height:40px}
+  .theme-toggle{width:40px;height:40px}
+  .pre{min-height:40px}
+  .seg button{min-height:40px}
+  .back{padding:12px 0}
+  .dock .btn{min-height:40px}
+  input[type=range]{height:40px}
+}
+@media (max-width:340px){ .brand{display:none} }
+.note .hn{font-size:.92em}
+:root:not([data-theme="dark"]) .sl-tag{color:#C2410C}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .sl-tag{color:var(--cpu)} }
+.hs-stat{align-content:start}
+.hs-grid .hs-stat:last-child{grid-column:1/-1}
+.hg-cfg{display:flex;gap:4px}
+.hg-cfg-t{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.hg-cfg-n{flex:none}
