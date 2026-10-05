@@ -155,7 +155,7 @@ export function closeAll() {
 export function init() {
   $('#chatLogBtn').addEventListener('click', openChatLog);
   $('#handLogBtn').addEventListener('click', openHandLog);
-  handsDlg().addEventListener('close', () => { if ($('#handDlg').open) $('#handDlg').close(); stopHands(); });
+  handsDlg().addEventListener('close', () => { if (handsDlg().open) return; if ($('#handDlg').open) $('#handDlg').close(); stopHands(); });
   chatDlg().addEventListener('close', () => { shown = []; });
   chat.subscribe(onChat);   // メッセージ・未読・chatEnabled が変わるたび
   // 卓に入った・出た（画面の切り替え）でボタンを合わせ、卓の外ではモーダルを閉じる
