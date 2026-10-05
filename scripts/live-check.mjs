@@ -59,8 +59,19 @@ async function prod() {
   check('未ログインの token が 401', tok.status === 401, `${tok.status} ${tok.body.slice(0, 80)}`);
   const so = await timed('auth relay', SITE + '/api/auth/sign-in/social', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: SITE },
     body: JSON.stringify({ provider: 'google', callbackURL: SITE + '/', errorCallbackURL: SITE + '/?error=login_failed', disableRedirect: true }) });
-  const gurl = so.json && so.json.url || '';
-  check('Google ログインの開始が Google の同意画面の URL を返す', so.status === 200 && /^https:\/\/accounts\.google\.com\//.test(gurl), `${so.status} ${gurl.slice(0, 60) || so.body.slice(0, 120)}`);
+  // Neon の共有 OAuth アプリでは Neon Auth を一度経由してから Google へ転送される。転送をたどって Google の同意画面に着くか
+  let gurl = so.json && so.json.url || '';
+  const hops = [];
+  for (let i = 0; i < 4 && gurl && !/^https:\/\/accounts\.google\.com\//.test(gurl); i++) {
+    hops.push(new URL(gurl).host);
+    const r = await timed('auth relay', gurl);
+    gurl = r.headers.get('location') ? new URL(r.headers.get('location'), gurl).href : '';
+  }
+  check('Google ログインの開始が Google の同意画面に着く', so.status === 200 && /^https:\/\/accounts\.google\.com\//.test(gurl), `${so.status} ${[...hops, gurl && new URL(gurl).host].join(' → ') || so.body.slice(0, 120)}`);
+  if (gurl) {
+    const ru = new URL(gurl).searchParams.get('redirect_uri') || '';
+    check('Google から戻る先が Neon Auth', /neon/.test(ru), ru.slice(0, 100));
+  }
   const sc = so.headers.getSetCookie();
   check('ログイン開始の Cookie がこのサイトのもの（Domain 無し・Secure）', sc.length > 0 && sc.every(c => !/;\s*domain=/i.test(c) && /;\s*secure/i.test(c)), sc.map(c => c.split(';')[0].split('=')[0]).join(', '));
   const nf = await timed('auth relay', SITE + '/api/auth/sign-up/email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
