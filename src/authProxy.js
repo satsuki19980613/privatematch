@@ -54,5 +54,7 @@ export function fromUpstream(res){
 
 export async function proxyAuth(req,upstream,path,fetcher=fetch){
   if(!isProxiedPath(path))return new Response('not found',{status:404});
-  return fromUpstream(await fetcher(await toUpstream(req,upstream,path)));
+  let res;try{res=await fetcher(await toUpstream(req,upstream,path))}
+  catch{return new Response(JSON.stringify({error:'auth_unreachable'}),{status:502,headers:{'content-type':'application/json','cache-control':'no-store'}})}
+  return fromUpstream(res);
 }

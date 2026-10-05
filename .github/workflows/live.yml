@@ -16,7 +16,6 @@ permissions:
   contents: read
 
 env:
-  NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
   NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
   APP_ORIGIN: ${{ vars.APP_ORIGIN || format('https://{0}.pages.dev', vars.CF_PAGES_PROJECT || 'privatematch') }}
 
@@ -36,13 +35,16 @@ jobs:
           set -a; . ./.env.production; set +a
           SITE="$APP_ORIGIN" AUTH_URL="$VITE_NEON_AUTH_URL" DATA_URL="$VITE_NEON_DATA_API_URL" GAME_URL="$VITE_GAME_URL" node scripts/live-check.mjs prod
       - name: 本番の Neon Auth の設定（表示だけ）
-        if: always() && env.NEON_API_KEY != ''
+        if: always() && vars.NEON_PROJECT_ID != ''
         run: |
           C="node node_modules/neonctl/bin/cli.js --project-id $NEON_PROJECT_ID --no-color"
           B=$($C branches list --output json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const l=Array.isArray(j)?j:j.branches;const b=l.find(x=>x.name===(process.env.NEON_PROD_BRANCH||"production"))||l.find(x=>x.default);console.log(b.id)})')
           echo "branch: $B"
-          for s in "oauth-provider list" "domain list" "config email-password get"; do echo "== $s"; $C neon-auth $s --branch "$B" || true; done
+          for s in "oauth-provider list" "domain list"; do echo "== $s"; $C neon-auth $s --branch "$B" || true; done
+          echo "== config email-password get"; ep=$($C neon-auth config email-password get --branch "$B" || true); echo "$ep"
+          if echo "$ep" | grep -Eq 'Enabled: +true'; then echo "::warning::本番の Neon Auth でメールとパスワードの登録が開いています（main への Deploy で閉じる）"; fi
         env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROD_BRANCH: ${{ vars.NEON_PROD_BRANCH }}
 
   e2e:
@@ -62,6 +64,7 @@ jobs:
       - name: 開発用ブランチ dev の準備
         id: neon
         env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           ALLOW_LOCALHOST: '1'
         run: |
           node scripts/setup-neon.mjs --branch dev
@@ -69,6 +72,9 @@ jobs:
           node node_modules/neonctl/bin/cli.js neon-auth config email-password update --branch dev --enabled --no-require-email-verification --project-id "$NEON_PROJECT_ID" --no-color
       - name: マイグレーションと Function の配備（dev）
         id: fn
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          ALLOW_LOCALHOST: '1'
         run: |
           echo "== migrate $(date +%T)"; timeout 180 npm run db:migrate -- --branch dev
           echo "== refresh-schema $(date +%T)"; timeout 120 node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch dev --database neondb --project-id "$NEON_PROJECT_ID" || true

@@ -232,7 +232,7 @@ async function e2e() {
     const r = await rpc(u, 'room_hands', { p_room: room, p_after: 0 });
     const hs = r.json || [], seat = views.get(u.uid).seat;
     const nos = hs.map(x => x.handNo);
-    check(`room_hands（${u.i}）が全ハンド・自分の手札だけ`, r.status === 200 && hs.length === v.handNo && nos.every((n, i) => n === i + 1) && hs.every(x => Array.isArray(x.hole) && x.hole.length === 2),
+    check(`room_hands（${u.i}）が全ハンド・自分の手札だけ（飛んだあとは無し）`, r.status === 200 && hs.length === v.handNo && nos.every((n, i) => n === i + 1) && hs[0] && Array.isArray(hs[0].hole) && hs[0].hole.length === 2 && hs.every(x => x.hole === null || (Array.isArray(x.hole) && x.hole.length === 2)),
       `${r.status} ${hs.length}/${v.handNo} seat=${seat}`);
     const later = await rpc(u, 'room_hands', { p_room: room, p_after: v.handNo - 1 });
     check(`room_hands の差分（${u.i}）`, later.status === 200 && later.json.length === 1);

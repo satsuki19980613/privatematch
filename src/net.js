@@ -58,13 +58,15 @@ async function getToken(){
   token={jwt,exp:expOf(jwt)};return jwt;
 }
 
-async function call(url,body){
+async function call(url,body,retry=true){
   const jwt=await getToken();
   const r=await timed(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${jwt}`},body:JSON.stringify(body)},15_000);
   const data=await r.json().catch(()=>null);
   if(r.ok)return data;
   const code=(data&&(data.error||data.message))||'http_'+r.status;
   if(r.status===401||code==='not_authenticated')lost();
+  // the Data API answers a missing / expired / unknown-key JWT with 400 (not 401): get a fresh token and try once more
+  else if(retry&&r.status===400&&/jwt|credentials|key id|expired/i.test(code)){token=null;return call(url,body,false)}
   throw Object.assign(new NetError(code,r.status),{data});
 }
 /** Data API RPC (the database functions granted to authenticated) */

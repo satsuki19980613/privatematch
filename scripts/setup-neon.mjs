@@ -1,6 +1,7 @@
 // Neon の準備（何度実行しても同じ結果になる）：node scripts/setup-neon.mjs --branch <branch>
 //   1. ブランチが無ければ作る（既定のブランチから）。本番は、その名前が無ければプロジェクトの既定のブランチを使う
-//   2. Neon Auth を有効にし、Google ログインを足す（Neon の共有 OAuth アプリ。自前のクライアントは GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET）
+//   2. Neon Auth を有効にし、Google ログインを足す（Neon の共有 OAuth アプリ。自前のクライアントは GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET）。
+//      本番（ALLOW_LOCALHOST が 1 でない）はメールとパスワードの登録と localhost を止めて、Google だけにする
 //   3. Data API を有効にする（認証は Neon Auth）
 //   4. ログインの戻り先として APP_ORIGIN を信頼するドメインに足す（開発ブランチは localhost も許可）
 //   5. Neon Auth と Data API の URL を表示し、GitHub Actions ならステップ出力 auth_url / data_url に書く
@@ -41,6 +42,12 @@ if (!/google/i.test(providers)) {
   await neon('neon-auth', 'oauth-provider', 'add', '--branch', branch, '--provider-id', 'google', ...own);
 }
 
+// 本番は Google だけ（Neon Auth は既定でメールとパスワードの登録も受け付けるので止める）。localhost からのログインも許さない
+if (process.env.ALLOW_LOCALHOST !== '1') {
+  await neon('neon-auth', 'config', 'email-password', 'update', '--branch', branch, '--no-enabled', '--disable-sign-up');
+  await tryNeon('neon-auth', 'domain', 'allow-localhost', 'disable', '--branch', branch);
+}
+
 // 3. Data API
 let api = await tryNeon('data-api', 'get', '--branch', branch, '--database', DB, '--output', 'json');
 if (!api || !/apirest/.test(api)) {
@@ -53,7 +60,7 @@ if (!api || !/apirest/.test(api)) {
 if (process.env.APP_ORIGIN) {
   const host = process.env.APP_ORIGIN.replace(/\/+$/, '');
   const domains = (await tryNeon('neon-auth', 'domain', 'list', '--branch', branch, '--output', 'json')) || '';
-  if (!domains.includes(host.replace(/^https?:\/\//, ''))) { console.log(`信頼するドメインに ${host} を足します`); await tryNeon('neon-auth', 'domain', 'add', host, '--branch', branch); }
+  if (!domains.includes(host.replace(/^https?:\/\//, ''))) { console.log(`信頼するドメインに ${host} を足します`); await neon('neon-auth', 'domain', 'add', host, '--branch', branch); }
 }
 if (process.env.ALLOW_LOCALHOST === '1') await tryNeon('neon-auth', 'domain', 'allow-localhost', 'enable', '--branch', branch);
 
