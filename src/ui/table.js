@@ -1,7 +1,7 @@
 // 卓：2〜6 席（自分は常に下）、ボード、ポット、操作ドック、ハンドの結果、ポーリングと tick、試合の結果。
 // 状態はサーバーのビュー（room_poll / act / tick）だけから作る。ルールで決めるのは legalActions(view) だけ。
 import { legalActions, dueAt } from '../engine.js';
-import { BLIND_TABLES, modeLabel, ACTION_MS } from '../structure.js';
+import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf } from '../structure.js';
 import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb } from './util.js';
 import { syncRoom } from '../history/sync.js';
 import * as chat from './chat.js';
@@ -203,7 +203,8 @@ function renderInfo() {
 function nextLevelText() {
   const v = T.v, c = v.config, h = v.hand, lv = h ? h.level : 1;
   if (lv >= BLIND_TABLES[c.speed].length) return { t: 'MAX', soon: false };
-  const ms = v.startedAt + lv * c.levelMin * 60000 - clock.now();
+  // 3 分たったらハンドの終わりまで 0:00 で止まり、次のハンドで上がって数え直す
+  const ms = (v.levelStartAt ?? v.startedAt + (lv - 1) * levelMsOf(c)) + levelMsOf(c) - clock.now();
   const s = Math.max(0, Math.ceil(ms / 1000));
   return { t: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, soon: s <= 15 };
 }

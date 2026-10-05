@@ -2,7 +2,7 @@
 // 記録は本物とは別の IndexedDB（privatematch-demo。history/store.js）に入るので、本当の成績には混ざらない。
 // サンプルは本物のエンジンで打った試合（だいたいチェック/コール、ときどきレイズ・オールイン）。?demo=reset で作り直す。
 import { newTable, legalActions, act, tick, dueAt, handRecord } from './engine.js';
-import { PLAYER_COUNTS, START_BBS, SPEEDS, LEVEL_MINUTES, MODE_IDS, payoutsFor } from './structure.js';
+import { PLAYER_COUNTS, START_BBS, SPEEDS, MODE_IDS, payoutsFor } from './structure.js';
 import * as store from './history/store.js';
 
 const GAMES = 120;
@@ -25,7 +25,7 @@ function move(st, seat, r, style) {
 /** 1 試合を最後まで打って、端末に保存する形（store の games / hands）にする */
 function playGame(i, startAt, r) {
   const players = pick(PLAYER_COUNTS, r);
-  const config = { players, startBb: pick(START_BBS, r), speed: pick(SPEEDS, r), levelMin: pick(LEVEL_MINUTES, r), mode: pick(MODE_IDS, r) };
+  const config = { players, startBb: pick(START_BBS, r), speed: pick(SPEEDS, r), mode: pick(MODE_IDS, r) };
   const seat = Math.floor(r() * players);
   const others = NAMES.slice().sort(() => r() - 0.5);
   const names = Array.from({ length: players }, (_, s) => (s === seat ? ME : others.pop()));
@@ -69,7 +69,7 @@ export async function seed() {
     t = endedAt + Math.floor((90 * 86400_000) / GAMES * (0.3 + r()));
   }
   // 途中で中止になった試合も 1 つ
-  await store.putGame({ roomId: 'demo-cancel', code: '424242', kind: 'free', config: { players: 4, startBb: 100, speed: 'normal', levelMin: 4, mode: 'club' }, seat: 0,
+  await store.putGame({ roomId: 'demo-cancel', code: '424242', kind: 'free', config: { players: 4, startBb: 100, speed: 'normal', mode: 'club' }, seat: 0,
     names: [ME, 'Mika', 'Kenta', 'Yui'], players: [ME, 'Mika', 'Kenta', 'Yui'].map(name => ({ name, place: null, pt: null })), place: null, pt: null,
     status: 'cancelled', startedAt: t, endedAt: t + 600_000, hands: 0 });
 }

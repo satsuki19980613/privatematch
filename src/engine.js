@@ -4,7 +4,7 @@
 // 同じシードなら同じ配札になり、保存した状態から続きを再現できる。
 // 関数は `st` をその場で書き換えて返す。違法な呼び出しは EngineError を投げ、そのとき `st` は変わらない。
 import {
-  blindsAt, levelAt, payoutsFor, normalizeConfig, BASE_BB,
+  blindsAt, nextLevel, levelMsOf, payoutsFor, normalizeConfig, BASE_BB,
   ACTION_MS, TIME_BANK_MS, AUTO_TO_SITOUT, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS,
 } from './structure.js';
 
@@ -129,7 +129,7 @@ export function newTable({ config, names, now, rnd, button, stacks }) {
   else seed.push(...globalThis.crypto.getRandomValues(new Uint32Array(8)));
   const start = stacks ? stacks.slice() : Array(n).fill(cfg.startBb * BASE_BB);
   const st = {
-    ver: 0, config: cfg, n, names: names.slice(), startedAt: now,
+    ver: 0, config: cfg, n, names: names.slice(), startedAt: now, levelStartAt: now,
     players: start.map(stack => ({ stack, status: 'active', timeBankMs: TIME_BANK_MS, autoCount: 0, place: null, pt: null })),
     handNo: 0, prevSbPos: null, prevBbSeat: null, seed, ctr: 0,
     hand: null, nextAt: null, status: 'running', pausedAt: null, endedAt: null, winner: null,
@@ -159,7 +159,10 @@ function positions(st, forcedBtn) {
 function dealHand(st, now, forcedBtn) {
   const n = st.n, P = st.players;
   const pos = positions(st, forcedBtn);
-  const level = levelAt(st.config, st.startedAt, now);
+  // レベルは前のハンドのレベルから。levelStartAt が無いのは以前の（開始からの経過時間で上がった）部屋
+  const cur = st.hand ? st.hand.level : 1;
+  const lv = nextLevel(st.config, cur, st.levelStartAt ?? st.startedAt + (cur - 1) * levelMsOf(st.config), now);
+  const level = lv.level; st.levelStartAt = lv.levelStartAt;
   const { sb, bb, ante } = blindsAt(st.config.speed, level);
   const deck = freshDeck(st);
   const live = seatsOf(st).map(s => isLive(P[s]));

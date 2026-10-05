@@ -185,7 +185,7 @@ test('同期: 並行に呼んでも直列（同じ部屋の同期が重ならな
 
 test('同期: 200 件を超えるハンド数でもページングで全部写る（250 ハンド）', async () => {
   fresh();
-  const id = S.create({ n: 2, cfg: { startBb: 200, speed: 'veryslow', levelMin: 5 } });
+  const id = S.create({ n: 2, cfg: { startBb: 150, speed: 'veryslow' } });
   // 全員フォールドで 250 ハンド回す（SB が毎回降りる。スタックはほぼ動かない）
   let guard = 0; while (S.live(id) && S.R(id).hands.length < 250 && guard++ < 1e5) S.step(id, foldPolicy);
   assert.ok(S.R(id).hands.length >= 250, 'hands=' + S.R(id).hands.length);
@@ -200,7 +200,7 @@ test('同期: 200 件を超えるハンド数でもページングで全部写�
 
 test('同期: ちょうど 200 件のとき（次の 1 回は空で終わる）', async () => {
   fresh();
-  const id = S.create({ n: 2, cfg: { startBb: 200, speed: 'veryslow', levelMin: 5 } });
+  const id = S.create({ n: 2, cfg: { startBb: 150, speed: 'veryslow' } });
   while (S.live(id) && S.R(id).hands.length < 200) S.step(id, foldPolicy);
   assert.equal(S.R(id).hands.length, 200);
   await sync.syncRoom(id);
@@ -247,7 +247,7 @@ test('同期: 終局を端末が一度も見ないまま 3 日で消えた試合
 
 test('同期: ネットワークエラー（room_hands の 2 ページ目で失敗）→ 部分的に保存、試合は未保存、再試行で欠け・重複なし', async () => {
   fresh();
-  const id = S.create({ n: 2, cfg: { startBb: 200, speed: 'veryslow', levelMin: 5 } });
+  const id = S.create({ n: 2, cfg: { startBb: 150, speed: 'veryslow' } });
   while (S.live(id) && S.R(id).hands.length < 230) S.step(id, foldPolicy);
   let n = 0; S.failIf = (name) => name === 'room_hands' && ++n === 2;
   assert.equal(await sync.syncRoom(id), false);
@@ -451,7 +451,7 @@ test('VPIP/PFR: 本物のエンジンの記録でもコールオールインを 
 test('ハンド記録: 2〜6 人・全レベル・オールイン多めで、拠出・収支・ポット・ポジション・勝者が整合', () => {
   let hands = 0, multiAllin = 0, sidePots = 0, withAnte = 0;
   for (let n = 2; n <= 6; n++) for (let seed = 1; seed <= 60; seed++) {
-    const r = rng(seed * 101 + n), cfg = { ...DEFAULT_CONFIG, players: n, startBb: [75, 100, 150, 200][seed % 4], speed: ['normal', 'slow', 'veryslow'][seed % 3], levelMin: 3 };
+    const r = rng(seed * 101 + n), cfg = { ...DEFAULT_CONFIG, players: n, startBb: [50, 75, 100, 150][seed % 4], speed: ['normal', 'slow', 'veryslow'][seed % 3] };
     const st = newTable({ config: cfg, names: Array.from({ length: n }, (_, i) => 'p' + i), now: 0, rnd: r });
     let now = 0, guard = 0;
     while (st.status === 'running' && guard++ < 3000) {

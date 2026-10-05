@@ -10,8 +10,8 @@ import {
   newTable, act, tick, sitout, sitin, leave, legalActions, viewFor, handRecord, totalChips, eval7, handName, dueAt, EngineError,
 } from '../src/engine.js';
 import {
-  DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, levelAt,
-  PLAYER_COUNTS, START_BBS, SPEEDS, LEVEL_MINUTES, MODE_IDS,
+  DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, normalizeConfig,
+  PLAYER_COUNTS, START_BBS, SPEEDS, MODE_IDS,
 } from '../src/structure.js';
 import { createRoom, joinRoom, applyRequest, tickRoom, viewsOf, leaveRoom } from '../server/game/rules.js';
 
@@ -557,22 +557,45 @@ test('一時停止：生存者が全員 sitout ならハンド間で停止、sit
   assert.equal(st.hand.startedAt, p0 + 5000);
 });
 
-test('ハンド間は 3 秒、レベルはハンド開始時の経過時間で決まる（次のハンドから適用）', () => {
-  const st = table(2, { config: { levelMin: 3 } });
+test('ハンド間は 3 秒、レベルは 3 分たった後の次のハンドから上がり、タイマーはそこから数え直す', () => {
+  const st = table(2);
   assert.equal(st.hand.level, 1);
   act(st, 0, { type: 'fold' }, 179000);
   assert.equal(st.hand.endedAt, 179000); assert.equal(st.nextAt, 179000 + BETWEEN_HANDS_MS);
   throwsCode(() => tick(st, 181999), 'not_yet');
   tick(st, 182000);   // 182000 ≥ 180000 → レベル 2
   assert.equal(st.hand.level, 2); assert.equal(st.hand.bb, 280); assert.equal(st.hand.ante, 70); assert.equal(st.hand.sb, 140);
+  assert.equal(st.levelStartAt, 182000); assert.equal(viewFor(st, 0).levelStartAt, 182000);
   // 逆：ハンド中にレベル境界をまたいでもそのハンドのブラインドは変わらない
   act(st, st.hand.toAct, { type: 'call' }, 190000);
   assert.equal(st.hand.level, 2);
-  const c = table(2, { config: { levelMin: 3 } });
+  // 次のレベルは 182000 から 3 分（開始からの 6 分ではない）
+  for (let t = 190001; st.hand.phase === 'betting'; t++) act(st, st.hand.toAct, { type: legalActions(st, st.hand.toAct).canCheck ? 'check' : 'call' }, t);
+  tick(st, 361999); assert.equal(st.hand.level, 2);                 // 361999 − 182000 < 3 分
+  act(st, st.hand.toAct, { type: 'fold' }, 362000);
+  tick(st, 365000); assert.equal(st.hand.level, 3); assert.equal(st.levelStartAt, 365000);
+  const c = table(2);
   act(c, 0, { type: 'fold' }, 176999);
   tick(c, 179999); assert.equal(c.hand.level, 1);
-  const lv = n => levelAt(cfg({ levelMin: 5, speed: 'veryslow' }), 1000, 1000 + n * 5 * 60000);
-  assert.equal(lv(0), 1); assert.equal(lv(58), 59); assert.equal(lv(59), 59); assert.equal(lv(1000), 59);
+  // 表の最後（veryslow は 59）で止まる
+  let x = { level: 1, levelStartAt: 1000 };
+  for (let i = 1; i <= 100; i++) x = nextLevel(cfg({ speed: 'veryslow' }), x.level, x.levelStartAt, 1000 + i * 180000);
+  assert.equal(x.level, 59);
+});
+
+test('設定：上昇間隔は選べない（levelMin は捨てる）、初期チップは 10000/15000/20000/30000 枚', () => {
+  assert.deepEqual(START_BBS.map(b => b * BASE_BB), [10000, 15000, 20000, 30000]);
+  assert.deepEqual(normalizeConfig({ ...DEFAULT_CONFIG, levelMin: 4 }), DEFAULT_CONFIG);
+  assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, startBb: 200 }), null);
+  assert.equal(totalChips(table(3, { config: { startBb: 50 } })), 3 * 10000);
+});
+
+test('以前の部屋（levelMin あり・levelStartAt なし）は開始からの時間で続きを数える', () => {
+  const st = table(2);
+  st.config = { ...st.config, levelMin: 5 }; delete st.levelStartAt;
+  act(st, 0, { type: 'fold' }, 299000);
+  tick(st, 299000 + BETWEEN_HANDS_MS);   // 302000 ≥ 300000 → 2
+  assert.equal(st.hand.level, 2); assert.equal(st.levelStartAt, 302000);
 });
 
 /* ======================= 6. 退出 ======================= */
@@ -835,7 +858,7 @@ function checkAgreement(st, now, stats) {
 function fuzzGame(seed, o = {}) {
   const r = rng(seed * 7919 + 13), rr = rng(seed + 424242);
   const n = o.n ?? pick(r, PLAYER_COUNTS);
-  const config = cfg({ players: n, startBb: pick(r, START_BBS), speed: pick(r, SPEEDS), levelMin: pick(r, LEVEL_MINUTES), mode: pick(r, MODE_IDS) });
+  const config = cfg({ players: n, startBb: pick(r, START_BBS), speed: pick(r, SPEEDS), mode: pick(r, MODE_IDS) });
   const uneven = r() < 0.3;
   const stacks = uneven ? Array.from({ length: n }, () => 300 + Math.floor(r() * 40) * 123) : undefined;
   const total = uneven ? sum(stacks) : n * config.startBb * BASE_BB;
@@ -851,12 +874,14 @@ function fuzzGame(seed, o = {}) {
     { fold: 0.15 + r() * 0.15, aggr: 0.1 + r() * 0.2, shove: r() * 0.05, chaos: 0.05 + r() * 0.08, dt: 4 },
   ][profile];
   sty.chaos = o.chaos ?? sty.chaos; sty.agree = o.agree ?? 0.08;
-  let prevHandNo = 0, dealNow = now, prevBb = null, prevSbPos = null, prevBtn = null;
+  let prevLv = null, prevHandNo = 0, dealNow = now, prevBb = null, prevSbPos = null, prevBtn = null;
   const checkDeal = () => {
     const h = st.hand;
     stats.hands++;
     assert.equal(h.startedAt, dealNow);
-    const lv = blindsAt(config.speed, levelAt(config, st.startedAt, dealNow));
+    const nl = prevLv ? nextLevel(config, prevLv.level, prevLv.levelStartAt, dealNow) : { level: 1, levelStartAt: dealNow };
+    assert.equal(st.levelStartAt, nl.levelStartAt, 'levelStartAt'); prevLv = nl;
+    const lv = blindsAt(config.speed, nl.level);
     assert.deepEqual([h.level, h.sb, h.bb, h.ante], [lv.level, lv.sb, lv.bb, lv.ante], 'blinds at deal');
     const live = []; for (let s = 0; s < n; s++) if (h.hole[s]) live.push(s);   // 配られた席（同じ操作の中で精算されて脱落していてもよい）
     const nextLive = f => { for (let i = 1; i <= n; i++) { const s = (f + i) % n; if (live.includes(s)) return s; } };

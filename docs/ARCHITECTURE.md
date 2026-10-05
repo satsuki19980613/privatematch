@@ -24,8 +24,8 @@
 整数 `0..51`。`rank = c >> 2`（0='2' … 12='A'）、`suit = c & 3`（0♠ 1♥ 2♦ 3♣）。
 
 ## 2. `src/structure.js` — 設定（pocket-ICM の SIT & GO そのまま）
-- 人数 2/3/4/5/6、開始スタック 75/100/150/200 BB（レベル 1 の BB = 200 チップ）、ブラインド構造 `normal`(16) / `slow`(32) / `veryslow`(59)、上昇間隔 3/4/5 分。
-- SB = BB/2、アンティは表の値を全員が払う。`level = min(表の長さ, floor((now − startedAt) / levelMs) + 1)` をハンド開始時に評価。
+- 人数 2/3/4/5/6、初期チップ 10000/15000/20000/30000 枚 = `startBb` 50/75/100/150（レベル 1 の BB = 200 チップ）、ブラインド構造 `normal`(16) / `slow`(32) / `veryslow`(59)。上昇間隔は選べず 3 分（`LEVEL_MS`。以前の部屋の `config.levelMin` はその値）。
+- SB = BB/2、アンティは表の値を全員が払う。レベルはハンド開始時に `nextLevel` で決める：`now − levelStartAt ≥ 3 分` なら前のハンドのレベル + 1（表の長さまで）にして `levelStartAt = now`（ポーカーチェイスと同じく、3 分たつとタイマーが止まり、次のハンドから上がってそこから数え直す）。
 - ゲームモード（順位 → pt）：`club` `rank-3` `rank-4` `rank-5` `legend-avg` `legend-season` `legend-base`。pt は `payouts.slice(0, players)[place − 1]`。
 - 時間：1 アクション 15 秒、タイムバンク 30 秒（1 試合・補充なし）、自動処理 2 回連続で sitout、ハンド間 3 秒、募集 15 分、一時停止 10 分。
 
@@ -42,7 +42,7 @@ handRecord(st)           // 精算済みハンドの { rec, holes }
 viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）を消したもの
 ```
 
-状態 `st`：`{ ver, config, n, names, startedAt, players: [{ stack, status, timeBankMs, autoCount, place, pt }], handNo, prevSbPos, prevBbSeat, seed, ctr, hand, nextAt, status, pausedAt, endedAt, winner }`
+状態 `st`：`{ ver, config, n, names, startedAt, levelStartAt, players: [{ stack, status, timeBankMs, autoCount, place, pt }], handNo, prevSbPos, prevBbSeat, seed, ctr, hand, nextAt, status, pausedAt, endedAt, winner }`
 - `status`：`running` | `paused` | `finished` | `cancelled`。プレイヤーの `status`：`active` | `sitout` | `left` | `out`。
 - `hand`：`{ handNo, level, sb, bb, ante, btn, sbSeat, bbSeat, street(0-3), deck, hole, board, startStacks, commits, streetBet, folded, allIn, toAct, streetLastBetTo, lastBetSize, actions: [{ seat, kind, betTo, put, auto, street }], turnStart, deadline, phase('betting'|'settled'), won, shown, names, pots, eliminated, startedAt, endedAt }`
 - `players[s].stack` はハンド中も拠出を引いた値（不変条件：Σstack + Σcommits = n × 開始スタック）。
