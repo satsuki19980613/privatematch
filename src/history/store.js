@@ -62,12 +62,47 @@ export async function exportAll() {
   const hands = await req(db.transaction('hands').objectStore('hands').getAll());
   return { app: 'privatematch', version: 1, exportedAt: Date.now(), games, hands };
 }
-/** 読み込み（同じ試合・ハンドは上書き）。=> 読み込んだ試合数 */
+/** 読み込む行の検証（書き出したものと同じ形だけを受け付ける。壊れた行や細工した行で画面が壊れないように） */
+const num = v => typeof v === 'number' && Number.isFinite(v);
+const int = v => Number.isInteger(v);
+const optInt = v => v == null || int(v);
+const optNum = v => v == null || num(v);
+const str = (v, max = 200) => typeof v === 'string' && v.length <= max;
+const card = c => int(c) && c >= 0 && c < 52;
+const cards = v => v == null || (Array.isArray(v) && v.length <= 5 && v.every(card));
+const nums = (v, n = 6) => Array.isArray(v) && v.length <= n && v.every(x => x == null || num(x));
+const KINDS = ['fold', 'check', 'call', 'bet', 'raise', 'allin'];
+export function validGame(g) {
+  return !!g && typeof g === 'object' && str(g.roomId, 64) && optInt(g.seat) && g.seat >= 0 && g.seat < 6 &&
+    ['running', 'finished', 'cancelled'].includes(g.status) && ['private', 'free'].includes(g.kind) && (g.code == null || str(g.code, 16)) &&
+    !!g.config && typeof g.config === 'object' && int(g.config.players) && g.config.players >= 2 && g.config.players <= 6 &&
+    Array.isArray(g.names) && g.names.length <= 6 && g.names.every(x => str(x, 64)) &&
+    Array.isArray(g.players) && g.players.length <= 6 && g.players.every(p => p && typeof p === 'object' && str(p.name ?? '', 64) && optInt(p.place) && optNum(p.pt)) &&
+    optInt(g.place) && (g.place == null || (g.place >= 1 && g.place <= 6)) && optNum(g.pt) && optNum(g.startedAt) && optNum(g.endedAt) && optInt(g.hands);
+}
+export function validHand(h) {
+  return !!h && typeof h === 'object' && str(h.roomId, 64) && int(h.handNo) && h.handNo > 0 && int(h.level) && num(h.bb) && num(h.sb) && num(h.ante) &&
+    optInt(h.btn) && optInt(h.sbSeat) && int(h.bbSeat) && nums(h.startStacks) && cards(h.board) && cards(h.hole) &&
+    Array.isArray(h.shown) && h.shown.length <= 6 && h.shown.every(x => x == null || x === false || (Array.isArray(x) && x.every(card))) &&
+    Array.isArray(h.names) && h.names.every(x => x == null || str(x, 64)) &&
+    Array.isArray(h.actions) && h.actions.every(a => a && int(a.seat) && int(a.street) && KINDS.includes(a.kind) && optNum(a.betTo) && optNum(a.put)) &&
+    Array.isArray(h.pots) && h.pots.every(p => p && num(p.amount) && Array.isArray(p.winners) && p.winners.every(int)) &&
+    Array.isArray(h.eliminated) && h.eliminated.every(e => e && int(e.seat) && int(e.place)) && Array.isArray(h.won);
+}
+/** 端末の行のほうが進んでいれば、読み込む行で上書きしない（古い書き出しで「途中」に戻さない） */
+const newer = (cur, g) => cur && (cur.status !== 'running' && g.status === 'running' || (cur.status === g.status && (cur.hands ?? 0) > (g.hands ?? 0)));
+
+/** 読み込み（同じ試合・ハンドは上書き。ただし端末のほうが進んだ試合はそのまま）。=> 保存した試合数 */
 export async function importAll(data) {
   if (!data || data.app !== 'privatematch' || !Array.isArray(data.games) || !Array.isArray(data.hands)) throw new Error('format');
-  const db = await open(), t = db.transaction(['games', 'hands'], 'readwrite');
-  for (const g of data.games) if (g && typeof g.roomId === 'string') t.objectStore('games').put(g);
-  for (const h of data.hands) if (h && typeof h.roomId === 'string' && Number.isInteger(h.handNo)) t.objectStore('hands').put(h);
+  const games = data.games.filter(validGame), hands = data.hands.filter(validHand);
+  const db = await open(), t = db.transaction(['games', 'hands'], 'readwrite'), gs = t.objectStore('games'), hs = t.objectStore('hands');
+  let n = 0;
+  for (const g of games) {
+    const rq = gs.get(g.roomId);
+    rq.onsuccess = () => { if (!newer(rq.result, g)) { gs.put(g); n++; } };
+  }
+  for (const h of hands) hs.put(h);
   await done(t);
-  return data.games.length;
+  return n;
 }

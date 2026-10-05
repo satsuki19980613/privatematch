@@ -4,6 +4,7 @@ import { configSummary } from '../structure.js';
 import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb } from './util.js';
 import { paint, setPane } from './menu.js';
 import * as store from '../history/store.js';
+import { syncRoom } from '../history/sync.js';
 import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks } from '../history/stats.js';
 import { netOfRecord, positionsOf, streetPots, STREET_NAMES, actionText, forcedOf } from '../history/hand.js';
 
@@ -13,7 +14,12 @@ let shown = PAGE;
 
 async function load() {
   if (loading) return; loading = true;
-  try { games = await store.allGames(); }
+  try {
+    games = await store.allGames();
+    // まだ「途中」の試合（退出した・飛んだあと閉じた）は、サーバーに残っている間に結果を取りに行く
+    const open = app.user ? games.filter(g => g.status === 'running' && (g.startedAt ?? 0) > Date.now() - 3 * 86400_000) : [];
+    if (open.length && (await Promise.all(open.map(g => syncRoom(g.roomId)))).some(Boolean)) games = await store.allGames();
+  }
   catch (e) { games = []; toast('この端末では記録を読み書きできません'); }
   loading = false;
   renderNow();
@@ -51,7 +57,7 @@ function statsHTML() {
         ${stat('1位率', pctLabel(sum.firstRate), '%')}
         ${stat('入賞率', pctLabel(sum.cashRate), '%', '(pt &gt; 0)')}
         ${stat('累計pt', fmtPt(sum.totalPt), 'pt', '', tone(sum.totalPt))}
-        ${stat('直近の成績', recent.length ? recent.join(' ') : '–', '', recent.length ? '古い→新しい' : '')}
+        ${stat('直近の成績', recent.length ? esc(recent.join(' ')) : '–', '', recent.length ? '古い→新しい' : '')}
       </div>
     </div>
     <div class="panel hs-panel"><span class="hs-title">順位分布</span><div class="spd">${dist}</div></div>
@@ -117,9 +123,15 @@ function bindStats(el) {
 const fmtTime = ms => { const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 function historyHTML() {
   const list = games.slice().sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)).slice(0, shown);
-  const rows = list.map(g => {
+  const rows = list.map(g => { try { return gameRow(g); } catch (e) { return ''; } }).join('');
+  return `<button class="back" data-back type="button">← STATS</button>
+    <div class="pane-h"><span class="eyebrow">HAND HISTORY</span></div>
+    ${games.length ? `<ul class="hgames">${rows}</ul>${games.length > shown ? '<button class="btn ghost wide" id="moreBtn" type="button">もっと見る</button>' : ''}` : '<div class="empty-note">まだ記録がありません。</div>'}`;
+}
+// 1 試合の行（壊れた行が 1 つあっても一覧全体は出す）
+function gameRow(g) {
     const open = openGame === g.roomId, hands = open ? handsCache.get(g.roomId) : null;
-    const status = g.status === 'finished' ? `${g.place ?? '–'}位 <b class="${(g.pt ?? 0) > 0 ? 'gain' : (g.pt ?? 0) < 0 ? 'loss' : ''}">${fmtPt(g.pt)} pt</b>` : g.status === 'cancelled' ? '中止' : '途中';
+    const status = g.status === 'finished' ? `${esc(g.place ?? '–')}位 <b class="${(g.pt ?? 0) > 0 ? 'gain' : (g.pt ?? 0) < 0 ? 'loss' : ''}">${fmtPt(g.pt)} pt</b>` : g.status === 'cancelled' ? '中止' : '途中';
     let body = '';
     if (open) {
       if (!hands) body = '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>';
@@ -138,12 +150,8 @@ function historyHTML() {
     }
     return `<li class="hg${open ? ' open' : ''}"><button class="hg-head" type="button" data-game="${esc(g.roomId)}">
       <span class="hg-top"><span class="hg-date">${g.startedAt ? fmtTime(g.startedAt) : ''}</span><span class="hg-kind">${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}</span><span class="hg-res">${status}</span></span>
-      <span class="hg-cfg">${esc(configSummary(g.config))} ・ ${g.hands ?? 0} hands</span>
+      <span class="hg-cfg">${esc(configSummary(g.config))} ・ ${+g.hands || 0} hands</span>
       <span class="hg-opp">${g.players.map((p, s) => s === g.seat ? '' : esc(p.name)).filter(Boolean).join(' / ')}</span></button>${body}</li>`;
-  }).join('');
-  return `<button class="back" data-back type="button">← STATS</button>
-    <div class="pane-h"><span class="eyebrow">HAND HISTORY</span></div>
-    ${games.length ? `<ul class="hgames">${rows}</ul>${games.length > shown ? '<button class="btn ghost wide" id="moreBtn" type="button">もっと見る</button>' : ''}` : '<div class="empty-note">まだ記録がありません。</div>'}`;
 }
 function bindHistory(el) {
   el.querySelector('[data-back]').onclick = () => setPane('stats');
@@ -180,14 +188,14 @@ export function openHand(g, h) {
     const posts = st === 0 ? `<li class="post">Ante ${fmt(h.ante)} ・ ${h.sbSeat != null ? `${name(h.sbSeat)} SB ${fmt(Math.min(h.sb, forced[h.sbSeat]))} ・ ` : 'SB なし ・ '}${name(h.bbSeat)} BB ${fmt(h.bb)}</li>` : '';
     streets.push(`<div class="hd-street"><div class="hd-sh"><b>${STREET_NAMES[st]}</b><span>POT ${fmtBb(pots[st], bb)} BB</span></div>
       ${board ? `<div class="hd-board">${board}</div>` : ''}
-      <ul class="hd-acts">${posts}${acts.map(a => `<li><span class="nm2">${name(a.seat)}</span><span class="pl k-${a.kind}">${esc(actionText(a))}</span>${a.auto ? '<small>auto</small>' : ''}</li>`).join('')}</ul></div>`);
+      <ul class="hd-acts">${posts}${acts.map(a => `<li><span class="nm2">${name(a.seat)}</span><span class="pl k-${esc(a.kind)}">${esc(actionText(a))}</span>${a.auto ? '<small>auto</small>' : ''}</li>`).join('')}</ul></div>`);
   }
   const res = h.pots.map((p, i) => `<li>${h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
-  $('#handBody').innerHTML = head(`HAND #${h.handNo} ・ LV ${h.level} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}`) +
+  $('#handBody').innerHTML = head(`HAND #${fmt(h.handNo)} ・ LV ${fmt(h.level)} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}`) +
     `<table class="tbl hd-tbl"><thead><tr><th>POS</th><th>NAME</th><th>STACK</th><th>CARDS</th><th>NET</th></tr></thead><tbody>${players}</tbody></table>
     ${streets.join('')}
     <div class="hd-sh"><b>Result</b></div><ul class="hd-acts">${res}</ul>
-    ${h.eliminated.length ? `<p class="hint">${h.eliminated.map(e => `${name(e.seat)} ${e.place}位で脱落`).join(' ・ ')}</p>` : ''}
+    ${h.eliminated.length ? `<p class="hint">${h.eliminated.map(e => `${name(e.seat)} ${+e.place || 0}位で脱落`).join(' ・ ')}</p>` : ''}
     <p class="hint">STACK・NET・POT の単位は BB（このハンドの BB = ${fmt(bb)}）。Bet / Raise / All-in の数字はそのストリートの合計額、Call は払った額（チップ）。</p>`;
   openDlg('#handDlg');
 }

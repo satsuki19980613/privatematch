@@ -8,8 +8,10 @@ export const PERIODS = [
   { key: 'all', label: '全期間' },
 ];
 
-/** 集計の対象（最後まで打った試合）を endedAt の昇順で */
-export const finishedGames = games => games.filter(g => g.status === 'finished' && g.place != null).sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
+/** 集計の対象（最後まで打った試合。飛んで順位と pt が決まった試合も）を終わった順に */
+const endOf = g => g.endedAt ?? g.savedAt ?? g.startedAt ?? 0;
+export const finishedGames = games => games.filter(g => g.place != null && (g.status === 'finished' || (g.status === 'running' && g.pt != null)))
+  .sort((a, b) => endOf(a) - endOf(b));
 
 /** 期間で絞る（入力も出力も昇順） */
 export function filterByPeriod(recs, period) {
@@ -36,10 +38,10 @@ export function summarize(results) {
   let placeSum = 0, firstN = 0, cashN = 0, totalPt = 0, maxPlayers = 0;
   const placeDist = [0, 0, 0, 0, 0, 0];
   for (const r of results) {
-    placeSum += r.place;
+    placeSum += +r.place || 0;
     if (r.place === 1) firstN++;
     if ((r.pt ?? 0) > 0) cashN++;
-    totalPt += r.pt ?? 0;
+    totalPt += +r.pt || 0;
     if (r.place >= 1 && r.place <= 6) placeDist[r.place - 1]++;
     maxPlayers = Math.max(maxPlayers, r.config ? r.config.players : 0);
   }
@@ -58,9 +60,16 @@ export function handStats(hands, seatOf) {
     const s = seatOf(h);
     if (s == null || !(h.startStacks[s] > 0)) continue;
     n++;
-    const pre = h.actions.filter(a => a.seat === s && a.street === 0 && !a.auto);
+    const preAll = h.actions.filter(a => a.street === 0), pre = preAll.filter(a => a.seat === s && !a.auto);
     if (pre.some(a => a.kind === 'call' || a.kind === 'bet' || a.kind === 'raise' || (a.kind === 'allin' && a.put > 0))) vpip++;
-    if (pre.some(a => a.kind === 'bet' || a.kind === 'raise' || (a.kind === 'allin' && a.betTo > (h.bb || 0)))) pfr++;
+    // PFR：それまでの最高額（無ければ BB）を超えて張った。コールになるオールインは数えない
+    let top = h.bb || 0, raised = false;
+    for (const a of preAll) {
+      if (a.kind === 'fold' || a.kind === 'check') continue;
+      if (a.seat === s && !a.auto && (a.kind === 'bet' || a.kind === 'raise' || (a.kind === 'allin' && a.betTo > top))) raised = true;
+      top = Math.max(top, a.betTo ?? 0);
+    }
+    if (raised) pfr++;
     const net = netOfRecord(h, s);
     if (net > 0) won++;
     netBb += net / (h.bb || 1);

@@ -293,7 +293,7 @@ test('同期: 全員で退出して即終了（途中のハンドは記録され
   assert.equal(g.hands, (await store.handsOf(id)).length);
 });
 
-test('同期: 途中で飛んだ（out）— 順位と pt は確定しているが、試合が終わるまで統計に入らない', async () => {
+test('同期: 途中で飛んだ（out）— 順位と pt が確定した時点で統計に入る', async () => {
   // 3 人戦で自分が先に飛ぶまで打つ
   fresh();
   let id, tries = 0;
@@ -305,7 +305,7 @@ test('同期: 途中で飛んだ（out）— 順位と pt は確定している�
   await sync.syncRoom(id);
   const g = await store.getGame(id);
   assert.equal(g.place, 3); assert.equal(g.status, 'running'); assert.notEqual(g.pt, null);
-  assert.equal(finishedGames(await store.allGames()).length, 0);
+  assert.equal(finishedGames(await store.allGames()).length, 1);
 });
 
 test('同期: 中止（cancelled）— place なしで保存、統計には数えない、起動時に再同期しない', async () => {
@@ -415,13 +415,13 @@ test('VPIP/PFR: BB のチェックは VPIP ではない / 相手のハンド・�
   assert.deepEqual(s.vpip, { n: 1, d: 2 }); assert.deepEqual(s.pfr, { n: 0, d: 2 });
   assert.equal(handStats([{ ...base2, startStacks: [0, 20000], actions: [] }], () => 0).hands, 0);
 });
-test('VPIP/PFR: 相手のレイズにオールインで「コール」した場合は PFR に数えない', { todo: 'BUG: allin のとき betTo > bb だけで PFR 判定（stats.js:63）。コールオールインも PFR になる' }, () => {
+test('VPIP/PFR: 相手のレイズにオールインで「コール」した場合は PFR に数えない', () => {
   // SB(seat0) が 600 までレイズ → BB(seat1) は残り 400（合計 400 < 600）で全額コール
   const h = { ...base2, startStacks: [20000, 400], actions: [{ seat: 0, kind: 'raise', betTo: 600, put: 500, street: 0 }, { seat: 1, kind: 'allin', betTo: 400, put: 200, street: 0 }] };
   const s = handStats([h], () => 1);
   assert.deepEqual(s.vpip, { n: 1, d: 1 }); assert.deepEqual(s.pfr, { n: 0, d: 1 });
 });
-test('VPIP/PFR: 本物のエンジンの記録でもコールオールインを PFR に数えない（ランダムに探索）', { todo: 'BUG: 同上' }, () => {
+test('VPIP/PFR: 本物のエンジンの記録でもコールオールインを PFR に数えない（ランダムに探索）', () => {
   let bad = 0;
   for (let seed = 1; seed <= 60; seed++) {
     const r = rng(seed), st = newTable({ config: { ...DEFAULT_CONFIG, players: 3 }, names: ['a', 'b', 'c'], now: 0, rnd: r });
@@ -556,17 +556,18 @@ test('IMPORT: __proto__ / constructor キーを含んでもプロトタイプ汚
   const evil = JSON.parse('{"app":"privatematch","games":[{"roomId":"p","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted2":1}}}],"hands":[{"roomId":"p","handNo":1,"__proto__":{"polluted3":1}}]}');
   await store.importAll(evil);
   assert.equal({}.polluted, undefined); assert.equal({}.polluted2, undefined); assert.equal({}.polluted3, undefined);
-  const g = await store.getGame('p'); assert.equal(Object.getPrototypeOf(g), Object.prototype); assert.equal(g.polluted, undefined);
+  // 形の壊れた行は読み込まない（validGame）。読み込まれた場合もプロトタイプは普通のまま
+  const g = await store.getGame('p'); if (g) { assert.equal(Object.getPrototypeOf(g), Object.prototype); assert.equal(g.polluted, undefined); }
 });
 
-test('IMPORT: 古い書き出しを読み込んでも、端末にある新しい（終了済みの）試合を「途中」に戻さない', { todo: 'BUG: importAll は無条件に put で上書きする（store.js:69）' }, async () => {
+test('IMPORT: 古い書き出しを読み込んでも、端末にある新しい（終了済みの）試合を「途中」に戻さない', async () => {
   fresh();
   await store.putGame(sampleGame('g1', { status: 'finished', place: 1, hands: 30 }));
   await store.importAll({ app: 'privatematch', games: [sampleGame('g1', { status: 'running', place: null, pt: null, hands: 10 })], hands: [] });
   const g = await store.getGame('g1'); assert.equal(g.status, 'finished'); assert.equal(g.hands, 30);
 });
 
-test('IMPORT: 中身の型が壊れた試合（players が配列でない / config が無い / place が文字列）は保存されない、または画面を壊さない', { todo: 'BUG: importAll は roomId しか検証しない。壊れた行がそのまま保存され、HAND HISTORY 描画（ui/stats.js:107-110 の g.players.map）が例外で止まる' }, async () => {
+test('IMPORT: 中身の型が壊れた試合（players が配列でない / config が無い / place が文字列）は保存されない、または画面を壊さない', async () => {
   fresh();
   await store.importAll({ app: 'privatematch', games: [{ roomId: 'bad1' }, { roomId: 'bad2', players: 'x', config: 1 }, { roomId: 'bad3', status: 'finished', place: '1', pt: '5', endedAt: 1 }], hands: [] });
   const games = await store.allGames();
@@ -574,7 +575,7 @@ test('IMPORT: 中身の型が壊れた試合（players が配列でない / conf
   for (const g of games) { assert.ok(Array.isArray(g.players), g.roomId + ' players'); assert.equal(typeof g.config, 'object'); if (g.status === 'finished') { assert.equal(typeof g.place, 'number'); assert.equal(typeof g.pt, 'number'); } }
 });
 
-test('IMPORT: finished で place が文字列の行が混ざると集計が文字列連結になる（検証が無い証拠）', { todo: 'BUG: 取り込み時に place / pt の型を検証していない' }, () => {
+test('IMPORT: finished で place が文字列の行が混ざると集計が文字列連結になる（検証が無い証拠）', () => {
   const s = summarize([{ place: '2', pt: '3', config: { players: 6 } }, { place: 1, pt: 5, config: { players: 6 } }]);
   assert.equal(typeof s.avgPlace, 'number');
   // 現状: placeSum = 0 + '2' + 1 = '021' → avgPlace = 10.5

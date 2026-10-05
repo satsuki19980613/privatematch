@@ -57,7 +57,7 @@ export function askLeave() {
     try { const r = await net().game({ op: 'leave', room: t.id }); if (T === t) { clock.offset = r.now - Date.now(); apply(r.view); } }
     catch (e) { /* もう終わっていれば同じこと */ }
     $('#leaveDlg').close();
-    if (T === t) { syncRoom(t.id); app.nav.toMenu(); }
+    if (T === t) { await syncRoom(t.id); if (T === t) app.nav.toMenu(); }
   };
 }
 

@@ -20,10 +20,15 @@ export function createHandler(deps) {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
     if (req.method !== 'POST') return reply(405, { error: 'method_not_allowed' });
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '');
-    let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch { uid = null; }
+    let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch (e) { if (e && e.unavailable) return reply(503, { error: 'unavailable' }); uid = null; }
     if (!uid) return reply(401, { error: 'not_authenticated' });
     let body;
-    try { const t = await req.text(); if (t.length > MAX_BODY) return reply(422, { error: 'malformed' }); body = JSON.parse(t); } catch { return reply(422, { error: 'malformed' }); }
+    try {
+      // 上限はバイト数で（先に Content-Length を見て、大きければ読まない）
+      if (Number(req.headers.get('Content-Length')) > MAX_BODY) return reply(422, { error: 'malformed' });
+      const buf = new Uint8Array(await req.arrayBuffer()); if (buf.length > MAX_BODY) return reply(422, { error: 'malformed' });
+      body = JSON.parse(new TextDecoder().decode(buf));
+    } catch { return reply(422, { error: 'malformed' }); }
     if (!body || typeof body !== 'object') return reply(422, { error: 'malformed' });
     const room = typeof body.room === 'string' && UUID.test(body.room) ? body.room : null;
     try {

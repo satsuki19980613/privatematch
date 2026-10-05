@@ -182,7 +182,9 @@ function dealHand(st, now, forcedBtn) {
   for (let s = 0; s < n; s++) if (live[s] && P[s].stack === 0) h.allIn[s] = true;
   // 手札はボタンの次の席から
   for (let k = 1; k <= n; k++) { const s = (pos.btn + k) % n; if (live[s]) h.hole[s] = [deck.pop(), deck.pop()]; }
-  h.streetLastBetTo = Math.max(...h.streetBet);
+  // コールすべき額は BB 満額（BB がショートでオールインでも）。ただし動ける人が 1 人だけなら出ている最高額に合わせれば足りる
+  const actable = seatsOf(st).filter(s => live[s] && !h.allIn[s]).length;
+  h.streetLastBetTo = Math.max(...h.streetBet, actable >= 2 ? bb : 0);
   const first = nextActable(h, pos.bbSeat);
   if (first === null || shouldCloseStreet(h)) advanceStreets(st, now);
   else setTurn(st, first, now);
@@ -274,7 +276,8 @@ function resolve(st, seat, move) {
   }
   if (type === 'allin') {
     if (L.maxTo !== null) return { kind: 'allin', betTo: L.maxTo, put: L.maxTo - my };
-    if (L.callPut !== null) return { kind: 'allin', betTo: my + L.callPut, put: L.callPut };
+    // レイズできないときの allin はコール扱い（全額が入るときだけ kind を 'allin' にする）
+    if (L.callPut !== null) return { kind: L.callPut >= stack ? 'allin' : 'call', betTo: my + L.callPut, put: L.callPut };
     throw bad('cannot go all-in');
   }
   if (type === 'raise') {
@@ -385,21 +388,22 @@ export function leave(st, seat, now) {
   if (st.status !== 'running' && st.status !== 'paused') throw new EngineError('game_over');
   if (!p || p.status === 'out' || p.status === 'left') throw new EngineError('illegal');
   p.status = 'left';
-  const still = seatsOf(st).filter(s => st.players[s].status === 'active' || st.players[s].status === 'sitout');
-  if (still.length <= 1) {
-    const h = st.hand, inHand = h && h.phase === 'betting';
-    const chips = s => st.players[s].stack + (inHand ? h.commits[s] : 0);
-    if (inHand) { for (const s of seatsOf(st)) st.players[s].stack = chips(s); st.hand = null; }
-    const pay = payoutsFor(st.config), used = new Set(st.players.map(x => x.place).filter(x => x != null));
-    const open = []; for (let pl = 1; pl <= st.n; pl++) if (!used.has(pl)) open.push(pl);
-    const rest = seatsOf(st).filter(s => st.players[s].place == null)
-      .sort((a, b) => (still.includes(b) - still.includes(a)) || chips(b) - chips(a) || a - b);
-    rest.forEach((s, i) => { st.players[s].place = open[i]; st.players[s].pt = pay[open[i] - 1] ?? 0; });
-    st.winner = rest[0]; st.status = 'finished'; st.endedAt = now; st.nextAt = null;
-    return bump(st);
-  }
+  if (stillPlaying(st).length <= 1) { finishWithoutOpponents(st, now); return bump(st); }
   runAutoTurns(st, now);
   return bump(st);
+}
+const stillPlaying = st => seatsOf(st).filter(s => st.players[s].status === 'active' || st.players[s].status === 'sitout');
+/** 退出していない生存者が 1 人以下になったら終了する。生存者が 1 位、退出した席は（進行中のハンドの拠出を戻した）スタックの多い順に残りの順位 */
+function finishWithoutOpponents(st, now) {
+  const still = stillPlaying(st), h = st.hand, inHand = h && h.phase === 'betting';
+  const chips = seatsOf(st).map(s => st.players[s].stack + (inHand ? h.commits[s] : 0));   // 返却前に確定する（返却後に足すと二重計上になる）
+  if (inHand) { for (const s of seatsOf(st)) st.players[s].stack = chips[s]; st.hand = null; }
+  const pay = payoutsFor(st.config), used = new Set(st.players.map(x => x.place).filter(x => x != null));
+  const open = []; for (let pl = 1; pl <= st.n; pl++) if (!used.has(pl)) open.push(pl);
+  const rest = seatsOf(st).filter(s => st.players[s].place == null)
+    .sort((a, b) => (still.includes(b) - still.includes(a)) || chips[b] - chips[a] || a - b);
+  rest.forEach((s, i) => { st.players[s].place = open[i]; st.players[s].pt = pay[open[i] - 1] ?? 0; });
+  st.winner = rest[0]; st.status = 'finished'; st.endedAt = now; st.nextAt = null;
 }
 
 /* ---------------- 精算 ---------------- */
@@ -418,18 +422,23 @@ function settle(st, now) {
     const levels = [...new Set(h.commits.filter(c => c > 0))].sort((a, b) => a - b);
     let prev = 0;
     const order = Array.from({ length: n }, (_, k) => (h.btn + 1 + k) % n);   // 端数はボタンの次の席から
+    // 拠出額のレイヤを作り、対象者が同じ隣接レイヤは 1 つのサイドポットに束ねてから配る（端数はポットごとに 1 回）
+    const layers = [];
     for (const lvl of levels) {
       let amount = 0; for (let s = 0; s < n; s++) amount += Math.min(h.commits[s], lvl) - Math.min(h.commits[s], prev);
       let eligible = contenders.filter(s => h.commits[s] >= lvl);
       if (!eligible.length) eligible = contenders.slice();
+      const last = layers[layers.length - 1];
+      if (last && last.eligible.join() === eligible.join()) last.amount += amount;
+      else layers.push({ amount, eligible });
+      prev = lvl;
+    }
+    for (const { amount, eligible } of layers) {
       const best = Math.max(...eligible.map(s => score[s]));
       const winners = eligible.filter(s => score[s] === best);
       const share = Math.floor(amount / winners.length); let rem = amount - share * winners.length;
       for (const s of order) if (winners.includes(s)) { won[s] += share + (rem > 0 ? 1 : 0); if (rem > 0) rem--; }
-      const last = pots[pots.length - 1];
-      if (last && last.eligible.join() === eligible.join()) last.amount += amount;
-      else pots.push({ amount, eligible, winners });
-      prev = lvl;
+      pots.push({ amount, eligible, winners });
     }
     h.shown = h.hole.map((c, s) => (contenders.includes(s) ? c.slice() : null));
     h.names = h.hole.map((c, s) => (contenders.includes(s) ? handName(score[s]) : null));
@@ -452,6 +461,8 @@ function settle(st, now) {
     st.winner = w; st.status = 'finished'; st.endedAt = now; st.nextAt = null;
     return;
   }
+  // 退出していない生存者が 1 人になったら、残りの退出者を待たずに終了（一時停止 → 中止になるのを防ぐ）
+  if (stillPlaying(st).length <= 1) return finishWithoutOpponents(st, now);
   st.nextAt = now + BETWEEN_HANDS_MS;
 }
 
