@@ -23,6 +23,7 @@ env:
 jobs:
   prod:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,9 +47,10 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     if: ${{ vars.NEON_PROJECT_ID != '' }}
     concurrency:
-      group: deploy-dev
+      group: live-e2e
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -68,13 +70,14 @@ jobs:
       - name: マイグレーションと Function の配備（dev）
         id: fn
         run: |
-          npm run db:migrate -- --branch dev
-          node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch dev --database neondb --project-id "$NEON_PROJECT_ID" || true
-          npm run deploy:game -- --branch dev
+          echo "== migrate $(date +%T)"; timeout 180 npm run db:migrate -- --branch dev
+          echo "== refresh-schema $(date +%T)"; timeout 120 node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch dev --database neondb --project-id "$NEON_PROJECT_ID" || true
+          echo "== deploy $(date +%T)"; timeout 300 npm run deploy:game -- --branch dev
+          echo "== done $(date +%T)"
       - name: 本物の通信で 1 試合
         env:
           AUTH_URL: ${{ steps.neon.outputs.auth_url }}
           DATA_URL: ${{ steps.neon.outputs.data_url }}
           GAME_URL: ${{ steps.fn.outputs.game_url }}
           ORIGIN: http://localhost:5180
-        run: node scripts/live-check.mjs e2e
+        run: timeout 900 node scripts/live-check.mjs e2e
