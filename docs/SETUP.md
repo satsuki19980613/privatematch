@@ -21,7 +21,7 @@ Cloudflare Pages は GitHub 連携で `main` を見ていて、そのコミッ�
 2. そのプロジェクトの **Integrations → GitHub** で GitHub とつなぎ、リポジトリ `privatematch` を選ぶ。
    リポジトリに Secret `NEON_API_KEY` と Variable `NEON_PROJECT_ID` が入る（Settings → Secrets and variables → Actions で確認できる）。
 
-Neon Auth・Google ログイン・Data API・開発用ブランチ `dev` は、ワークフローが自動で用意する（`scripts/setup-neon.mjs`）。
+Neon Auth・Google ログイン・Data API・開発用ブランチ `dev` は、ワークフローが自動で用意する（`scripts/setup-neon.mjs`）。本番はメールとパスワードの登録と localhost を止めて Google だけにする。
 
 ### Cloudflare Pages
 1. https://dash.cloudflare.com → **Workers & Pages → Create → Pages → Connect to Git** で `privatematch` を選ぶ。
@@ -48,4 +48,5 @@ Neon Auth・Google ログイン・Data API・開発用ブランチ `dev` は、�
 - 画面だけ：Codespaces などで `npm install && npm run dev` → `http://localhost:5180/?fake`（サーバー無し。Bot が相手をする）。
   - `&wait=ms` Bot の入室間隔、`&idle` Bot が動かない、`&fast` Bot の思考を短く
 - 本物のサーバーにつなぐ：Deploy を `dev` で実行し、Summary の URL を `.env.development.local` に書く（`.env.example` 参照）。
+- 本物の通信確認：Actions の **Live**（`.github/workflows/live.yml`）。本番のサイト・ログイン中継・Function・Data API に届くかを読み取りだけで確かめ、開発用ブランチ `dev` では作業ブランチのサーバーを配備してテスト用の利用者 4 人で 1 試合を打つ。作業ブランチ（`claude/**`）への push と毎週月曜に走る。
 - テスト：`npm test`。DB の結合テストは `TEST_DATABASE_URL` があるときだけ走る（CI では Postgres のサービスで毎回走る）。

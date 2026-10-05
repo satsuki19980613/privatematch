@@ -50,11 +50,12 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 ルール（pocket-ICM SNG_DESIGN §1）
 - デッドボタン：`bb = nextLive(前の bb)`、`sb = 前の bb`（飛んでいれば SB 無し）、`btn = 前の SB の位置`。HU はボタン = SB。
 - 手番：プリフロップは BB の次、ポストフロップはボタンの次から。アンティ → ブラインドの順に `min(stack, 額)`。
-- 最小レイズ = 直前の上乗せ幅（最低 BB）。最小レイズ未満のオールインは、すでに動いた席のレイズ権を再開しない。
-- 動ける席が 1 人以下になったらボードを最後まで配る。ショーダウンは全員表向き。サイドポットは拠出額のレイヤごと、端数はボタンの次から。
+- プリフロップのコールすべき額は BB 満額（BB がショートでオールインでも）。ただし配った時点で動ける人が 1 人だけなら、出ている最高額に合わせれば足りる。
+- 最小レイズ = 直前の上乗せ幅（最低 BB）。最小レイズ未満のオールインは、すでに動いた席のレイズ権を再開しない。レイズできないときの `allin` はコールとして記録する。
+- 動ける席が 1 人以下になったらボードを最後まで配る。ショーダウンは全員表向き。サイドポットは拠出額のレイヤごと（対象者が同じ隣接レイヤは 1 つのポット）、端数はポットごとにボタンの次から。
 - 同じハンドで複数人が飛んだら開始時スタックの多い方が上位。
 - sitout / left の席は手番が来た瞬間に自動処理（チェックできればチェック、それ以外はフォールド）。
-- 退出（left）で残りが 1 人になったらその人の勝ちで終了（退出した席はスタックの多い順に残りの順位）。
+- 退出していない生存者（active / sitout）が 1 人になったら（退出でも脱落でも）その人の勝ちで終了。退出した席は（進行中のハンドの拠出を戻した）スタックの多い順に残りの順位。
 - 生存者が全員 sitout ならハンド間で一時停止、10 分で中止。
 
 ## 4. `server/game/rules.js` — 部屋（純関数。fakeNet も使う）
@@ -73,20 +74,21 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 | `sitout` / `sitin` | `{ room }` | 同上 |
 | `tick` | `{ room }` | 同上（何も無ければ 409 `not_yet`） |
 
-エラー：`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`。
+エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
 |---|---|
-| `profiles` | uid、nickname（1〜16・大文字小文字を無視して一意） |
+| `profiles` | uid、nickname（1〜16・大文字小文字を無視して一意。制御文字・ゼロ幅・方向制御は不可） |
 | `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 
-RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）。
+RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）。
 
 ## 7. 端末の記録（`src/history/*`）
 - IndexedDB `privatematch`：`games`（1 試合 1 件）と `hands`（`[roomId, handNo]`）。
-- 卓ではハンドが終わるたびに `room_hands` を差分で読み、終局時に試合の結果を保存する。起動時は `me().recent` を見て取りこぼしを埋める。
+- 卓ではハンドが終わるたびに `room_hands` を差分で読み、終局時に試合の結果を保存する。起動時は `me().recent` を、STATS を開いたときは「途中」の試合を見て取りこぼしを埋める。
+- 集計の対象は終局した試合と、飛んで順位と pt が決まった試合。IMPORT は書き出しと同じ形の行だけを受け付け、端末のほうが進んだ試合は上書きしない。
 - STATS：試合数・平均順位・1 位率・入賞率（pt > 0）・累計 pt・直近の成績、順位分布、累計 pt のグラフ（期間：直近 100/500/1000/全期間）。HAND HISTORY：試合ごとの一覧 → ハンドの詳細。EXPORT / IMPORT（JSON）。
 
 ## 8. 画面
