@@ -1,0 +1,19 @@
+# Cloudflare Pages の応答ヘッダ。`npm run preview` も同じ値を使う（vite.config.js）。
+# style-src 'unsafe-inline'：画面が要素ごとの CSS 変数（席の位置・カードの遅延・持ち時間）を書くため。スクリプトは 'self' だけ。
+# connect-src：このサイト（/api/auth の中継）と Neon（Data API・Function "game"。どちらも *.neon.tech）。
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.neon.tech; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
