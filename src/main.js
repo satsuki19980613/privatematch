@@ -84,7 +84,12 @@ document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e =
 
 /* ---------- 起動 ---------- */
 async function boot() {
-  if (import.meta.env.DEV && new URLSearchParams(location.search).has('fake')) { app.net = await import('./fakeNet.js'); }
+  const q = new URLSearchParams(location.search);
+  // ?demo：ログインもサーバーも使わない（Bot と打てる・STATS にサンプル）。開発中は ?fake も同じ代役を使う
+  if (q.has('demo') || (import.meta.env.DEV && q.has('fake'))) {
+    app.net = await import('./fakeNet.js');
+    if (q.has('demo')) { document.body.classList.add('demo'); try { await (await import('./demo.js')).seed(); } catch (e) { /* IndexedDB が使えない */ } }
+  }
   app.booting = app.net.online;
   stashInvite();
   showScreen('menu'); renderMenu();

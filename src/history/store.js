@@ -2,7 +2,9 @@
 //   games: 1 試合 1 件（keyPath roomId）
 //     { roomId, code, kind, config, seat, names, players: [{ name, place, pt }], place, pt, status, startedAt, endedAt, hands, savedAt }
 //   hands: 1 ハンド 1 件（keyPath [roomId, handNo]）。記録（engine.handRecord の rec）に自分の手札 hole を足したもの
-const DB_NAME = 'privatematch', VER = 1;
+// デモ（?demo）は別の保存先を使い、本物の記録に混ぜない
+export const DEMO = typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo');
+const DB_NAME = DEMO ? 'privatematch-demo' : 'privatematch', VER = 1;
 let dbp = null;
 
 function open() {
@@ -47,6 +49,12 @@ export async function handsOf(roomId) {
   const db = await open();
   const list = await req(db.transaction('hands').objectStore('hands').index('room').getAll(roomId));
   return list.sort((a, b) => a.handNo - b.handNo);
+}
+/** すべて消す（デモの作り直し用） */
+export async function clearAll() {
+  const db = await open(), t = db.transaction(['games', 'hands'], 'readwrite');
+  t.objectStore('games').clear(); t.objectStore('hands').clear();
+  await done(t);
 }
 /** その試合で保存済みの最後のハンド番号（無ければ 0） */
 export async function lastHandNo(roomId) {
