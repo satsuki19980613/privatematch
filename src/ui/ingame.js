@@ -35,7 +35,7 @@ const GROUP_MS = 3 * 60_000;
 function msgHTML(m, prev) {
   const cont = prev && prev.seat === m.seat && m.at - prev.at < GROUP_MS;
   const who = m.mine ? 'YOU' : esc(m.name || `Seat ${m.seat + 1}`);
-  return `<li class="cm ${m.mine ? 'mine' : 'opp'}${cont ? ' cont' : ''}">${cont ? '' : `<div class="cm-h"><b class="cm-n">${who}</b><time>${hhmm(m.at)}</time></div>`}<p class="cm-t">${esc(m.text)}</p></li>`;
+  return `<li class="cm ${m.mine ? 'mine' : 'opp'} t-${m.tone || 'p1'}${cont ? ' cont' : ''}">${cont ? '' : `<div class="cm-h"><b class="cm-n">${who}</b><time>${hhmm(m.at)}</time></div>`}<p class="cm-t">${esc(m.text)}</p></li>`;
 }
 function openChatLog() {
   if (!inGame() || !chat.chatEnabled()) return;

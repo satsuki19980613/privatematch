@@ -457,7 +457,7 @@ function fits() {
   if (bw > (T0.right - T0.left) * .62) return false;
   for (const g of G.flat()) if (g.l < T0.left - 1 || g.r > T0.right + 1 || g.t < T0.top - 1 || g.b > T0.bottom + 1) return false;
   for (let i = 0; i < G.length; i++) for (let j = i + 1; j < G.length; j++) for (const a of G[i]) for (const b of G[j]) if (hit(a, b)) return false;
-  return chat.fitsLane(T0, G, rectOf, hit);   // チャットのレーンと入力ボタン（PRIVATE の卓だけ）
+  return chat.fitsLane(T0, G, rectOf, hit);   // チャットの入力ボタン（PRIVATE の卓だけ）
 }
 function largest(lo, hi, set) {
   set(lo); if (!fits()) return lo;
@@ -475,7 +475,6 @@ export function fitTable(force, glide) {
   if (!b.classList.contains('kb')) b.classList.toggle('land', vw > vh * 1.25 && vh < 600);   // キーボードの間は向きの判定を変えない
   const c = chat.fitLane(key + (b.classList.contains('land') ? 'L' : ''), () => largest(14, b.classList.contains('land') ? 50 : 80, x => st.style.setProperty('--cw', x + 'px')));
   st.style.setProperty('--cw', c + 'px');
-  if (b.classList.contains('chat')) chat.settle(fits);   // レーンの幅をこの大きさで決め直す
   chat.afterFit();
 }
 viewportHooks({

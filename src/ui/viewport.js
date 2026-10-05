@@ -29,7 +29,9 @@ function probeInsets() {
   p.remove();
   return { top, bottom };
 }
-const visible = () => { const vv = window.visualViewport; return Math.round(vv ? vv.height * (vv.scale || 1) : window.innerHeight); };
+// what the browser shows (a real keyboard included); visible() also takes off the demo keyboard (below)
+const real = () => { const vv = window.visualViewport; return Math.round(vv ? vv.height * (vv.scale || 1) : window.innerHeight); };
+const visible = () => real() - simPx();
 
 // current values (what is on screen) and the running animation
 const cur = { h: 0, kbp: 0, kbm: 0 };
@@ -59,6 +61,7 @@ function setVars(h, cw, kbp, kbm, lw) {
   root.style.setProperty('--kbp', String(Math.round(kbp * 1000) / 1000));
   root.style.setProperty('--kbm', String(Math.round(kbm * 1000) / 1000));
   if (cw) stage()?.style.setProperty('--cw', Math.round(cw * 100) / 100 + 'px');
+  if (sim.el) simTrack(h);
 }
 const ease = p => { // cubic-bezier(.2,.8,.2,1)
   let lo = 0, hi = 1, t = p;
@@ -115,20 +118,35 @@ function finish(to) {
 }
 
 function apply() {
-  const h = visible(); if (!(h > 0)) return;
+  const r = real(); if (!(r > 0)) return;
   const w = window.innerWidth;
   const { top, bottom } = probeInsets();
   const edgeToEdge = /Android/i.test(navigator.userAgent) && top > 0 && bottom === 0;
   root.style.setProperty('--sab-fb', edgeToEdge ? ANDROID_NAV_PX + 'px' : '0px');
   follow();
-  if (w !== baseW) { baseW = w; baseH = h; }
   const focused = H.focused();
-  if (!focused) baseH = Math.max(baseH, h);
+  // the width changed (rotation): the height without the keyboard is the layout viewport's (the keyboard does not shrink it)
+  const turned = !!baseW && w !== baseW;
+  if (w !== baseW) { baseW = w; baseH = focused ? Math.max(r, window.innerHeight) : r; }
+  if (!focused) baseH = Math.max(baseH, r);
+  // the demo keyboard is up only while the input has focus, and gives way when a real keyboard turns up after all
+  if (sim.on && (!focused || (!sim.forced && baseH - r > KB_PX))) { if (focused) sim.real = true; sim.on = false; }
+  const h = visible(); simShow();
   const kb = focused && baseH - h > KB_PX;
   const wasKb = document.body.classList.contains('kb');
   const inGame = document.body.dataset.screen === 'game';
   if (anim && anim.to.h === h && !!anim.to.kbp === kb) return;   // already heading there
   if (inGame && cur.h && w === lastW && (kb || wasKb) && H.measure) { lastW = w; glide(h, kb); return; }
+  // turned with the keyboard up: lay the table out for the new orientation without the keyboard first, then glide down to it
+  if (inGame && turned && kb && H.measure) {
+    if (anim) { cancelAnimationFrame(anim.raf); anim = null; }
+    lastW = w;
+    document.body.classList.remove('kb', 'kbmin');
+    setVars(baseH, 0, 0, 0); cur.kbm = 0;
+    H.measure(); snap = false; snapshot();
+    glide(h, true);
+    return;
+  }
   lastW = w;
   if (anim) { cancelAnimationFrame(anim.raf); anim = null; }
   document.body.classList.remove('kb', 'kbmin');
@@ -144,6 +162,69 @@ function follow() {
   app.style.translate = off ? `0 ${off}px` : '';
 }
 
+// Demo keyboard: a PC browser (also its devtools phone view, which looks like a phone in every other way) has no software
+// keyboard, so ?demo could not show how the table shrinks for one. When the chat input gets focus there and the visible height
+// has not dropped by a keyboard within SIM_WAIT ms, a stand-in board rises from the bottom and visible() loses its height, so
+// the glide above runs exactly as for a real keyboard. Its top edge is the frame's bottom edge in every frame of the glide. Once a page is known to have no keyboard the board comes at once.
+// ?kb=sim: always and at once (also outside ?demo, for development). ?kb=off: never. Never wider than 900px (a PC screen).
+const SIM_WAIT = 550, SIM_MAXW = 900;
+const kbq = new URLSearchParams(location.search).get('kb');
+const sim = { el: null, on: false, px: 0, forced: kbq === 'sim', none: kbq === 'sim', real: false, t: 0 };
+function simPx() {
+  if (!sim.on) return 0;
+  const w = window.innerWidth, h = window.innerHeight;
+  if (w > SIM_MAXW) return 0;
+  return Math.round(w > h ? h * .5 : Math.min(h * .4, 300));   // iPhone: 260–300px upright, about half the height sideways
+}
+const KEYS = [['→', 1], ['あ'], ['か'], ['さ'], ['⌫', 1], ['↺', 1], ['た'], ['な'], ['は'], ['空白', 1], ['ABC', 1], ['ま'], ['や'], ['ら'], ['改行', 2],
+  ['☺', 1], ['小ﾞﾟ'], ['わ'], ['、。?!']];
+const GLOBE = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg>';
+const MIC = '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>';
+function simEl() {
+  if (sim.el) return sim.el;
+  const el = sim.el = document.createElement('div');
+  el.className = 'simkb'; el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = '<div class="skb-bar"></div><div class="skb-keys">' +
+    KEYS.map(([k, f]) => `<i class="skb-k${f ? ' fn' : ''}${f === 2 ? ' tall' : ''}">${k}</i>`).join('') + '</div><div class="skb-home">' + GLOBE + MIC + '</div>';
+  document.body.appendChild(el);
+  // pressing it changes nothing: the input keeps focus and the chat's "tap outside closes" never sees it
+  const block = e => {
+    if (!el.contains(e.target)) return;
+    e.preventDefault(); e.stopPropagation();
+    const k = e.type === 'pointerdown' && e.target.closest('.skb-k');
+    if (k) { k.classList.add('hit'); setTimeout(() => k.classList.remove('hit'), 140); }
+  };
+  addEventListener('pointerdown', block, true); addEventListener('mousedown', block, true);   // before chat.js's document listener
+  el.addEventListener('touchstart', block, { passive: false });
+  return el;
+}
+function simShow() {
+  const px = simPx();
+  if (!px && !sim.el) return;
+  const el = simEl();
+  if (px) { sim.px = px; el.style.height = px + 'px'; el.classList.toggle('land', window.innerWidth > window.innerHeight); }
+}
+// the board's top follows the frame's bottom (setVars): it rises and falls with --app-h, never ahead of it or behind it
+function simTrack(h) {
+  const el = sim.el, px = sim.px, y = Math.max(0, Math.min(px, Math.round((px - (real() - h)) * 10) / 10));
+  el.style.transform = `translateY(${y}px)`;
+  el.style.visibility = y >= px ? 'hidden' : 'visible';
+}
+const simAllowed = () => kbq !== 'off' && !sim.real && (sim.forced || document.body.classList.contains('demo')) && window.innerWidth <= SIM_MAXW;
+function simUp() { if (H.focused() && !sim.on) { snapshot(); sim.on = true; now(); } }
+document.addEventListener('focusin', () => {
+  clearTimeout(sim.t);
+  if (!H.focused() || sim.on || !simAllowed()) return;
+  if (sim.none) { simUp(); return; }
+  sim.t = setTimeout(() => {
+    if (!H.focused() || sim.on || !simAllowed()) return;
+    if (baseH - real() > KB_PX) { sim.real = true; return; }   // a real keyboard: leave it alone from now on
+    sim.none = true; simUp();
+  }, SIM_WAIT);
+});
+// the input lost focus (Esc, send on a phone, a tap outside): the board goes down with the glide back
+document.addEventListener('focusout', () => { if (sim.on) setTimeout(() => { if (sim.on && !H.focused()) now(); }, 0); });
+
 let t = 0;
 const later = () => { clearTimeout(t); t = setTimeout(apply, 50); };
 // keyboard-related changes are handled at once (before the next paint) so the frame never shows a stale height
@@ -158,3 +239,4 @@ if (window.visualViewport) {
 }
 /** the chat input lost focus: if no resize follows (keyboard already gone / hardware keyboard), settle anyway */
 export function settleSoon() { setTimeout(() => { if (!H.focused()) apply(); }, 650); }
+
