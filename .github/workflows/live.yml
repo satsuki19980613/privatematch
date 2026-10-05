@@ -1,0 +1,80 @@
+# 本物のサーバーとの通信確認（scripts/live-check.mjs）。
+#   prod: 本番のサイト・ログイン中継・Function・Data API に、ログインせずに届くか（書き込まない）。Neon Auth の設定も表示する
+#   e2e:  開発用の Neon ブランチ dev にこのコミットのサーバーを配備し、テスト用の利用者 4 人で部屋の作成から終局・記録の取得まで遊ぶ
+# 起動：Actions → Live → Run workflow、作業ブランチ（claude/**）への push（サーバーや確認スクリプトが変わったとき）、毎週月曜
+name: Live
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: ['scripts/live-check.mjs', '.github/workflows/live.yml', 'server/**', 'db/**', 'src/engine.js', 'src/structure.js']
+  schedule:
+    - cron: '17 0 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+  NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+  APP_ORIGIN: ${{ vars.APP_ORIGIN || format('https://{0}.pages.dev', vars.CF_PAGES_PROJECT || 'privatematch') }}
+
+jobs:
+  prod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: 本番の通信確認
+        run: |
+          set -a; . ./.env.production; set +a
+          SITE="$APP_ORIGIN" AUTH_URL="$VITE_NEON_AUTH_URL" DATA_URL="$VITE_NEON_DATA_API_URL" GAME_URL="$VITE_GAME_URL" node scripts/live-check.mjs prod
+      - name: 本番の Neon Auth の設定（表示だけ）
+        if: always() && env.NEON_API_KEY != ''
+        run: |
+          C="node node_modules/neonctl/bin/cli.js --project-id $NEON_PROJECT_ID --no-color"
+          B=$($C branches list --output json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const l=Array.isArray(j)?j:j.branches;const b=l.find(x=>x.name===(process.env.NEON_PROD_BRANCH||"production"))||l.find(x=>x.default);console.log(b.id)})')
+          echo "branch: $B"
+          for s in "oauth-provider list" "domain list" "config email-password get"; do echo "== $s"; $C neon-auth $s --branch "$B" || true; done
+        env:
+          NEON_PROD_BRANCH: ${{ vars.NEON_PROD_BRANCH }}
+
+  e2e:
+    runs-on: ubuntu-latest
+    if: ${{ vars.NEON_PROJECT_ID != '' }}
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: 開発用ブランチ dev の準備
+        id: neon
+        env:
+          ALLOW_LOCALHOST: '1'
+        run: |
+          node scripts/setup-neon.mjs --branch dev
+          # テスト用の利用者をメールとパスワードで作るため（dev だけ。本番は Google のみ）
+          node node_modules/neonctl/bin/cli.js neon-auth config email-password update --branch dev --enabled --no-require-email-verification --project-id "$NEON_PROJECT_ID" --no-color
+      - name: マイグレーションと Function の配備（dev）
+        id: fn
+        run: |
+          npm run db:migrate -- --branch dev
+          node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch dev --database neondb --project-id "$NEON_PROJECT_ID" || true
+          npm run deploy:game -- --branch dev
+      - name: 本物の通信で 1 試合
+        env:
+          AUTH_URL: ${{ steps.neon.outputs.auth_url }}
+          DATA_URL: ${{ steps.neon.outputs.data_url }}
+          GAME_URL: ${{ steps.fn.outputs.game_url }}
+          ORIGIN: http://localhost:5180
+        run: node scripts/live-check.mjs e2e
