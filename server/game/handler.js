@@ -8,6 +8,7 @@ const CODE = /^[0-9]{6}$/;
 export const STATUS = {
   not_found: 404, no_profile: 403, stale: 409, not_yet: 409, game_over: 409, not_your_turn: 409, busy: 409, not_started: 409,
   room_closed: 409, room_full: 409, in_other_room: 409, illegal: 422, malformed: 422,
+  chat_closed: 409, too_fast: 429, chat_full: 409,
 };
 
 export function createHandler(deps) {
@@ -51,6 +52,9 @@ export function createHandler(deps) {
         case 'tick':
           if (!room) return reply(422, { error: 'malformed' });
           return reply(200, await deps.tick(uid, room));
+        case 'chat':
+          if (!room || typeof body.text !== 'string') return reply(422, { error: 'malformed' });
+          return reply(200, await deps.chat(uid, room, body.text));
         default:
           return reply(422, { error: 'malformed' });
       }

@@ -24,7 +24,7 @@ function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>>
 const tally = a => a.reduce((m, x) => { m[x] = (m[x] || 0) + 1; return m; }, {});
 const outcome = p => Promise.resolve(p).then(() => 'ok', e => e.code || `EXC:${e.message}`);
 const CFG = n => ({ ...DEFAULT_CONFIG, players: n });
-const RPCS = ['me', 'set_nickname', 'room_poll', 'room_peek', 'free_rooms', 'room_hands'];
+const RPCS = ['me', 'set_nickname', 'room_poll', 'room_peek', 'free_rooms', 'room_hands', 'room_chat'];
 const CTL = { ZWSP: String.fromCharCode(0x200b), NBSP: String.fromCharCode(0xa0), RLO: String.fromCharCode(0x202e) };
 
 describe('QA server（専用 DB）', { skip }, () => {
@@ -82,7 +82,7 @@ describe('QA server（専用 DB）', { skip }, () => {
   // ================= 1. 権限（RLS・GRANT） =================
   describe('権限', () => {
     test('表は authenticated / anonymous から読み書きできない（RLS 有効・GRANT 無し）', async () => {
-      for (const t of ['profiles', 'rooms', 'room_hands']) {
+      for (const t of ['profiles', 'rooms', 'room_hands', 'room_chat']) {
         const { rows: [c] } = await pool.query('select relrowsecurity from pg_class where oid = $1::regclass', [`public.${t}`]);
         assert.equal(c.relrowsecurity, true, `${t} の RLS`);
         for (const role of ['authenticated', 'anonymous', 'public'])
@@ -101,7 +101,7 @@ describe('QA server（専用 DB）', { skip }, () => {
       await assert.rejects(as('authenticated', { sub: u }, 'select * from neon_auth."user"'), e => e.code === '42501');
     });
 
-    test('実行できる関数は ARCHITECTURE §6 の RPC 6 本だけ（anonymous は 0 本）。definer 関数は search_path 固定', async () => {
+    test('実行できる関数は ARCHITECTURE §6 の RPC 7 本だけ（anonymous は 0 本）。definer 関数は search_path 固定', async () => {
       const { rows } = await pool.query(`select p.oid, p.proname, p.prosecdef, array_to_string(p.proconfig, ',') cfg,
         has_function_privilege('authenticated', p.oid, 'execute') auth, has_function_privilege('anonymous', p.oid, 'execute') anon,
         has_function_privilege('public', p.oid, 'execute') pub from pg_proc p where p.pronamespace = 'public'::regnamespace`);
@@ -116,7 +116,7 @@ describe('QA server（専用 DB）', { skip }, () => {
 
     test('anonymous は RPC を何も実行できない（JWT の有無にかかわらず）', async () => {
       const [u] = await newUsers(1);
-      const calls = ['me()', "set_nickname('x')", `room_poll('${randomUUID()}', 0)`, "room_peek('123456')", 'free_rooms()', `room_hands('${randomUUID()}', 0)`];
+      const calls = ['me()', "set_nickname('x')", `room_poll('${randomUUID()}', 0)`, "room_peek('123456')", 'free_rooms()', `room_hands('${randomUUID()}', 0)`, `room_chat('${randomUUID()}', 0)`];
       for (const claims of [undefined, { sub: u, role: 'authenticated' }, { sub: u, role: 'anonymous' }, ''])
         for (const c of calls) await assert.rejects(as('anonymous', claims, `select public.${c}`), e => e.code === '42501', c);
     });

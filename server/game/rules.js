@@ -1,4 +1,4 @@
-// 部屋のルール（docs/ARCHITECTURE.md §5）：作成・参加（満席で開始）・退出・アクション・時間で進む処理・ビュー。
+// 部屋のルール（docs/ARCHITECTURE.md §4）：作成・参加（満席で開始）・退出・アクション・時間で進む処理・ビュー・チャット。
 // 入出力も時計も持たない純関数（now と rnd は引数で受け取る）。fakeNet もブラウザでこれを使う。
 //
 // 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], state, ver, createdAt, startedAt }
@@ -6,6 +6,7 @@
 //   members: 待機中は参加順（先頭が作成者）、開始後は席順。state はエンジンの状態（山札を含む。サーバーだけが持つ）
 import { newTable, act, tick, sitin, sitout, leave, viewFor, handRecord, dueAt, EngineError } from '../../src/engine.js';
 import { normalizeConfig, WAITING_EXPIRES_MS } from '../../src/structure.js';
+import { normalizeChat, CHAT_MIN_INTERVAL_MS } from '../../src/chat.js';
 
 export const KINDS = ['private', 'free'];
 
@@ -105,6 +106,20 @@ export function tickRoom(room, uid, now) {
   const st = clone(room.state);
   engineCall(() => tick(st, now));
   return stepped(room, st);
+}
+
+/**
+ * チャットの発言（PRIVATE MATCH の卓だけ。開始後なら終局後も部屋がある限り送れる）。ゲームの ver とは独立（room は変えない）。
+ * lastAt はその席の最後の発言時刻（ms。無ければ null）。=> { seat, text }（text は normalizeChat 済み）
+ */
+export function postChat(room, uid, text, lastAt, now) {
+  const seat = seatOf(room, uid);
+  if (seat < 0) throw new MoveError('not_found');
+  if (room.kind !== 'private' || !room.started) throw new MoveError('chat_closed');
+  const t = normalizeChat(text);
+  if (t == null) throw new MoveError('malformed');
+  if (lastAt != null && now - lastAt < CHAT_MIN_INTERVAL_MS) throw new MoveError('too_fast');
+  return { seat, text: t };
 }
 
 /** 次に何かが起きる時刻（DB の due_ms） */
