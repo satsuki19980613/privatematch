@@ -4,6 +4,8 @@ import { legalActions, dueAt } from '../engine.js';
 import { BLIND_TABLES, modeLabel, ACTION_MS } from '../structure.js';
 import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb } from './util.js';
 import { syncRoom } from '../history/sync.js';
+import * as chat from './chat.js';
+import { viewportHooks, gliding } from './viewport.js';
 
 const GRACE_MS = 1500, LOCK_MS = 350;
 const sum = a => a.reduce((s, x) => s + x, 0);
@@ -17,6 +19,7 @@ export function enter(id) {
   T = { id, ver: -1, v: null, busy: false, timer: 0, lockUntil: 0, pre: null, rs: null, resultShown: false, tickAt: 0, tickBusy: false,
     clockCache: null, sh: { handNo: -1, board: -1, settled: -1, bet: [], init: false }, synced: 0, syncT: 0, leaving: false };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
+  chat.start(id);
   for (const s of ['#seats', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(s); e.innerHTML = ''; e._h = null; }
   setHTML($('#dockMain'), '<span class="dk-title">…</span><span class="dots"><i></i><i></i><i></i></span>');
   $('#dock').classList.add('idle');
@@ -32,11 +35,14 @@ export function leave() {
   clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT);
   document.querySelectorAll('.fly').forEach(e => e.remove());
   for (const d of ['#overDlg', '#leaveDlg']) if ($(d).open) $(d).close();
+  chat.stop();
   T = null;
   syncHeader();
 }
 export const active = () => !!T;
 export const activeId = () => (T ? T.id : null);
+/** 今のビュー（無ければ null）。卓の外のモジュール（チャット・ハンド履歴）が読む */
+export const currentView = () => (T ? T.v : null);
 
 /* ===================== ヘッダ（Leave） ===================== */
 function syncHeader() {
@@ -69,6 +75,7 @@ async function poll() {
     if (t !== T) return;
     clock.offset = r.now - Date.now();
     if (r.view && !t.busy) apply(r.view);
+    chat.onPoll(r.chat);
   } catch (e) {
     if (t !== T) return;
     if (e.code === 'not_found') { toast('卓が見つかりません'); return app.nav.toMenu(); }
@@ -108,6 +115,7 @@ function apply(v) {
   if (t.rs && !(h && h.toAct === v.seat && h.phase === 'betting')) closeSheet();
   // 終わったハンドを端末に写す（少し待ってまとめて）
   if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800); }
+  chat.onView(v);
   render();
   autoPre();
   checkResult();
@@ -148,7 +156,7 @@ function showResult() {
 const LAYOUT = {
   2: [[50, 0, .5, 0, 't']],
   3: [[0, 30, 0, .5, 'l'], [100, 30, 1, .5, 'r']],
-  4: [[0, 46, 0, .5, 'l'], [50, 0, .5, 0, 't'], [100, 46, 1, .5, 'r']],
+  4: [[0, 30, 0, .5, 'l'], [50, 0, .5, 0, 't'], [100, 30, 1, .5, 'r']],
   5: [[0, 58, 0, .5, 'l'], [24, 0, .5, 0, 't'], [76, 0, .5, 0, 't'], [100, 58, 1, .5, 'r']],
   6: [[0, 66, 0, .5, 'l'], [0, 24, 0, .5, 'l'], [50, 0, .5, 0, 't'], [100, 24, 1, .5, 'r'], [100, 66, 1, .5, 'r']],
 };
@@ -442,14 +450,14 @@ function fits() {
   if (st.scrollHeight > st.clientHeight + 1 || $('#tInfo').scrollWidth > $('#tInfo').clientWidth + 1) return false;
   const T0 = tb.getBoundingClientRect();
   // 席ごと（手札・プレート・ベット）と、真ん中（ポット・ボード）がそれぞれ重ならず、卓の中に収まること
-  const G = [...document.querySelectorAll('#seats .seat')].map(seat => [...seat.children].map(rectOf).filter(Boolean));
+  const G = [...document.querySelectorAll('#seats .seat')].map(seat => [...seat.children].filter(e => !e.classList.contains('ghost')).map(rectOf).filter(Boolean));
   const mid = [rectOf($('#pot')), rectOf($('#boardC'))].filter(Boolean);
   G.push(mid);
   const bw = $('#boardC').getBoundingClientRect().width;
   if (bw > (T0.right - T0.left) * .62) return false;
   for (const g of G.flat()) if (g.l < T0.left - 1 || g.r > T0.right + 1 || g.t < T0.top - 1 || g.b > T0.bottom + 1) return false;
   for (let i = 0; i < G.length; i++) for (let j = i + 1; j < G.length; j++) for (const a of G[i]) for (const b of G[j]) if (hit(a, b)) return false;
-  return true;
+  return chat.fitsLane(T0, G, rectOf, hit);   // チャットのレーンと入力ボタン（PRIVATE の卓だけ）
 }
 function largest(lo, hi, set) {
   set(lo); if (!fits()) return lo;
@@ -457,15 +465,24 @@ function largest(lo, hi, set) {
   while (hi - lo > .5) { const m = (lo + hi) / 2; set(m); if (fits()) lo = m; else hi = m; }
   return Math.floor(lo * 2) / 2;
 }
-let fitKey = '';
-export function fitTable(force) {
+let fitKey = '', fitWait = false;
+export function fitTable(force, glide) {
   const b = document.body; if (b.dataset.screen !== 'game' || !T || !T.v) return;
+  if (gliding() && !glide) { fitWait = true; return; }   // キーボードでの縮小・復帰の途中：終わってから
+  if (b.classList.contains('kbmin') && !glide) return;     // キーボードで卓を薄くしている間は大きさを変えない
   const app_ = $('.app'), st = $('#stage'), vw = app_.clientWidth, vh = app_.clientHeight, key = vw + 'x' + vh + ':' + T.v.n;
   if (!force && key === fitKey) return; fitKey = key;
-  b.classList.toggle('land', vw > vh * 1.25 && vh < 600);
-  const c = largest(14, b.classList.contains('land') ? 50 : 80, x => st.style.setProperty('--cw', x + 'px'));
+  if (!b.classList.contains('kb')) b.classList.toggle('land', vw > vh * 1.25 && vh < 600);   // キーボードの間は向きの判定を変えない
+  const c = chat.fitLane(key + (b.classList.contains('land') ? 'L' : ''), () => largest(14, b.classList.contains('land') ? 50 : 80, x => st.style.setProperty('--cw', x + 'px')));
   st.style.setProperty('--cw', c + 'px');
+  if (b.classList.contains('chat')) fits();   // レーンの幅をこの大きさで決め直す
+  chat.afterFit();
 }
+viewportHooks({
+  measure: () => { if (document.body.dataset.screen !== 'game' || !T || !T.v) return null; fitTable(true, true); return { cw: parseFloat($('#stage').style.getPropertyValue('--cw')), tableH: $('#table').clientHeight }; },
+  focused: () => document.activeElement === $('#chatIn'),
+  done: () => { if (fitWait) { fitWait = false; fitTable(true); } },
+});
 let fitT = 0;
 export const refit = () => { clearTimeout(fitT); fitT = setTimeout(() => fitTable(true), 30); };
 addEventListener('resize', refit);
