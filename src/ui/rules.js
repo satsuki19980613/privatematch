@@ -1,5 +1,5 @@
 // ルールのモーダル：進行・持ち時間・ブラインド構造（3 種）・ゲームモードの pt。説明は画面に出さずここに集める。
-import { BLIND_TABLES, SPEED_LABEL, SPEEDS, GAME_MODES, MODE_IDS, modeLabel, PLAYER_COUNTS, START_BBS, LEVEL_MINUTES, BASE_BB } from '../structure.js';
+import { BLIND_TABLES, SPEED_LABEL, SPEEDS, GAME_MODES, MODE_IDS, modeLabel, PLAYER_COUNTS, START_BBS, BASE_BB, LEVEL_MS } from '../structure.js';
 import { $, head, openDlg, fmt } from './util.js';
 
 let tab = 'normal';
@@ -12,8 +12,8 @@ function paint() {
     <h3>進行 <span>NO-LIMIT HOLD'EM ・ SIT &amp; GO</span></h3>
     <dl class="spec">
       <dt>部屋</dt><dd>PRIVATE MATCH は部屋番号か招待 URL で入れる部屋、FREE MATCH は一覧に公開されて誰でも入れる部屋です。作成者が決めた人数（${PLAYER_COUNTS.join('/')}人）が揃った瞬間に始まります。募集は 15 分で締め切られます。</dd>
-      <dt>設定</dt><dd>ポーカーチェイスの SIT &amp; GO と同じです。開始スタック ${START_BBS.join('/')} BB（レベル 1 の BB = ${BASE_BB} チップ）、ブラインド構造 3 種、上昇間隔 ${LEVEL_MINUTES.join('/')} 分。アンティは全員が払います。</dd>
-      <dt>レベル</dt><dd>開始からの経過時間で上がり、次のハンドから適用されます。</dd>
+      <dt>設定</dt><dd>ポーカーチェイスの SIT &amp; GO と同じです。初期チップ ${START_BBS.map(b => (b * BASE_BB).toLocaleString('en-US')).join('/')} 枚（${START_BBS.join('/')} BB。レベル 1 の BB = ${BASE_BB} 枚）、ブラインド構造 3 種。アンティは全員が払います。</dd>
+      <dt>レベル</dt><dd>${LEVEL_MS / 60000} 分ごとに上がります。${LEVEL_MS / 60000} 分たつとタイマーが止まり、次のハンドから上のレベルになって、そこからまた数えます。</dd>
       <dt>ボタン</dt><dd>デッドボタン方式。ヘッズアップではボタンが SB です。</dd>
       <dt>持ち時間</dt><dd>1 アクション 15 秒。切れるとタイムバンク（1 試合 30 秒）を使います。尽きるとチェックかフォールドになり、2 回続くと離席扱いになります（I'm back で戻れます）。</dd>
       <dt>ショーダウン</dt><dd>残った全員が表向きにします。</dd>

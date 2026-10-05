@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newTable, act, tick, sitout, sitin, leave, legalActions, viewFor, handRecord, totalChips, eval7, handName, dueAt, EngineError,
 } from '../src/engine.js';
-import { DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, levelAt } from '../src/structure.js';
+import { DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, LEVEL_MS } from '../src/structure.js';
 
 // 再現できる乱数（mulberry32）
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -117,15 +117,21 @@ test('ビューは他人の手札と山札を見せない', () => {
   assert.deepEqual(legalActions(v), legalActions(st));
 });
 
-test('レベルは経過時間で上がり、次のハンドから適用', () => {
-  const c = cfg({ levelMin: 3 });
-  assert.equal(levelAt(c, 0, 0), 1); assert.equal(levelAt(c, 0, 179999), 1); assert.equal(levelAt(c, 0, 180000), 2);
-  assert.equal(levelAt(c, 0, 1e12), 16);
+test('レベルは 3 分で上がり、次のハンドから適用。タイマーはそのハンドから数え直す', () => {
+  const c = cfg();
+  assert.equal(LEVEL_MS, 180000);
+  assert.deepEqual(nextLevel(c, 1, 0, 179999), { level: 1, levelStartAt: 0 });
+  assert.deepEqual(nextLevel(c, 1, 0, 200000), { level: 2, levelStartAt: 200000 });   // 20 秒遅れて上がっても次は 200000 から 3 分
+  assert.deepEqual(nextLevel(c, 2, 200000, 379999), { level: 2, levelStartAt: 200000 });
+  assert.deepEqual(nextLevel(c, 1, 0, 1e12), { level: 2, levelStartAt: 1e12 });      // 長く止まっていても 1 つずつ
+  assert.deepEqual(nextLevel(c, 16, 0, 1e12), { level: 16, levelStartAt: 0 });       // 表の最後で止まる
+  assert.deepEqual(nextLevel(cfg({ levelMin: 5 }), 1, 0, 299999), { level: 1, levelStartAt: 0 });   // 以前の部屋は選んだ分数のまま
+  assert.deepEqual(nextLevel(cfg({ levelMin: 5 }), 1, 0, 300000), { level: 2, levelStartAt: 300000 });
 });
 
 // ランダムに打って、不変条件（チップの保存・順位・pt）を確かめる
 function randomGame(n, seed, opts = {}) {
-  const r = rng(seed), config = cfg({ players: n, startBb: [75, 100, 150, 200][seed % 4], speed: ['normal', 'slow', 'veryslow'][seed % 3], mode: ['club', 'rank-4', 'legend-avg'][seed % 3] });
+  const r = rng(seed), config = cfg({ players: n, startBb: [50, 75, 100, 150][seed % 4], speed: ['normal', 'slow', 'veryslow'][seed % 3], mode: ['club', 'rank-4', 'legend-avg'][seed % 3] });
   const st = newTable({ config, names: names(n), now: 0, rnd: r });
   const total = n * config.startBb * BASE_BB;
   let now = 0, steps = 0, hands = 0, lastHand = 0;

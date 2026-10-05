@@ -4,12 +4,12 @@
 
 /** 人数（作成者が選ぶ。揃った瞬間に自動で始まる） */
 export const PLAYER_COUNTS = [2, 3, 4, 5, 6];
-/** 開始スタック（BB）。チップは × BASE_BB */
-export const START_BBS = [75, 100, 150, 200];
+/** 初期チップ（BB）。チップは × BASE_BB = 10000 / 15000 / 20000 / 30000 枚 */
+export const START_BBS = [50, 75, 100, 150];
 /** ブラインド構造（ゲームに登録されている 3 種） */
 export const SPEEDS = ['normal', 'slow', 'veryslow'];
-/** 上昇間隔（分） */
-export const LEVEL_MINUTES = [3, 4, 5];
+/** 1 レベルの長さ。ポーカーチェイスは全ストラクチャー 3 分（上昇間隔は選べない） */
+export const LEVEL_MS = 3 * 60000;
 /** レベル 1 の BB（チップ） */
 export const BASE_BB = 200;
 
@@ -54,11 +54,14 @@ export function blindsAt(speed, level) {
   const [bb, ante] = t[i];
   return { level: i + 1, sb: bb / 2, bb, ante };
 }
-/** level = min(表の長さ, floor((now − startedAt) / levelMs) + 1)。ハンド開始時に評価する（次のハンドから適用） */
-export function levelAt(config, startedAt, now) {
-  const n = BLIND_TABLES[config.speed].length;
-  const idx = Math.floor(Math.max(0, now - startedAt) / (config.levelMin * 60000)) + 1;
-  return Math.min(n, idx);
+/** 1 レベルの長さ（ms）。上昇間隔を選べた頃の部屋（config.levelMin）はその値のまま */
+export const levelMsOf = config => (config.levelMin ? config.levelMin * 60000 : LEVEL_MS);
+/** 次のハンドのレベル。ポーカーチェイスと同じく、レベルが始まってから 1 レベルの長さが過ぎていれば
+ *  次のハンドから 1 つ上げ、タイマーはそのハンドの開始から数え直す（ハンドの途中では上がらない）。
+ *  level = いまのレベル、levelStartAt = いまのレベルが始まった時刻 → { level, levelStartAt } */
+export function nextLevel(config, level, levelStartAt, now) {
+  if (level < BLIND_TABLES[config.speed].length && now - levelStartAt >= levelMsOf(config)) return { level: level + 1, levelStartAt: now };
+  return { level, levelStartAt };
 }
 
 // ゲームモード（順位別ポイント）。pocket-ICM の GAME_MODE_SPECS の payouts。ブラインドは全モード共通。
@@ -94,19 +97,21 @@ export function payoutsFor(config) {
   return (GAME_MODES[config.mode] || GAME_MODES.club).payouts.slice(0, config.players);
 }
 
-export const DEFAULT_CONFIG = { players: 6, startBb: 100, speed: 'normal', levelMin: 4, mode: 'club' };
+export const DEFAULT_CONFIG = { players: 6, startBb: 100, speed: 'normal', mode: 'club' };
 
-/** 受け取った設定を検証して正規化する。不正なら null */
+/** 受け取った設定を検証して正規化する。不正なら null（以前の levelMin は受け取っても捨てる） */
 export function normalizeConfig(c) {
   if (!c || typeof c !== 'object') return null;
-  const out = { players: c.players, startBb: c.startBb, speed: c.speed, levelMin: c.levelMin, mode: c.mode };
+  const out = { players: c.players, startBb: c.startBb, speed: c.speed, mode: c.mode };
   if (!PLAYER_COUNTS.includes(out.players) || !START_BBS.includes(out.startBb) || !SPEEDS.includes(out.speed) ||
-    !LEVEL_MINUTES.includes(out.levelMin) || !MODE_IDS.includes(out.mode)) return null;
+    !MODE_IDS.includes(out.mode)) return null;
   return out;
 }
-/** 試合の見出し（人数・開始bb・構造・上昇間隔・モード） */
+/** 初期チップの表示（「20,000枚」） */
+export const chipsLabel = startBb => `${(startBb * BASE_BB).toLocaleString('en-US')}枚`;
+/** 試合の見出し（人数・初期チップ・構造・モード。上昇間隔を選べた頃の試合はその分数も） */
 export function configSummary(c) {
-  return `${c.players}人 ・ ${c.startBb}bb開始 ・ ${SPEED_LABEL[c.speed]} ・ ${c.levelMin}分上昇 ・ ${modeLabel(c.mode)}`;
+  return `${c.players}人 ・ ${chipsLabel(c.startBb)} ・ ${SPEED_LABEL[c.speed]}${c.levelMin ? ` ・ ${c.levelMin}分上昇` : ''} ・ ${modeLabel(c.mode)}`;
 }
 
 // 時間の定数（ms）

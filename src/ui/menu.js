@@ -1,8 +1,8 @@
 // メニューの画面：ログイン、メイン（PrivateMatch / FreeMatch / STATS）、部屋の作成、部屋番号で参加、FreeMatch の募集一覧、
 // 参加前の確認、プロフィール。待機室は room.js、成績・履歴は stats.js が同じ #menuIn に描く。
 import {
-  PLAYER_COUNTS, START_BBS, SPEEDS, LEVEL_MINUTES, SPEED_LABEL, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES,
-  DEFAULT_CONFIG, normalizeConfig, configSummary, modeLabel,
+  PLAYER_COUNTS, START_BBS, SPEEDS, SPEED_LABEL, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES,
+  DEFAULT_CONFIG, normalizeConfig, configSummary, modeLabel, chipsLabel,
 } from '../structure.js';
 import { $, app, esc, head, openDlg, toast, localGet, localSet } from './util.js';
 import * as room from './room.js';
@@ -99,7 +99,7 @@ function freeHTML() {
   else if (!freeList.length) list = '<div class="empty-note">いま募集中の部屋はありません。</div>';
   else list = `<ul class="rooms">${freeList.map(r => `<li><button class="room-row" type="button" data-code="${esc(r.code)}">
       <span class="rr-host">${esc(r.host || '')}</span><span class="rr-seat"><b>${r.seated}</b>/${r.config.players}</span>
-      <span class="rr-meta">${r.config.startBb}bb ・ ${SPEED_LABEL[r.config.speed]} ・ ${r.config.levelMin}分 ・ ${esc(modeLabel(r.config.mode))}</span></button></li>`).join('')}</ul>`;
+      <span class="rr-meta">${chipsLabel(r.config.startBb)} ・ ${SPEED_LABEL[r.config.speed]} ・ ${esc(modeLabel(r.config.mode))}</span></button></li>`).join('')}</ul>`;
   return `${back()}<div class="pane-h"><span class="eyebrow">FREE MATCH</span></div>
     <button class="mbtn" id="fmCreate" type="button"><span>部屋を作る<small>一覧に公開され、誰でも参加できます</small></span><span class="rt">＋</span></button>
     <div class="list-h"><span class="eyebrow">募集中</span></div>${list}`;
@@ -134,9 +134,8 @@ function createHTML() {
   return `${back(createKind === 'free' ? 'free' : 'private')}<div class="pane-h"><span class="eyebrow">${createKind === 'free' ? 'FREE MATCH' : 'PRIVATE MATCH'}</span><b>部屋を作る</b></div>
     <div class="form">
       <span class="lbl">人数</span>${seg('players', PLAYER_COUNTS, v => v + '人')}
-      <span class="lbl">開始スタック</span>${seg('startBb', START_BBS, v => v + 'bb')}
+      <span class="lbl">初期チップ</span>${seg('startBb', START_BBS, chipsLabel)}
       <span class="lbl">ブラインド構造</span>${seg('speed', SPEEDS, v => SPEED_LABEL[v])}
-      <span class="lbl">上昇間隔</span>${seg('levelMin', LEVEL_MINUTES, v => v + '分')}
       <span class="lbl">ゲームモード（プライズ）</span>${kindSeg}${varSeg}
       <div class="blinds pays">${pay}</div>
     </div>

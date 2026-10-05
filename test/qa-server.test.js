@@ -404,7 +404,7 @@ describe('QA server（専用 DB）', { skip }, () => {
       assert.equal((await call(fetchH, tok, { op: 'act', room: randomUUID(), ver: 1, move: { type: 'call' } })).status, 404);
       assert.equal((await call(fetchH, tok, { op: 'join', code: '000000' })).status, 404);
       assert.equal((await call(fetchH, tok, { ...START, extra: { deep: [1, 2, 3] }, config: { ...CFG(2), evil: 'x'.repeat(100) } })).status, 200);
-      assert.deepEqual(Object.keys((await rowOf((await pool.query("select id from public.rooms where status='waiting' order by created_at desc limit 1")).rows[0].id)).config).sort(), ['levelMin', 'mode', 'players', 'speed', 'startBb']);   // 余計な設定キーは保存されない
+      assert.deepEqual(Object.keys((await rowOf((await pool.query("select id from public.rooms where status='waiting' order by created_at desc limit 1")).rows[0].id)).config).sort(), ['mode', 'players', 'speed', 'startBb']);   // 余計な設定キーは保存されない
       await reset();
     });
 
