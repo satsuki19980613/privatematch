@@ -29,13 +29,14 @@ const SEG = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(u
 const CLUSTER = /\p{RI}\p{RI}|(?:.[\p{M}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]*)(?:\u200D.[\p{M}\u{1F3FB}-\u{1F3FF}]*)*/gsu;
 const graphemes = s => (SEG ? Array.from(SEG.segment(s), x => x.segment) : s.match(CLUSTER) ?? []);
 
-/** 上限（CHAT_MAX_UNITS）に収まるところまで切った文字列。書記素の途中では切らない（入力欄の制限に使う） */
+/** 上限（CHAT_MAX_UNITS）に収まるところまで切った文字列。書記素の途中では切らない（入力欄の制限に使う）。
+ *  幅は NFC にしてから数える（normalizeChat と同じ。合成除外の文字は NFC で 2 つに分かれて幅が増えるため） */
 export function clipChat(s) {
   s = String(s ?? '');
-  if (chatUnits(s) <= CHAT_MAX_UNITS) return s;
+  if (chatUnits(s.normalize('NFC')) <= CHAT_MAX_UNITS) return s;
   let out = '', n = 0;
   for (const g of graphemes(s)) {
-    const u = chatUnits(g);
+    const u = chatUnits(g.normalize('NFC'));
     if (n + u > CHAT_MAX_UNITS) break;
     out += g; n += u;
   }
@@ -48,11 +49,15 @@ const SPACES = /[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u2
 // ZWJ（U+200D）だけは絵文字どうしをつなぐもの（👨‍👩‍👧 など）を残す
 const INVISIBLE = /(?<![\p{Extended_Pictographic}\uFE0F\u{1F3FB}-\u{1F3FF}])\u200D|\u200D(?!\p{Extended_Pictographic})|[\p{Cc}\p{Cs}\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u2000-\u200C\u200E\u200F\u2028-\u202F\u205F-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFC]/gu;
 
+const BLANK = /[\p{M}\p{Cf}\p{Z}\uFE00-\uFE0F\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\u{1D173}-\u{1D17A}]/gu;
+
 /** 送る文を正規化する。=> 文字列、または null（文字列でない・空・上限を超える。切り詰めはしない） */
 export function normalizeChat(s) {
   if (typeof s !== 'string') return null;
   // 消してから NFC（消した文字の両側が合成されることがあるため）
   const t = s.replace(SPACES, ' ').replace(INVISIBLE, '').normalize('NFC').replace(/ {2,}/g, ' ').trim();
   if (!t || chatUnits(t) > CHAT_MAX_UNITS) return null;
+  // 見た目が空（結合文字・異体字セレクタ・タグ文字・書式文字だけ）なら送らない
+  if (!t.replace(BLANK, '')) return null;
   return t;
 }
