@@ -252,7 +252,7 @@ function bubble(m) {
   for (const x of live) if (!x.gone && x.seat === m.seat) retire(x, true);
   const el = document.createElement('div');
   el.className = 'cb t-' + toneOf(m.seat);
-  el.innerHTML = `<div class="cb-in"><b class="cb-n">${esc(nameOf(m))}</b><span class="cb-t">${esc(m.text)}</span></div>`;
+  el.innerHTML = `<div class="cb-in"><b class="cb-n">${esc(nameOf(m))}</b><span class="cb-t"><i>${esc(m.text)}</i></span></div>`;
   L.appendChild(el);
   const b = { el, seat: m.seat, timer: 0, gone: false };
   live.push(b);
@@ -271,68 +271,182 @@ function anchorOf(seat) {
   const h = rect(s.querySelector('.hole .card') && s.querySelector('.hole')), p = rect(s.querySelector('.sp'));
   if (!h && !p) return null;
   const pw = p ? p.width : h.width, hh = h && p && h.bottom <= p.top + 2 ? h.height : 0;   // 札の高さ（札がプレートの上にあるとき）
-  if (!h || !p) { const r = h || p; return { left: r.left, right: r.right, top: r.top, pw, hh }; }
-  return { left: Math.min(h.left, p.left), right: Math.max(h.right, p.right), top: Math.min(h.top, p.top), pw, hh };
+  const c = h || p;   // 横に置くときにしっぽで指す高さ（札。無ければプレート）
+  // 横に置くときの的：札（無ければプレート）と、プレート（札の横に空きが無いとき）
+  const side = { cl: c.left, cr: c.right, cy: (c.top + c.bottom) / 2, sides: [c, p].filter((r, i, a) => r && a.indexOf(r) === i).map(r => ({ l: r.left, r: r.right, t: r.top, b: r.bottom, cy: (r.top + r.bottom) / 2 })) };
+  if (!h || !p) return { left: c.left, right: c.right, top: c.top, bottom: c.bottom, ...side, pw, hh };
+  return { left: Math.min(h.left, p.left), right: Math.max(h.right, p.right), top: Math.min(h.top, p.top), bottom: Math.max(h.bottom, p.bottom), ...side, pw, hh };
 }
-// よけたいもの（重み）：ほかの席の札・ベット・ディーラーボタン（1）とプレート（名前とスタック。2）、ポット・ボード（1）、ドック（6）
+// よけたいもの（重み）：ほかの席の札・ベット・ディーラーボタン（1）とプレート（名前とスタック。2）、ポット・ボード（1）、ドック（6）。
+// 発言した人自身の席は、ベット（1）・表になった札（1.5）・プレート（.05。ほかの席にかぶるよりは本人のプレートにかぶせる）。伏せた札にはかぶせてよい
 function obstacles(seat) {
   const out = [];
   document.querySelectorAll('#seats .seat').forEach(s => {
-    if (s.id === 'seat' + seat) return;
-    for (const c of s.children) { const r = rect(c); if (r) out.push([r, c.classList.contains('sp') ? 2 : 1]); }
+    const own = s.id === 'seat' + seat;
+    for (const c of s.children) {
+      const r = rect(c); if (!r) continue;
+      const sp = c.classList.contains('sp');
+      if (!own) out.push([r, sp ? 2 : 1]);
+      else if (sp) out.push([r, .05]);
+      else if (c.classList.contains('bchip')) out.push([r, 1]);
+      else if (c.classList.contains('hole') && c.querySelector('.card:not(.back)')) out.push([r, 1.5]);
+    }
   });
   for (const id of ['pot', 'boardC']) { const r = rect(document.getElementById(id)); if (r) out.push([r, 1]); }
   const d = rect($('#dock')); if (d) out.push([d, 6]);
+  const cb = $('#chatBtn'), r = cb && !cb.hidden && cb.style.visibility !== 'hidden' ? rect(cb) : null; if (r) out.push([r, 2]);
   return out;
 }
 const M = 4, TAIL = 7;
+// 吹き出しの形の候補（幅 × 文字の大きさ）を測っておく。標準・細め・横長と、それぞれ少し小さい文字（11px まで）
+function shapes(b, a, R, BL, BR) {
+  const el = b.el, mine = b.seat === (S.v && S.v.seat);
+  const prev = el.style.fontSize; el.style.fontSize = '';
+  const fs = parseFloat(getComputedStyle(el).fontSize) || 13; el.style.fontSize = prev;
+  const small = Math.max(11, Math.round(fs * .86 * 10) / 10);
+  // 札の横の空き（横に置く細い形の幅）
+  const gap = Math.round(Math.max(a.cl - R.left - BL, BR - (a.cr - R.left)) - TAIL - 4);
+  const key = [Math.round(a.pw), Math.round(R.width), fs, BL, BR, gap >> 3].join('|');
+  if (b.key === key && b.shapes) return b.shapes;
+  const room = BR - BL, caps = [
+    [Math.max(a.pw * 1.15, 104, mine ? Math.min(R.width * .62, 260) : 0), 0],
+    [Math.max(a.pw * .95, 120), 300],
+    [Math.max(a.pw * 1.6, 170), 300],
+  ];
+  const out = [];
+  for (const f of small < fs - .4 ? [fs, small] : [fs]) for (const [c, pen] of caps) {
+    const cap = Math.round(Math.min(room, c));
+    if (out.some(o => o.cap === cap && o.fs === f)) continue;
+    el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = f === fs ? '' : f + 'px';
+    const cin = el.querySelector('.cb-in');
+    if (cin.scrollHeight > cin.clientHeight + 1) continue;   // 4 行に収まらない（切れる）形は使わない
+    out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: pen + (f === fs ? 0 : 600) });
+  }
+  // 札の横の狭い空きに入る細い形（小さい文字。4 行に収まるときだけ）
+  if (gap >= 90 && gap < Math.min(...out.map(o => o.cap))) {
+    const cap = Math.round(gap), f = small, cin = el.querySelector('.cb-in');
+    el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = f + 'px';
+    if (cin.scrollHeight <= cin.clientHeight + 1) out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: 1000 });
+  }
+  // 最後の手段：1 行の帯（長い文は横に流して全部読ませる）。とても狭い卓（小さい画面の 5〜6 人・キーボードで縮小表示）用
+  el.classList.add('tk');
+  for (const c of [...new Set([Math.round(Math.max(a.pw * .95, 96)), Math.round(Math.max(Math.min(gap, a.pw), 84))])]) {
+    const cap = Math.min(room, c);
+    el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = small + 'px';
+    out.push({ cap, fs: small, w: el.offsetWidth, h: el.offsetHeight, pen: 1400, tk: true });
+  }
+  el.classList.remove('tk');
+  b.key = key; b.shapes = out; b.cur = null; b.applied = -1;   // 測るときに形を変えたので、選んだ形を付け直させる
+  return out;
+}
+// 帯の文が入りきらなければ、往復で横に流す（読む速さ：1 秒に約 40px。端で少し止まる）
+function ticker(el) {
+  const box = el.querySelector('.cb-t'), t = box && box.firstElementChild; if (!t) return;
+  const over = Math.ceil(t.scrollWidth - box.clientWidth);
+  el.style.setProperty('--shift', over > 2 ? -over + 'px' : '0px');
+  el.style.setProperty('--tdur', over > 2 ? (2.4 + over / 40).toFixed(2) + 's' : '0s');
+  el.classList.toggle('run', over > 2 && !REDUCE);
+}
 function place(b, placed) {
   const L = layer(), a = anchorOf(b.seat), el = b.el;
   if (!L || !a) { el.style.visibility = 'hidden'; return; }
   const R = L.getBoundingClientRect(), tb = $('#table'), ti = $('#tInfo'), land = document.body.classList.contains('land');
   // 置ける範囲：横向きは卓の列だけ（右の列のドック・情報に出ない）。縦向きは情報の行より下
   const BL = land && tb ? Math.max(M, tb.offsetLeft) : M, BR = land && tb ? Math.min(R.width - M, tb.offsetLeft + tb.offsetWidth) : R.width - M;
-  const TOP = !land && ti && ti.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M;
-  // 幅はその席のプレートくらいまで（長い文は 4 行まで折り返す）。自分の吹き出しは卓の真ん中が空いているので広め。
-  // 上に余白が足りない席（上の段など）は横に広げて行を減らす。ぶつかるなら席の幅まで細くする（どちらも一度決めたらその吹き出しの間はそのまま）
-  const mine = b.seat === (S.v && S.v.seat);
-  const fitCap = () => {
-    const cap = Math.round(Math.min(BR - BL, b.wide ? Math.max(a.pw * 1.6, 170) : b.narrow ? Math.max(a.pw * .95, 120) : Math.max(a.pw * 1.15, 104, mine ? Math.min(R.width * .62, 260) : 0)));
-    if (Math.abs((b.cap || 0) - cap) > 1) { b.cap = cap; el.style.setProperty('--cbw', cap + 'px'); }
-  };
-  fitCap();
-  if (!b.wide && !b.narrow && el.offsetHeight > a.top - R.top - TAIL - 2 - TOP) { b.wide = true; fitCap(); }
-  const w = el.offsetWidth, h = el.offsetHeight;
-  const cx = (a.left + a.right) / 2 - R.left;
-  // 上に入りきらなければ、その人の札の上にかぶせる（情報の行やほかの席には出ない）
-  const y0 = Math.round(Math.max(TOP, a.top - R.top - h - TAIL - 2));
-  // 位置：しっぽが席を指せる範囲で、ほかの物との重なりが一番少ないところ。横にずらすのを先に、足りなければ少し上へ、
-  // 相手の吹き出しはその人の札の上まで下げてもよい（自分の札は隠さない）。同じなら元の位置に近いところ
-  const lo = Math.max(BL, cx - w + 14), hi = Math.min(BR - w, cx - 14), mid = Math.max(BL, Math.min(BR - w, cx - w / 2));
-  let x = mid, y = y0;
-  const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left, r: r.right - R.left, t: r.top - R.top, b: r.bottom - R.top, k })).concat(placed || []);
-  const cost = (X, Y) => obs.reduce((sum, o) => sum + o.k * Math.max(0, Math.min(o.r, X + w) - Math.max(o.l, X)) * Math.max(0, Math.min(o.b, Y + h + TAIL) - Math.max(o.t, Y)), 0);
-  let best = cost(mid, y0);
-  if (best > 0) {
+  const TOP = !land && ti && ti.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M, BOT = R.height - M;
+  const mine = b.seat === (S.v && S.v.seat), cx = (a.left + a.right) / 2 - R.left, at = a.top - R.top;
+  // 2px の余白を取って縁が触れないようにする
+  const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left - 2, r: r.right - R.left + 2, t: r.top - R.top - 2, b: r.bottom - R.top + 2, k })).concat((placed || []).map(o => ({ ...o, l: o.l - 2, r: o.r + 2, t: o.t - 2, b: o.b + 2 })));
+  const area = (X, Y, w, h) => { let c = 0; for (const o of obs) { const dx = Math.min(o.r, X + w) - Math.max(o.l, X); if (dx <= 0) continue; const dy = Math.min(o.b, Y + h) - Math.max(o.t, Y); if (dy > 0) c += o.k * dx * dy; } return c; };
+  // 吹き出しとしっぽ（上なら下に、横なら席の側に）の分を合わせた箱で重なりを数える
+  const cost = (side, X, Y, w, h) => side === 'up' ? area(X, Y, w, h + TAIL) : side[0] === 'd' ? area(X, Y - TAIL, w, h + TAIL) : side[0] === 'l' ? area(X, Y, w + TAIL, h) : area(X - TAIL, Y, w + TAIL, h);
+  const inside = (X, Y, w, h) => X >= BL - .5 && X + w <= BR + .5 && Y >= TOP - .5 && Y + h <= BOT + .5;
+  const list = shapes(b, a, R, BL, BR);
+  // 候補の位置（形 i ごと）：上（元の位置・少し上へ・相手は札とプレートの上まで下へ）、席の左右（しっぽは横向き）
+  const spots = (sh, fn) => {
+    const y0 = Math.round(Math.max(TOP, at - sh.h - TAIL - 2));
+    const lo = Math.max(BL, cx - sh.w + 14), hi = Math.min(BR - sh.w, cx - 14), mid = Math.max(BL, Math.min(BR - sh.w, cx - sh.w / 2));
+    const st = sh.tk ? 2 : 4, sx = sh.tk ? 3 : 5;   // 帯は小さいので細かく探す
     const ys = [y0];
-    for (let d = 4; d <= 32 && y0 - d >= TOP; d += 4) ys.push(y0 - d);
-    if (!mine) for (let d = 4; d <= a.hh * .8; d += 4) ys.push(y0 + d);
-    let bestScore = best;
-    for (const Y of ys) for (let X = lo; X <= Math.max(lo, hi); X += 4) {
-      const c = cost(X, Y), score = c + Math.abs(Y - y0) * 24 + Math.abs(X - mid) * .5;
-      if (score < bestScore) { bestScore = score; best = c; x = X; y = Y; }
-    }
-    if (best > 0 && !b.narrow && !b.wide) { b.narrow = true; return place(b, placed); }
+    for (let d = st; d <= 40 && y0 - d >= TOP; d += st) ys.push(y0 - d);
+    if (!mine) for (let d = st; d <= a.hh + 34; d += st) ys.push(y0 + d);
+    const xs = [mid]; for (let X = lo; X <= hi; X += sx) xs.push(X);
+    for (const Y of ys) for (const X of xs) fn('up', X, Y, (Y < y0 ? (y0 - Y) * 10 : (Y - y0) * 8) + Math.abs(X - mid) * .5);
+    // 横：札の横（無理ならプレートの横）。しっぽの高さ（的の真ん中）が吹き出しの縦の範囲に入るように、上下にずらしながら
+    a.sides.forEach((t, k) => {
+      const tl = t.l - R.left, tr = t.r - R.left, ty = t.cy - R.top, ty0 = Math.round(ty - sh.h / 2);
+      for (const side of ['l', 'r']) for (let g = 0; g <= 24; g += 6) {
+        const X = side === 'l' ? Math.round(tl - TAIL - 2 - g - sh.w) : Math.round(tr + TAIL + 2 + g);
+        for (let d = 0; d <= sh.h / 2 - 12; d += 5) for (const Y of d ? [ty0 - d, ty0 + d] : [ty0]) fn(side + k, X, Y, 500 + k * 150 + g * 6 + d * 2);
+      }
+      // 最後の手段：的の下（しっぽは上向き）。自分の吹き出しは自分の札の下＝自分のプレートの上
+      const tcx = (t.l + t.r) / 2 - R.left, tb = t.b - R.top;
+      const lo = Math.max(BL, tcx - sh.w + 14), hi = Math.min(BR - sh.w, tcx - 14), md = Math.max(BL, Math.min(BR - sh.w, tcx - sh.w / 2));
+      for (let g = 0; g <= 24; g += 6) { const Y = Math.round(tb + TAIL + 2 + g); for (let X = lo; X <= hi; X += 5) fn('d' + k, X, Y, 900 + k * 150 + g * 6 + Math.abs(X - md) * .5); }
+    });
+  };
+  // いまの置き方（席からの相対位置）がまだ何にも重ならなければそのまま（毎フレームの探し直しをしない・ちらつかせない）
+  const tgt = side => a.sides[+side[1]] || a.sides[0];
+  const base = side => { if (side === 'up') return [cx, at]; const t = tgt(side); return side[0] === 'd' ? [(t.l + t.r) / 2 - R.left, t.b - R.top] : [(side[0] === 'l' ? t.l : t.r) - R.left, t.cy - R.top]; };
+  let pick = null;
+  if (b.cur && list[b.cur.i]) {
+    const sh = list[b.cur.i], [bx, by] = base(b.cur.side), X = bx + b.cur.rx, Y = by + b.cur.ry;
+    if ((b.cur.side === 'up' || a.sides[+b.cur.side[1]]) && inside(X, Y, sh.w, sh.h) && cost(b.cur.side, X, Y, sh.w, sh.h) === 0) pick = { ...b.cur, x: X, y: Y };
   }
-  x = Math.round(Math.max(BL, Math.min(BR - w, x)));
+  if (!pick) {
+    let bestScore = Infinity;
+    list.forEach((sh, i) => spots(sh, (side, X, Y, pen) => {
+      if (!inside(X, Y, sh.w, sh.h)) return;
+      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen;
+      if (score < bestScore) { bestScore = score; pick = { i, side, x: X, y: Y }; }
+    }));
+    if (pick) { const [bx, by] = base(pick.side); pick.rx = pick.x - bx; pick.ry = pick.y - by; }
+  }
+  if (!pick) { el.style.visibility = 'hidden'; return; }
+  b.cur = pick;
+  const sh = list[pick.i];
+  if (b.applied !== pick.i) {
+    b.applied = pick.i; el.style.setProperty('--cbw', sh.cap + 'px'); el.style.fontSize = sh.fs === list[0].fs ? '' : sh.fs + 'px';
+    el.classList.toggle('tk', !!sh.tk);
+    if (sh.tk) ticker(el);
+  }
+  const x = Math.round(pick.x), y = Math.round(pick.y);
+  const dir = pick.side[0];
+  if (b.side !== dir) { b.side = dir; el.classList.toggle('sl', dir === 'l'); el.classList.toggle('sr', dir === 'r'); el.classList.toggle('sd', dir === 'd'); }
   el.style.visibility = '';
   el.style.translate = `${x}px ${y}px`;
-  el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(w - 10, cx - x))) + 'px');
-  if (placed && !b.gone) placed.push({ l: x, r: x + w, t: y, b: y + h + TAIL, k: 4 });
+  if (dir === 'd') {
+    const [ex, ey] = base(pick.side);
+    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, ex - x))) + 'px');
+    el.style.setProperty('--stem', Math.max(0, Math.round(y - ey - TAIL - 2)) + 'px');
+  } else if (pick.side === 'up') {
+    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, cx - x))) + 'px');
+    // 上にずらしたときは、しっぽの柄を伸ばして席までつなぐ
+    el.style.setProperty('--stem', Math.max(0, Math.round(at - (y + sh.h) - TAIL - 2)) + 'px');
+  } else {
+    const [ex, ey] = base(pick.side);
+    el.style.setProperty('--ty', Math.round(Math.max(10, Math.min(sh.h - 10, ey - y))) + 'px');
+    el.style.setProperty('--stem', Math.max(0, Math.round(dir === 'l' ? ex - (x + sh.w) - TAIL - 2 : x - ex - TAIL - 2)) + 'px');
+  }
+  if (placed && !b.gone) placed.push(pick.side === 'up' ? { l: x, r: x + sh.w, t: y, b: y + sh.h + TAIL, k: 4, b0: b }
+    : dir === 'd' ? { l: x, r: x + sh.w, t: y - TAIL, b: y + sh.h, k: 4, b0: b }
+    : { l: dir === 'l' ? x : x - TAIL, r: dir === 'l' ? x + sh.w + TAIL : x + sh.w, t: y, b: y + sh.h, k: 4, b0: b });
 }
-// 吹き出しがある間だけ毎フレーム席に合わせる（キーボードでの縮小・配り直し・向きの変化にそのまま付いていく）
+// 吹き出しがある間だけ毎フレーム席に合わせる（キーボードでの縮小・配り直し・向きの変化にそのまま付いていく）。
+// それでも吹き出しどうしが重なったまま（0.25 秒）なら、古い方を先に消す（発言は履歴に残っている）
 let raf = 0;
-function loop() { raf = 0; if (!live.length) return; const placed = []; for (const b of live) place(b, placed); raf = requestAnimationFrame(loop); }
+function loop() {
+  raf = 0; if (!live.length) return;
+  const placed = [], now = performance.now();
+  for (const b of live) place(b, placed);
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i]; let hit = false;
+    for (let j = i + 1; j < placed.length; j++) { const q = placed[j]; if (Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1) { hit = true; break; } }
+    const b = p.b0;
+    if (!hit) b.clash = 0; else if (!b.clash) b.clash = now; else if (now - b.clash > 250) retire(b, true);
+  }
+  raf = requestAnimationFrame(loop);
+}
 const kick = () => { if (!raf && live.length) raf = requestAnimationFrame(loop); };
 function retire(b, quick) {
   if (!b || b.gone) return;

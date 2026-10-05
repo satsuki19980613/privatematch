@@ -779,7 +779,27 @@ body.kbmin .chat-bubbles{--cf:max(11px,calc(clamp(12px,calc(var(--cw)*.3),14.5px
   padding:calc(var(--cf)*.3) calc(var(--cf)*.7) calc(var(--cf)*.34) calc(var(--cf)*.5);transform-origin:var(--tx,50%) 100%}
 .cb.t-you{background:linear-gradient(var(--you-soft),var(--you-soft)),var(--cb-bg)}
 /* the tail points down at the speaker (--tx = the speaker's centre within the bubble) */
-.cb::after{content:"";position:absolute;left:calc(var(--tx,50%) - 6px);top:100%;width:12px;height:7px;background:var(--tone,var(--cpu));clip-path:polygon(0 0,100% 0,50% 100%)}
+.cb::after{content:"";position:absolute;left:calc(var(--tx,50%) - 6px);top:calc(100% + var(--stem,0px));width:12px;height:7px;background:var(--tone,var(--cpu));clip-path:polygon(0 0,100% 0,50% 100%)}
+/* moved up to make room : a thin stem keeps the tail on the speaker */
+.cb::before{content:"";position:absolute;left:calc(var(--tx,50%) - 1px);top:100%;width:2px;height:var(--stem,0px);background:var(--tone,var(--cpu))}
+/* no room above : beside the speaker's cards, the tail points sideways at them (--ty = their middle within the bubble) */
+.cb.sl::after,.cb.sr::after{top:calc(var(--ty,50%) - 6px);width:7px;height:12px}
+.cb.sl::after{left:calc(100% + var(--stem,0px));clip-path:polygon(0 0,100% 50%,0 100%)}
+.cb.sr::after{left:auto;right:calc(100% + var(--stem,0px));clip-path:polygon(100% 0,0 50%,100% 100%)}
+.cb.sl::before,.cb.sr::before{top:calc(var(--ty,50%) - 1px);width:var(--stem,0px);height:2px}
+.cb.sl::before{left:100%}
+.cb.sr::before{left:auto;right:100%}
+/* last resort : below the speaker's cards / plate, the tail points up at them */
+.cb.sd::after{top:auto;bottom:calc(100% + var(--stem,0px));clip-path:polygon(50% 0,100% 100%,0 100%)}
+.cb.sd::before{top:auto;bottom:100%}
+.cb-t i{font-style:normal}
+/* last resort for very small tables : one line, the text slides along to show all of it */
+.cb.tk .cb-in{display:flex;align-items:center;-webkit-line-clamp:unset}
+.cb.tk .cb-n{flex:none;margin-top:0}
+.cb.tk .cb-t{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap}
+.cb.tk .cb-t i{display:inline-block}
+.cb.tk.run .cb-t i{animation:cbtick var(--tdur,4s) linear infinite}
+@keyframes cbtick{0%,18%{transform:none}82%,100%{transform:translateX(var(--shift,0px))}}
 .cb-in{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;line-height:1.4;font-weight:500;overflow-wrap:anywhere}
 .cb-n{display:inline-block;max-width:7em;margin-right:.5em;padding:0 .4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top;margin-top:.24em;
   font-family:var(--f-num);font-size:.72em;font-weight:700;letter-spacing:.05em;line-height:1.5;background:var(--tone,var(--cpu));color:var(--tone-ink,var(--cpu-ink))}
