@@ -1,8 +1,8 @@
-// 卓のチャット（PRIVATE MATCH の卓だけ）：差分読み・送信・未読、入力欄（ドックの位置に入れ替わる）、吹き出し（自分の札とボードの間のレーン）。
-// table.js から start / stop / onPoll / onView を呼ぶ。fitTable はレーンと入力ボタンを fitLane / fitsLane で衝突判定に入れる。
+// 卓のチャット（PRIVATE MATCH の卓だけ）：差分読み・送信・未読、入力欄（ドックの位置に入れ替わる）、吹き出し（発言した人の席の真上）。
+// table.js から start / stop / onPoll / onView を呼ぶ。fitTable は入力ボタンを fitLane / fitsLane で衝突判定に入れる。
 // ヘッダの履歴ボタン（#chatLogBtn）とモーダルは ingame.js（chatEnabled / messages / subscribe / unread / markRead を使う）。
 import { $, app, esc, toast, REDUCE, EASE } from './util.js';
-import { settleSoon, snapshot, viewportHooks } from './viewport.js';
+import { settleSoon, snapshot } from './viewport.js';
 import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, chatUnits, clipChat, normalizeChat } from '../chat.js';
 
 const S = {
@@ -20,7 +20,7 @@ const notify = () => subs.forEach(f => { try { f(); } catch (e) { /* 購読側�
 export function chatEnabled() { return S.on; }
 export function messages() {
   const v = S.v;
-  return S.msgs.map(m => ({ seq: m.seq, seat: m.seat, name: v ? (v.names[m.seat] ?? '') : '', text: m.text, at: m.at, mine: !!v && m.seat === v.seat }));
+  return S.msgs.map(m => ({ seq: m.seq, seat: m.seat, name: v ? (v.names[m.seat] ?? '') : '', text: m.text, at: m.at, mine: !!v && m.seat === v.seat, tone: toneOf(m.seat) }));
 }
 export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 export function unread() { return S.unread; }
@@ -92,7 +92,7 @@ async function pull(silent) {
       if (silent || !S.loaded) { /* 入室時の履歴：既読扱い・吹き出しにしない */ }
       else {
         S.unread += fresh.filter(m => !S.v || m.seat !== S.v.seat).length;
-        fresh.slice(-2).forEach(m => bubble(m));
+        fresh.slice(-5).forEach(m => bubble(m));
       }
       notify();
     }
@@ -142,10 +142,10 @@ async function send() {
 function setOn(on) {
   S.on = on;
   document.body.classList.toggle('chat', on);
-  const lane = $('#chatLane'), btn = $('#chatBtn');
-  if (lane) lane.hidden = !on;
+  const L = layer(), btn = $('#chatBtn');
+  if (L) L.hidden = !on;
   if (btn) btn.hidden = !on;
-  if (!on) { closeComposer(true); modeKey = ''; }
+  if (!on) closeComposer(true);
 }
 
 /* ===================== 入力欄（ドックの位置に入れ替わる） ===================== */
@@ -234,103 +234,120 @@ document.addEventListener('keydown', e => {
   }
 }
 
-/* ===================== 吹き出し ===================== */
-const live = [];   // { el, m, timer, gone }
+/* ===================== 吹き出し（発言した人の席の真上） ===================== */
+// 吹き出しは #chatBubbles（#stage を覆う層。卓の配置には関わらない）に置き、動いている間は毎フレーム、その席の札（無ければプレート）の
+// 真上に合わせる。卓がキーボードで縮小表示になっても文字の大きさは変わらない。1 席に 1 つ（同じ人の次の発言は前のものと入れ替わる）
+const live = [];   // { el, seat, timer, gone }
 const nameOf = m => (S.v && m.seat === S.v.seat ? 'YOU' : (S.v && S.v.names[m.seat]) || '');
 const dwell = text => Math.max(3500, Math.min(7000, 3000 + chatUnits(text) * 100));
-const active = () => live.filter(b => !b.gone);
-const GAP = 4;
+const layer = () => $('#chatBubbles');
+/** 席の色：YOU と、自分から見た席の順（1 = 左隣 … 5）。吹き出し・履歴・席の合図で同じ色を使う */
+export function toneOf(seat) {
+  const v = S.v; if (!v) return 'p1';
+  return seat === v.seat ? 'you' : 'p' + (((seat - v.seat) % v.n + v.n) % v.n);
+}
 
 function bubble(m) {
-  const lane = $('#chatLane'); if (!lane || lane.hidden || !S.v) return null;
-  const mine = m.seat === S.v.seat;
-  const before = new Map(active().map(b => [b, b.el.offsetTop]));
+  const L = layer(); if (!L || L.hidden || !S.v) return null;
+  for (const x of live) if (!x.gone && x.seat === m.seat) retire(x, true);
   const el = document.createElement('div');
-  el.className = 'cb ' + (mine ? 'you' : 'op');
+  el.className = 'cb t-' + toneOf(m.seat);
   el.innerHTML = `<div class="cb-in"><b class="cb-n">${esc(nameOf(m))}</b><span class="cb-t">${esc(m.text)}</span></div>`;
-  lane.appendChild(el);
-  const b = { el, m, timer: 0, gone: false };
+  L.appendChild(el);
+  const b = { el, seat: m.seat, timer: 0, gone: false };
   live.push(b);
-  trim(b, before);
-  slide(before);
+  place(b); kick();
   if (REDUCE) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'linear' });
-  else el.animate([{ opacity: 0, transform: 'translateY(6px) scale(.96)', filter: 'blur(6px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }],
+  else el.animate([{ opacity: 0, transform: 'translateY(8px) scale(.94)', filter: 'blur(6px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }],
     { duration: 480, easing: 'cubic-bezier(.16,.84,.3,1)' });
   b.timer = setTimeout(() => retire(b), dwell(m.text));
-  ping(m.seat, mine);
+  ping(m.seat);
   return b;
 }
-/** レーンに入らない古いものを押し出す（同時に見えるのは最大 2 つ。入らなければ最新 1 つ） */
-function trim(keep, before) {
-  const lane = $('#chatLane'); if (!lane) return;
-  const H = lane.clientHeight - (parseFloat(getComputedStyle(lane).paddingBottom) || 0);
-  let act = active();
-  const total = () => act.reduce((s, b) => s + b.el.offsetHeight, 0) + GAP * Math.max(0, act.length - 1);
-  while (act.length > 1 && (act.length > 2 || total() > H + 1)) {
-    const old = act.find(b => b !== keep) || act[0];
-    retire(old, false, true, before && before.get(old));
-    act = active();
-  }
-  act.forEach((b, i) => b.el.classList.toggle('old', i < act.length - 1));
+// 席の札とプレートを合わせた箱（画面の座標。卓の縮小表示の変形も込み）と、プレートの幅
+const rect = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+function anchorOf(seat) {
+  const s = document.getElementById('seat' + seat); if (!s) return null;
+  const h = rect(s.querySelector('.hole .card') && s.querySelector('.hole')), p = rect(s.querySelector('.sp'));
+  if (!h && !p) return null;
+  const pw = p ? p.width : h.width;
+  if (!h || !p) { const r = h || p; return { left: r.left, right: r.right, top: r.top, pw }; }
+  return { left: Math.min(h.left, p.left), right: Math.max(h.right, p.right), top: Math.min(h.top, p.top), pw };
 }
-/** 流れから外れた分、残りの吹き出しを元の位置から滑らかに動かす */
-function slide(before) {
-  for (const [b, top] of before) {
-    if (b.gone) continue;
-    const d = top - b.el.offsetTop;
-    if (Math.abs(d) > .5 && !REDUCE) b.el.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: 420, easing: EASE, composite: 'add' });
-  }
+// よけたいもの：ほかの席（札・プレート・ベット・ディーラーボタン）とポット・ボード
+function obstacles(seat) {
+  const out = [];
+  document.querySelectorAll('#seats .seat').forEach(s => {
+    if (s.id === 'seat' + seat) return;
+    for (const c of s.children) { const r = rect(c); if (r) out.push(r); }
+  });
+  for (const id of ['pot', 'boardC']) { const r = rect(document.getElementById(id)); if (r) out.push(r); }
+  return out;
 }
-function retire(b, quick, pushed, top0) {
+const M = 4, TAIL = 7;
+function place(b, placed) {
+  const L = layer(), a = anchorOf(b.seat), el = b.el;
+  if (!L || !a) { el.style.visibility = 'hidden'; return; }
+  // 幅はその席のプレートくらいまで（隣の席の上に広がらない。長い文は 3 行まで折り返す）。
+  // 上に余白が足りない席（横向きの上の段など）は横に広げて行を減らす（一度広げたらその吹き出しの間はそのまま）
+  const R = L.getBoundingClientRect(), room = a.top - R.top - TAIL - 2 - M;
+  const fitCap = () => { const cap = Math.round(b.wide ? Math.min(R.width - 2 * M, Math.max(a.pw * 2.4, 200)) : Math.max(a.pw * 1.15, 104, b.seat === (S.v && S.v.seat) ? Math.min(R.width * .62, 260) : 0));
+    if (Math.abs((b.cap || 0) - cap) > 1) { b.cap = cap; el.style.setProperty('--cbw', cap + 'px'); } };
+  fitCap();
+  if (!b.wide && el.offsetHeight > room) { b.wide = true; fitCap(); }
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const cx = (a.left + a.right) / 2 - R.left;
+  const y = Math.round(Math.max(M, a.top - R.top - h - TAIL - 2));
+  // 横の位置：しっぽが席を指せる範囲で、ほかの物との重なりが一番少ないところ（同じなら真ん中に近いところ）
+  const lo = Math.max(M, cx - w + 14), hi = Math.min(R.width - M - w, cx - 14), mid = Math.max(M, Math.min(R.width - M - w, cx - w / 2));
+  let x = mid;
+  if (hi > lo) {
+    // ほかの吹き出しとの重なりは席の物より重く見る
+    const obs = obstacles(b.seat).map(r => ({ l: r.left - R.left, r: r.right - R.left, t: r.top - R.top, b: r.bottom - R.top, k: 1 }))
+      .concat(placed || []).filter(o => o.b > y && o.t < y + h + TAIL);
+    if (obs.length) {
+      const cost = X => obs.reduce((sum, o) => sum + o.k * Math.max(0, Math.min(o.r, X + w) - Math.max(o.l, X)) * Math.max(0, Math.min(o.b, y + h + TAIL) - Math.max(o.t, y)), 0);
+      let best = cost(mid);
+      if (best > 0) for (let X = lo; X <= hi; X += 4) { const c = cost(X); if (c < best - 1 || (Math.abs(c - best) <= 1 && Math.abs(X - mid) < Math.abs(x - mid))) { best = c; x = X; } }
+    }
+  }
+  x = Math.round(x);
+  el.style.visibility = '';
+  el.style.translate = `${x}px ${y}px`;
+  el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(w - 10, cx - x))) + 'px');
+  if (placed && !b.gone) placed.push({ l: x, r: x + w, t: y, b: y + h + TAIL, k: 4 });
+}
+// 吹き出しがある間だけ毎フレーム席に合わせる（キーボードでの縮小・配り直し・向きの変化にそのまま付いていく）
+let raf = 0;
+function loop() { raf = 0; if (!live.length) return; const placed = []; for (const b of live) place(b, placed); raf = requestAnimationFrame(loop); }
+const kick = () => { if (!raf && live.length) raf = requestAnimationFrame(loop); };
+function retire(b, quick) {
   if (!b || b.gone) return;
-  const lane = $('#chatLane');
   clearTimeout(b.timer);
-  const before = pushed ? null : new Map(active().filter(x => x !== b).map(x => [x, x.el.offsetTop]));
   b.gone = true;
-  const el = b.el, top = top0 ?? el.offsetTop;
-  // 流れから外して今の位置に残し、薄くしながら少し上へ
-  el.style.position = 'absolute'; el.style.top = top + 'px'; el.style.left = '0'; el.style.right = '0';
-  el.style.marginInline = 'auto'; el.style.width = 'max-content'; el.style.maxWidth = '100%';
-  el.classList.add('gone');
+  const el = b.el; el.classList.add('gone');
   const done = () => { el.remove(); const k = live.indexOf(b); if (k >= 0) live.splice(k, 1); };
-  if (before) slide(before);
-  if (lane && !pushed) trim();
-  if (REDUCE || quick) { const a = el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: quick ? 160 : 300, fill: 'forwards' }); a.onfinish = done; setTimeout(done, 600); return; }
-  const a = el.animate([{ opacity: pushed ? .6 : 1, transform: 'none', filter: 'blur(0)' }, { opacity: 0, transform: 'translateY(-8px) scale(.98)', filter: 'blur(4px)' }],
-    { duration: pushed ? 420 : 620, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'forwards' });
+  const a = REDUCE || quick
+    ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: quick ? 160 : 300, fill: 'forwards' })
+    : el.animate([{ opacity: 1, transform: 'none', filter: 'blur(0)' }, { opacity: 0, transform: 'translateY(-8px) scale(.98)', filter: 'blur(4px)' }],
+      { duration: 620, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'forwards' });
   a.onfinish = done; setTimeout(done, 1000);
 }
 function clearBubbles() {
   for (const b of live) clearTimeout(b.timer);
   live.length = 0;
-  const lane = $('#chatLane'); if (lane) lane.innerHTML = '';
+  cancelAnimationFrame(raf); raf = 0;
+  const L = layer(); if (L) L.innerHTML = '';
 }
-// 送信者の席のプレートの縁を一瞬光らせる
-function ping(seat, mine) {
+// 送信者の席のプレートの縁を、その人の色で一瞬光らせる
+function ping(seat) {
   const s = document.getElementById('seat' + seat); if (!s || REDUCE) return;
-  s.classList.remove('cping', 'cping-y'); void s.offsetWidth;
-  s.classList.add('cping'); if (mine) s.classList.add('cping-y');
-  clearTimeout(s._cpT); s._cpT = setTimeout(() => s.classList.remove('cping', 'cping-y'), 1500);
+  s.classList.remove('cping', ...[...s.classList].filter(c => c.startsWith('t-'))); void s.offsetWidth;
+  s.classList.add('cping', 't-' + toneOf(seat));
+  clearTimeout(s._cpT); s._cpT = setTimeout(() => s.classList.remove('cping'), 1500);
 }
 
 /* ===================== fitTable との連携 ===================== */
-// レーンの大きさ：l2 = 吹き出し 2 つ、l1 = 1 つ（2 行まで）、off = 置けない（吹き出しは出さない）
-let mode = 'l2', modeKey = '';
-function setMode(m) {
-  const lane = $('#chatLane'); if (!lane) return;
-  lane.classList.toggle('l2', m === 'l2'); lane.classList.toggle('l1', m === 'l1'); lane.classList.toggle('top', m === 'top');
-  lane.style.display = m === 'off' ? 'none' : '';
-}
-// ベットが無い席にも同じ大きさの見えないチップを置いて、ベットが出ても配置が変わらないようにする（レーンとの判定だけに使う）
-function ghosts(add) {
-  if (!add) { document.querySelectorAll('#seats .bchip.ghost').forEach(e => e.remove()); return; }
-  document.querySelectorAll('#seats .seat').forEach(s => {
-    if (s.querySelector('.bchip')) return;
-    const g = document.createElement('div'); g.className = 'bchip ghost'; g.setAttribute('aria-hidden', 'true');
-    g.innerHTML = '<i></i><b>00,000</b>';
-    s.appendChild(g);
-  });
-}
 /** 測る間だけ、席のベットチップの入場アニメ（translateY・scale）を終わりの位置に置く（transform 込みの矩形で判定しないため） */
 export function settle(fn) {
   if (!S.on) return fn();
@@ -341,76 +358,22 @@ export function settle(fn) {
   }
   try { return fn(); } finally { for (const [a, t] of run) { try { a.currentTime = t; } catch (e) { /* 終わっていた */ } } }
 }
-/** fitTable の二分探索を包む。search() は今のレーンの状態で入る最大の --cw を返す */
+/** fitTable の二分探索を包む（入力ボタンの置き場所を決めてから測る） */
 export function fitLane(key, search) {
   placeBtn();   // 向きで置き場所（卓の中 / 右の列）が変わる
-  if (!S.on || !$('#chatLane')) return search();
-  return settle(() => fitLane1(key, search));
+  return S.on ? settle(search) : search();
 }
-function fitLane1(key, search) {
-  ghosts(true);
-  try {
-    if (key === modeKey) {
-      setMode(mode);
-      const c = search();
-      if (c > 14 || mode === 'top') return c;   // 入らなくなった（ベットや札の変化）：決め直す
-    }
-    {
-      modeKey = key;
-      setMode('off'); const c0 = search();
-      setMode('l2'); const c2 = search();
-      if (c2 >= c0 * .9 && c2 > 14) { mode = 'l2'; return c2; }
-      setMode('l1'); const c1 = search();
-      // 卓を小さくしすぎるなら、卓の中には置かず上の情報の行に 1 つずつ出す（小さい画面の 5〜6 人）
-      const ok = c => c >= Math.max(20, c0 * .72);
-      // キーボードの開閉の間は卓の中のレーンを保つ（情報の行へ切り替えると吹き出しが 1 フレームで飛ぶ）。小さすぎれば viewport.js が卓を縮小表示にする
-      if (document.body.classList.contains('kb') && mode !== 'top') mode = c1 > c2 ? 'l1' : 'l2';
-      else mode = ok(c1) ? 'l1' : ok(c2) ? 'l2' : 'top';
-      setMode(mode);
-      return mode === 'l1' ? c1 : mode === 'l2' ? c2 : search();
-    }
-  } finally { ghosts(false); }
-}
-/** fits() の追加の判定：入力ボタンとレーンが卓の中にあり、どの席・真ん中・ベット（見えないものも）とも重ならない。
- *  レーンの幅は、レーンの高さの帯に入る物を左右に避けて中央から広げられるだけ（最大は CSS の幅、最小は短い文が 1 行に入る幅） */
+/** fits() の追加の判定：卓の中の入力ボタンが卓からはみ出さず、どの席・真ん中・ベットとも重ならない */
 export function fitsLane(T0, G, rectOf, hit) {
   if (!S.on) return true;
-  const btn = $('#chatBtn'), lane = $('#chatLane'), B = btn && btn.parentNode === $('#table') ? rectOf(btn) : null;   // 横向きは右の列（卓の外）
-  const others = G.flat().concat([...document.querySelectorAll('#seats .bchip.ghost')].map(rectOf).filter(Boolean));
-  const inside = r => r.l >= T0.left - 1 && r.r <= T0.right + 1 && r.t >= T0.top - 1 && r.b <= T0.bottom + 1;
-  if (B) { if (!inside(B)) return false; for (const g of others) if (hit(B, g, 4)) return false; }
-  if (!lane || lane.hidden || lane.style.display === 'none' || lane.classList.contains('top')) return true;
-  lane.style.width = ''; lane.style.setProperty('--lane-dy', '0px');
-  const L = rectOf(lane); if (!L) return true;
-  if (L.l < T0.left - 1 || L.r > T0.right + 1 || L.t < T0.top - 1) return false;
-  const cx = (L.l + L.r) / 2, h = L.b - L.t, obs = B ? others.concat([B]) : others;
-  const cf = parseFloat(getComputedStyle(lane).getPropertyValue("--cf")) || 12, min = cf * 8 + 14;
-  // 盤のすぐ下から自分の札へ向かって下げていき、最初に十分な幅が取れた高さに置く
-  for (let dy = 0; L.b + dy <= T0.bottom + 1; dy += 3) {
-    const t = L.t + dy, b = L.b + dy;
-    let half = (L.r - L.l) / 2, blocked = false;
-    for (const g of obs) {
-      if (g.b <= t - 4 || g.t >= b + 4) continue;
-      if (g.r <= cx) half = Math.min(half, cx - g.r - 6);
-      else if (g.l >= cx) half = Math.min(half, g.l - cx - 6);
-      else { blocked = true; break; }
-    }
-    if (blocked) { if (dy > 0) return false; continue; }   // 真ん中をふさぐもの（自分の席）に当たった：これより下は無い
-    if (half * 2 >= min) {
-      lane.style.width = Math.floor(half * 2) + 'px';
-      if (dy) lane.style.setProperty('--lane-dy', dy + 'px');
-      return h > 0;
-    }
-  }
-  return false;
+  const btn = $('#chatBtn'), B = btn && btn.parentNode === $('#table') ? rectOf(btn) : null;   // 横向きは右の列（卓の外）
+  if (!B) return true;
+  if (B.l < T0.left - 1 || B.r > T0.right + 1 || B.t < T0.top - 1 || B.b > T0.bottom + 1) return false;
+  for (const g of G.flat()) if (hit(B, g, 4)) return false;
+  return true;
 }
-// キーボードで卓を縮小表示にする間は、レーンの置き方を元のまま保つ（viewport.js が測ったあとで戻す）
-viewportHooks({
-  laneSave: () => ({ mode, modeKey }),
-  laneLoad: x => { if (!x) return; mode = x.mode; modeKey = x.modeKey; setMode(mode); },
-});
-/** 配置が変わったあと（レーンの大きさが変わったら入らない吹き出しを押し出す） */
-export function afterFit() { placeBtn(); if (S.on && live.length) trim(); }
+/** 配置が変わったあと */
+export function afterFit() { placeBtn(); kick(); }
 
 // 入力ボタンの場所：縦向き・PC は卓の左下（#table の中。fits() が席と重ならないことを保証する）。
 // 横向き（body.land）は右の列でドックのすぐ下（入らなければすぐ上。どちらも無理なら隠す）。tinfo・ドック・ヘッダとは重ならない
@@ -439,4 +402,4 @@ if (window.ResizeObserver) {
   for (const id of ['stage', 'dock']) { const e = document.getElementById(id); if (e) ro.observe(e); }
 }
 
-if (import.meta.env && import.meta.env.DEV) window.__chat = { S, live, get mode() { return mode; }, bubble: m => bubble(m) };
+if (import.meta.env && import.meta.env.DEV) window.__chat = { S, live, bubble: m => bubble(m) };

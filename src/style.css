@@ -701,10 +701,10 @@ dialog.glass-dlg:not([open])::backdrop{opacity:0;transition-duration:.16s}
 .cm-list{list-style:none;margin:0;padding:0}
 .dlg .cm{position:relative;margin-top:12px;padding:0 0 2px 12px;font-size:14px;line-height:1.5;color:var(--ink)}
 .dlg .cm.cont{margin-top:0;padding-top:4px}
-.cm::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--cpu)}
+.cm::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--tone,var(--cpu))}
 .cm.mine::before{background:var(--you)}
 .cm-h{display:flex;align-items:center;gap:8px;min-width:0}
-.cm-n{min-width:0;max-width:14em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 6px;font-size:11px;font-weight:700;line-height:1.5;background:var(--cpu);color:var(--cpu-ink)}
+.cm-n{min-width:0;max-width:14em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 6px;font-size:11px;font-weight:700;line-height:1.5;background:var(--tone,var(--cpu));color:var(--tone-ink,var(--cpu-ink))}
 .cm.mine .cm-n{background:var(--you);color:#fff;font-family:var(--f-num);letter-spacing:.08em}
 .cm-h time{flex:none;font-family:var(--f-num);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .dlg .cm-t{margin:3px 0 0;font-size:14px;line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
@@ -758,44 +758,34 @@ dialog.glass-dlg:not([open])::backdrop{opacity:0;transition-duration:.16s}
   .glass-dlg .x{top:4px;right:4px;width:28px;height:28px}
 }
 
-/* ===== table chat (PRIVATE only) : bubbles lane, chat button, composer, keyboard — src/ui/chat.js, src/ui/viewport.js ===== */
+/* ===== table chat (PRIVATE only) : bubbles over the speakers, chat button, composer, keyboard — src/ui/chat.js, src/ui/viewport.js ===== */
 :root{--cb-bg:rgba(255,255,255,.86);--cb-edge:rgba(255,255,255,.95);--cb-ink:#0D0F13;--cb-shadow:0 14px 28px -16px rgba(22,26,44,.6),0 1px 3px -1px rgba(22,26,44,.2)}
 @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--cb-bg:rgba(32,35,43,.86);--cb-edge:rgba(255,255,255,.16);--cb-ink:#F1F2F5;--cb-shadow:0 14px 30px -14px rgba(0,0,0,.95),0 1px 3px -1px rgba(0,0,0,.5)} }
 :root[data-theme="dark"]{--cb-bg:rgba(32,35,43,.86);--cb-edge:rgba(255,255,255,.16);--cb-ink:#F1F2F5;--cb-shadow:0 14px 30px -14px rgba(0,0,0,.95),0 1px 3px -1px rgba(0,0,0,.5)}
-/* the lane : between the board and the hero's cards (fitTable keeps it clear of every seat, bet and the board).
-   It lies over the table's grid area (not inside #table) so it keeps its size when the table is scaled down for the keyboard */
-.chat-lane{grid-area:table;position:absolute;z-index:4;left:50%;transform:translateX(-50%);width:min(56%,calc(var(--cw)*8 + 80px));height:var(--lane-h);padding-bottom:6px;
-  --cf:clamp(12px,calc(var(--cw)*.3),15px);--lgap:max(6px,calc(var(--cw)*.16));--lane-h:calc(var(--cf)*4.1 + 15px);
-  --k:calc(var(--kbm,0)*var(--kbm,0));top:calc((50% + var(--cw)*.69 + var(--lgap) + var(--lane-dy,0px))*(1 - var(--k)) + (100% - var(--lane-h))*var(--k));
-  display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;pointer-events:none}
-.chat-lane[hidden]{display:none}
-.chat-lane.l1{--lane-h:calc(var(--cf)*3.45 + 9px)}
-/* no room on the table (small phones, 5–6 players) : one bubble at a time over the info row, which steps aside meanwhile */
-.chat-lane.top{grid-area:info;top:0;height:100%;width:100%!important;padding-bottom:0;justify-content:center;--cf:12px}
-.chat-lane.top .cb{padding:3px 8px 3px 6px}
-body.land[data-screen="game"] .chat-lane.top{top:58px;height:calc(100% - 58px)}   /* below the header, like .tinfo */
-.chat-lane.top .cb-in{-webkit-line-clamp:1;line-height:1.3}
-.chat-lane.top .cb::after{display:none}
-.tinfo{transition:opacity .35s cubic-bezier(.2,.8,.2,1)}
-.stage:has(.chat-lane.top .cb:not(.gone)) .tinfo{opacity:0}
-.cb{position:relative;flex:none;max-width:100%;color:var(--cb-ink);background:var(--cb-bg);
-  border:1px solid var(--cb-edge);border-left:3px solid var(--cpu);box-shadow:var(--cb-shadow),inset 0 1px 0 var(--cb-edge);
-  -webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);
-  padding:calc(var(--cf)*.3) calc(var(--cf)*.7) calc(var(--cf)*.34) calc(var(--cf)*.5);transition:opacity .45s cubic-bezier(.2,.8,.2,1)}
-.cb.you{border-left-color:var(--you);background:linear-gradient(var(--you-soft),var(--you-soft)),var(--cb-bg)}
-.cb::after{content:"";position:absolute;left:-3px;top:100%;width:7px;height:6px;background:var(--cpu);clip-path:polygon(0 0,100% 0,0 100%);transition:opacity .3s}
-.cb.you::after{background:var(--you)}
-.cb.old{opacity:.62}
-.cb.old::after,.cb.gone::after{opacity:0}
-.cb-in{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:var(--cf);line-height:1.4;font-weight:500;overflow-wrap:anywhere;-webkit-user-select:text;user-select:text}
-.cb-n{display:inline-block;max-width:8em;margin-right:.5em;padding:0 .4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top;margin-top:.24em;
-  font-family:var(--f-num);font-size:.72em;font-weight:700;letter-spacing:.05em;line-height:1.5;background:var(--cpu);color:var(--cpu-ink)}
-.cb.you .cb-n{background:var(--you);color:#fff}
+/* speaker colours : YOU and the other seats in order from the hero (1 = next to the left …). Bubbles, the chat log and the seat's flash share them */
+:root{--pc1:#FE7A47;--pc1-ink:#2B1206;--pc2:#F0B429;--pc2-ink:#2A1C00;--pc3:#34B286;--pc3-ink:#03251A;--pc4:#9B80E8;--pc4-ink:#150A33;--pc5:#EE6D96;--pc5-ink:#300716}
+.t-you{--tone:var(--you);--tone-ink:#fff}
+.t-p1{--tone:var(--pc1);--tone-ink:var(--pc1-ink)}.t-p2{--tone:var(--pc2);--tone-ink:var(--pc2-ink)}.t-p3{--tone:var(--pc3);--tone-ink:var(--pc3-ink)}
+.t-p4{--tone:var(--pc4);--tone-ink:var(--pc4-ink)}.t-p5{--tone:var(--pc5);--tone-ink:var(--pc5-ink)}
+/* bubbles : a layer over the stage (outside #table, so they keep their size when the table is scaled down for the keyboard).
+   chat.js places each one right above its speaker's cards every frame while it is shown */
+.chat-bubbles{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden;--cf:clamp(12px,calc(var(--cw)*.3),14.5px)}
+.chat-bubbles[hidden]{display:none}
+/* the table is scaled down for the keyboard : the bubbles shrink a little with it, never below 11px */
+body.kbmin .chat-bubbles{--cf:max(11px,calc(clamp(12px,calc(var(--cw)*.3),14.5px)*(1 - (1 - var(--ts1,1))*var(--kbm,0))))}
+.cb{position:absolute;left:0;top:0;width:max-content;max-width:min(var(--cbw,15.5em),calc(100% - 8px));color:var(--cb-ink);background:var(--cb-bg);
+  border:1px solid var(--cb-edge);border-left:3px solid var(--tone,var(--cpu));box-shadow:var(--cb-shadow),inset 0 1px 0 var(--cb-edge);
+  -webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);font-size:var(--cf);
+  padding:calc(var(--cf)*.3) calc(var(--cf)*.7) calc(var(--cf)*.34) calc(var(--cf)*.5);transform-origin:var(--tx,50%) 100%}
+.cb.t-you{background:linear-gradient(var(--you-soft),var(--you-soft)),var(--cb-bg)}
+/* the tail points down at the speaker (--tx = the speaker's centre within the bubble) */
+.cb::after{content:"";position:absolute;left:calc(var(--tx,50%) - 6px);top:100%;width:12px;height:7px;background:var(--tone,var(--cpu));clip-path:polygon(0 0,100% 0,50% 100%)}
+.cb-in{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;line-height:1.4;font-weight:500;overflow-wrap:anywhere}
+.cb-n{display:inline-block;max-width:7em;margin-right:.5em;padding:0 .4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top;margin-top:.24em;
+  font-family:var(--f-num);font-size:.72em;font-weight:700;letter-spacing:.05em;line-height:1.5;background:var(--tone,var(--cpu));color:var(--tone-ink,var(--cpu-ink))}
 /* who spoke : the plate's edge lights up once in the speaker's colour */
 .seat.cping .sp{animation:cping 1.5s cubic-bezier(.2,.8,.2,1)}
-.seat.cping-y .sp{animation-name:cpingY}
-@keyframes cping{0%{box-shadow:0 0 0 0 rgba(254,122,71,0),var(--shadow)}16%{box-shadow:0 0 0 2px var(--cpu),0 0 20px 2px rgba(254,122,71,.5),var(--shadow)}100%{box-shadow:0 0 0 0 rgba(254,122,71,0),var(--shadow)}}
-@keyframes cpingY{0%{box-shadow:0 0 0 0 rgba(51,107,135,0),var(--shadow)}16%{box-shadow:0 0 0 2px var(--you),0 0 20px 2px rgba(51,107,135,.5),var(--shadow)}100%{box-shadow:0 0 0 0 rgba(51,107,135,0),var(--shadow)}}
+@keyframes cping{0%{box-shadow:0 0 0 0 transparent,var(--shadow)}16%{box-shadow:0 0 0 2px var(--tone,var(--cpu)),0 0 20px 2px color-mix(in srgb,var(--tone,var(--cpu)) 50%,transparent),var(--shadow)}100%{box-shadow:0 0 0 0 transparent,var(--shadow)}}
 /* the chat button : bottom-left corner of the table, just above the dock (fitTable keeps it clear of the seats) */
 .chat-btn{--cbs:clamp(44px,calc(var(--cw)*1.05),52px);position:absolute;z-index:4;left:0;bottom:0;width:var(--cbs);height:var(--cbs);padding:0;display:grid;place-items:center;cursor:pointer;color:var(--ink);
   background:linear-gradient(160deg,var(--glass-hi),var(--glass-lo));border:1px solid var(--edge);box-shadow:var(--shadow),inset 0 1px 0 var(--edge);
@@ -836,6 +826,29 @@ body.land .dock.cz{position:relative}
 body.kb .top{padding-top:calc(var(--tp0,10px)*(1 - var(--kbp,0)) + 3px*var(--kbp,0));padding-bottom:calc(var(--tb0,10px)*(1 - var(--kbp,0)) + 3px*var(--kbp,0))}
 body.land .dock{min-height:calc(128px - 40px*var(--kbp,0))}
 /* no room for a usable table (phones with the keyboard up) : the table keeps its layout and is scaled down into the space above
-   the lane, a little faded; the composer and the latest bubbles stay at full size */
+   the composer, a little faded; the composer and the bubbles stay at full size */
 body.kbmin .table{height:var(--t0h);max-height:none;align-self:start;transform-origin:50% 0;
   transform:scale(calc(1 - (1 - var(--ts1,1))*var(--kbm,0)));opacity:calc(1 - .3*var(--kbm,0))}
+
+/* ===== demo keyboard (viewport.js) : stands in for the phone's keyboard where there is none (?demo on a PC, ?kb=sim). It takes
+   off the visible height and its top edge follows the frame's bottom through the glide (viewport.js sets the transform) ===== */
+:root{--skb-bg:#D1D4DA;--skb-key:#FFFFFF;--skb-fn:#ADB2BD;--skb-ink:#0D0F13;--skb-shade:rgba(13,15,19,.3);--skb-mute:rgba(13,15,19,.45)}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--skb-bg:#26272B;--skb-key:#5E5F63;--skb-fn:#3D3E42;--skb-ink:#F4F5F7;--skb-shade:rgba(0,0,0,.7);--skb-mute:rgba(255,255,255,.4)} }
+:root[data-theme="dark"]{--skb-bg:#26272B;--skb-key:#5E5F63;--skb-fn:#3D3E42;--skb-ink:#F4F5F7;--skb-shade:rgba(0,0,0,.7);--skb-mute:rgba(255,255,255,.4)}
+.simkb{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-direction:column;background:var(--skb-bg);border-top:1px solid var(--hair);
+  color:var(--skb-ink);font-family:var(--f-ui);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;cursor:default;
+  transform:translateY(100%);visibility:hidden;will-change:transform}
+.skb-bar{flex:0 0 clamp(26px,14%,42px)}
+.skb-keys{flex:1 1 0;min-height:0;width:min(100%,560px);margin:0 auto;padding:0 6px;display:grid;gap:6px;
+  grid-template-columns:1fr 1.3fr 1.3fr 1.3fr 1fr;grid-template-rows:repeat(4,minmax(0,1fr))}
+.skb-k{display:grid;place-items:center;min-width:0;background:var(--skb-key);box-shadow:0 1px 0 var(--skb-shade);
+  font-style:normal;font-size:clamp(15px,4.4vh,21px);line-height:1;white-space:nowrap;overflow:hidden;transition:background .08s}
+.skb-k.fn{background:var(--skb-fn);font-family:var(--f-num);font-size:clamp(11px,2.6vh,14px);font-weight:500}
+.skb-k.tall{grid-row:span 2}
+.skb-k.hit{background:var(--skb-fn)}
+.skb-k.fn.hit{background:var(--skb-key)}
+.skb-home{flex:0 0 auto;height:calc(30px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:flex-start;padding:6px 26px 0}
+.skb-home svg{width:24px;height:24px;fill:none;stroke:var(--skb-mute);stroke-width:1.6}
+.simkb.land .skb-bar{flex-basis:clamp(18px,12%,32px)}
+.simkb.land .skb-home{height:calc(8px + env(safe-area-inset-bottom,0px));padding:0}
+.simkb.land .skb-home svg{display:none}
