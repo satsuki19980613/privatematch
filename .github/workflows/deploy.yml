@@ -99,6 +99,25 @@ jobs:
             git commit -m "chore(deploy): 本番の Neon の住所を更新"
             git push origin HEAD:main
           fi
+      - name: 疎通の確認（Function・Data API・サイトのログイン中継）
+        if: steps.cfg.outputs.ready == 'true' && env.TARGET == 'production'
+        env:
+          DATA_URL: ${{ steps.neon.outputs.data_url }}
+          GAME_URL: ${{ steps.fn.outputs.game_url }}
+        run: |
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          g=$(code -X POST -H "Origin: $APP_ORIGIN" -d '{}' "$GAME_URL"); echo "Function game（トークン無し → 401 が正しい）: $g"
+          d=$(code -X POST -H 'Content-Type: application/json' -d '{}' "$DATA_URL/rpc/me"); echo "Data API me（トークン無し → 401 が正しい）: $d"
+          s=000
+          for i in $(seq 1 30); do s=$(code "$APP_ORIGIN/api/auth/ok"); [ "$s" = 200 ] && break; sleep 10; done
+          echo "サイトのログイン中継 /api/auth/ok（200 が正しい。Cloudflare のビルド待ちで最大 5 分）: $s"
+          {
+            echo "### 疎通"
+            echo "- Function game: $g（401 で正常）"
+            echo "- Data API: $d（401 で正常）"
+            echo "- $APP_ORIGIN/api/auth/ok: $s（200 で正常）"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$g" = 401 ] && [ "$s" = 200 ] || { echo "::error::疎通の確認に失敗しました"; exit 1; }
       - name: まとめ
         if: steps.cfg.outputs.ready == 'true'
         run: |
