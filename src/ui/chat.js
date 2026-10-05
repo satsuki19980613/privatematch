@@ -172,7 +172,10 @@ function ensureComposer() {
   i.addEventListener('compositionend', () => { composing = false; clipInput(); });
   i.addEventListener('input', () => { if (!composing) clipInput(); syncLeft(); });
   i.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeComposer(); return; }
+    if (e.key === 'Escape') {
+      if (e.isComposing || e.keyCode === 229 || composing) return;   // IME の変換の取り消し
+      e.preventDefault(); e.stopPropagation(); closeComposer(); return;
+    }
     if (e.key === 'Enter') {
       if (e.isComposing || e.keyCode === 229 || composing) return;   // IME の確定は送信しない
       e.preventDefault(); send();
@@ -188,7 +191,7 @@ function clipInput() {
 function syncLeft() {
   const el = $('#czLeft'), i = $('#chatIn'); if (!el || !i) return;
   const left = CHAT_MAX_UNITS - chatUnits(i.value);
-  el.textContent = String(left);
+  el.textContent = String(Math.max(0, left));   // IME の変換中は切らないので一時的に超えることがある
   el.classList.toggle('low', left <= 6);
   const send = $('#czSend'); if (send) send.disabled = S.sending || !normalizeChat(i.value);
 }
