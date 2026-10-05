@@ -185,12 +185,14 @@ export function openHand(g, h) {
   for (let st = 0; st <= lastStreet; st++) {
     const acts = h.actions.filter(a => a.street === st);
     const board = st === 0 ? '' : h.board.slice(0, [0, 3, 4, 5][st]).map(c => cardHTML(c)).join('');
-    const posts = st === 0 ? `<li class="post">Ante ${fmt(h.ante)} ・ ${h.sbSeat != null ? `${name(h.sbSeat)} SB ${fmt(Math.min(h.sb, forced[h.sbSeat]))} ・ ` : 'SB なし ・ '}${name(h.bbSeat)} BB ${fmt(h.bb)}</li>` : '';
+    // 実際に出したブラインド（ショートのときは足りない額。アンティの分は除く）
+    const blind = s => forced[s] - Math.min(h.startStacks[s], h.ante);
+    const posts = st === 0 ? `<li class="post">Ante ${fmt(h.ante)} ・ ${h.sbSeat != null ? `${name(h.sbSeat)} SB ${fmt(blind(h.sbSeat))} ・ ` : 'SB なし ・ '}${name(h.bbSeat)} BB ${fmt(blind(h.bbSeat))}</li>` : '';
     streets.push(`<div class="hd-street"><div class="hd-sh"><b>${STREET_NAMES[st]}</b><span>POT ${fmtBb(pots[st], bb)} BB</span></div>
       ${board ? `<div class="hd-board">${board}</div>` : ''}
       <ul class="hd-acts">${posts}${acts.map(a => `<li><span class="nm2">${name(a.seat)}</span><span class="pl k-${esc(a.kind)}">${esc(actionText(a))}</span>${a.auto ? '<small>auto</small>' : ''}</li>`).join('')}</ul></div>`);
   }
-  const res = h.pots.map((p, i) => `<li>${h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
+  const res = h.pots.map((p, i) => `<li>${p.eligible && p.eligible.length === 1 && i > 0 ? 'Uncalled ' : h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
   $('#handBody').innerHTML = head(`HAND #${fmt(h.handNo)} ・ LV ${fmt(h.level)} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}`) +
     `<table class="tbl hd-tbl"><thead><tr><th>POS</th><th>NAME</th><th>STACK</th><th>CARDS</th><th>NET</th></tr></thead><tbody>${players}</tbody></table>
     ${streets.join('')}
