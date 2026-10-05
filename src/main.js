@@ -6,6 +6,7 @@ import { renderMenu, setPane, openJoin } from './ui/menu.js';
 import * as room from './ui/room.js';
 import * as table from './ui/table.js';
 import * as stats from './ui/stats.js';
+import * as ingame from './ui/ingame.js';
 import { openRules } from './ui/rules.js';
 import { syncRecent } from './history/sync.js';
 
@@ -20,7 +21,7 @@ function showScreen(n) {
   if (n !== 'game') document.body.classList.remove('land');
 }
 function toMenu() {
-  table.leave(); room.stop(); closeAllDlg(); stats.invalidate();
+  ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate();
   showScreen('menu'); setPane('main');
   if (app.user) refreshMe();
 }
@@ -74,6 +75,7 @@ function takeInvite() {
 /* ---------- ヘッダ・ダイアログ ---------- */
 $('#rulesBtn').addEventListener('click', openRules);
 $('#leaveBtn').addEventListener('click', table.askLeave);
+ingame.init(); // チャット履歴・ハンド履歴のボタンとモーダル
 $('#themeToggle').addEventListener('click', () => {
   const r = document.documentElement, cur = r.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'), next = cur === 'dark' ? 'light' : 'dark';
   r.dataset.theme = next; localSet('pm-theme', next);

@@ -644,3 +644,198 @@ body.land .pre,body.land .pre.away-btn{margin-left:0}
 @media (max-width:340px){.dock.idle{gap:8px;padding-inline:10px}.dock.idle .dk-title{min-width:2.5em;flex:1 1 0}.pre.away-btn{margin-left:0}}
 /* demo (?demo) */
 body.demo .brand span::after{content:"DEMO";margin-left:8px;padding:2px 6px;font-size:10px;letter-spacing:.14em;font-weight:700;background:var(--cpu);color:#fff;vertical-align:2px}
+
+/* ===== in game : header buttons (chat log / hand history) + glass modals (#chatDlg / #handsDlg) — src/ui/ingame.js ===== */
+:root{--gd-bg:linear-gradient(160deg,rgba(255,255,255,.7),rgba(255,255,255,.42));--gd-edge:rgba(255,255,255,.95);--gd-line:rgba(13,15,19,.09);--gd-row:rgba(255,255,255,.45);
+  --gd-shadow:0 40px 80px -34px rgba(22,26,44,.55),0 2px 8px -2px rgba(22,26,44,.1);--gd-veil:rgba(12,14,20,.14)}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--gd-bg:linear-gradient(160deg,rgba(44,48,58,.62),rgba(14,16,21,.6));--gd-edge:rgba(255,255,255,.16);
+  --gd-line:rgba(255,255,255,.08);--gd-row:rgba(255,255,255,.05);--gd-shadow:0 40px 80px -30px rgba(0,0,0,.85);--gd-veil:rgba(0,0,0,.32)} }
+:root[data-theme="dark"]{--gd-bg:linear-gradient(160deg,rgba(44,48,58,.62),rgba(14,16,21,.6));--gd-edge:rgba(255,255,255,.16);
+  --gd-line:rgba(255,255,255,.08);--gd-row:rgba(255,255,255,.05);--gd-shadow:0 40px 80px -30px rgba(0,0,0,.85);--gd-veil:rgba(0,0,0,.32)}
+
+/* header buttons : same family as the theme toggle (square, hairline) */
+.hbtn{position:relative;flex:none;width:2rem;height:2rem;padding:0;display:grid;place-items:center;border:1px solid var(--hair-2);background:transparent;color:var(--ink);cursor:pointer;
+  transition:border-color .3s cubic-bezier(.2,.8,.2,1),background .2s,transform .12s}
+.hbtn[hidden],.hbtn .badge[hidden]{display:none}
+.hbtn svg{width:15px;height:15px}
+@media (hover:hover){.hbtn:hover{border-color:var(--ink);background:var(--glass-lo)}}
+.hbtn:active{transform:scale(.94)}
+.hbtn .badge{position:absolute;top:-4px;right:-4px;width:9px;height:9px;background:var(--cpu);box-shadow:0 0 0 2px var(--bg);pointer-events:none}
+@media (pointer:coarse){.hbtn{width:40px;height:40px}.hbtn svg{width:17px;height:17px}}
+/* in play the right column keeps its buttons; the brand gives way (it disappears rather than running under the nav pill) */
+body:not(.land) .navpill{grid-column:2}
+body:not(.land) .top-r{grid-column:3}
+body[data-screen="game"] .top{grid-template-columns:minmax(0,1fr) auto minmax(max-content,1fr)}
+body[data-screen="game"] .brand{container-type:inline-size;overflow:hidden}
+@container (max-width:112px){ .brand span{display:none} }
+@container (max-width:168px){ body.demo .brand span{display:none} }
+/* landscape : the header sits above the right column (250px) */
+body.land[data-screen="game"] .top-r{gap:4px}
+body.land[data-screen="game"] .hbtn,body.land[data-screen="game"] .theme-toggle{width:34px;height:34px}
+
+/* glass modal : opens from the centre (scale + fade + a little blur clearing), closes quickly */
+dialog.glass-dlg{--gd-max:min(80dvh,calc(var(--app-h,100dvh)*.8));max-width:min(520px,94vw);max-height:var(--gd-max);color:var(--ink);background:var(--gd-bg);
+  -webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);
+  border:1px solid var(--gd-edge);box-shadow:var(--gd-shadow),inset 0 1px 0 var(--gd-edge);
+  opacity:1;transform:none;filter:none;
+  transition:opacity .28s cubic-bezier(.2,.8,.2,1),transform .34s cubic-bezier(.2,.8,.2,1),filter .34s cubic-bezier(.2,.8,.2,1),overlay .18s allow-discrete,display .18s allow-discrete}
+dialog.glass-dlg:not([open]){opacity:0;transform:scale(.97);filter:blur(3px);transition-duration:.16s}
+@starting-style{dialog.glass-dlg[open]{opacity:0;transform:scale(.96);filter:blur(6px)}}
+dialog.glass-dlg::backdrop{background:var(--gd-veil);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);opacity:1;
+  transition:opacity .28s ease,overlay .18s allow-discrete,display .18s allow-discrete}
+dialog.glass-dlg:not([open])::backdrop{opacity:0;transition-duration:.16s}
+@starting-style{dialog.glass-dlg[open]::backdrop{opacity:0}}
+@media (prefers-reduced-motion:reduce){dialog.glass-dlg,dialog.glass-dlg::backdrop{transition:none}}
+.glass-dlg .x{background:transparent}
+.glass-dlg .dlg{display:flex;flex-direction:column;max-height:var(--gd-max);overflow:hidden;padding:0}
+.gd-head{flex:none;padding:22px 22px 12px;border-bottom:1px solid var(--gd-line)}
+.gd-head h2{margin-bottom:0}
+.gd-scroll{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding:4px 22px 14px}
+.gd-foot{flex:none;padding:10px 22px 16px;border-top:1px solid var(--gd-line)}
+.gd-empty{display:grid;place-items:center;min-height:120px;font-family:var(--f-num);font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.gd-empty .dots{margin:0}
+.gd-write{min-height:42px;width:100%;grid-auto-flow:column;align-items:center;gap:8px;font-family:var(--f-num);letter-spacing:.04em}
+.gd-write svg{width:15px;height:15px}
+
+/* chat log */
+.cm-list{list-style:none;margin:0;padding:0}
+.dlg .cm{position:relative;margin-top:12px;padding:0 0 2px 12px;font-size:14px;line-height:1.5;color:var(--ink)}
+.dlg .cm.cont{margin-top:0;padding-top:4px}
+.cm::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--cpu)}
+.cm.mine::before{background:var(--you)}
+.cm-h{display:flex;align-items:center;gap:8px;min-width:0}
+.cm-n{min-width:0;max-width:14em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 6px;font-size:11px;font-weight:700;line-height:1.5;background:var(--cpu);color:var(--cpu-ink)}
+.cm.mine .cm-n{background:var(--you);color:#fff;font-family:var(--f-num);letter-spacing:.08em}
+.cm-h time{flex:none;font-family:var(--f-num);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.dlg .cm-t{margin:3px 0 0;font-size:14px;line-height:1.55;color:var(--ink);overflow-wrap:anywhere}
+
+/* this game's hands */
+.gd-sum{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:6px;font-family:var(--f-num);font-weight:600;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+.gd-sum:empty{display:none}
+.gd-sum i{font-style:normal;margin-left:4px;font-size:10px;font-weight:600;letter-spacing:.12em;color:var(--muted)}
+.dlg .gh-list{list-style:none;margin:0 -8px;padding:0}
+.gh-row{width:100%;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;grid-template-areas:"no lv pos net" "cards cards cards net";gap:5px 10px;align-items:center;
+  padding:10px 8px;border:0;border-bottom:1px solid var(--gd-line);background:none;text-align:left;cursor:pointer;transition:background .15s}
+.gh-row:hover{background:var(--gd-row)}
+.gh-row:focus-visible{outline-offset:-2px}
+.gh-no{grid-area:no;font-family:var(--f-num);font-weight:600;font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums}
+.gh-lv{grid-area:lv;font-family:var(--f-num);font-size:11px;color:var(--muted);white-space:nowrap}
+.gh-lv b{font-weight:600;color:var(--ink-2)}
+.gh-pos{grid-area:pos;font-family:var(--f-num);font-weight:700;font-size:10px;letter-spacing:.08em;color:var(--ink-2)}
+.gh-net{grid-area:net;display:grid;justify-items:end;font-family:var(--f-num);font-weight:600;font-size:15px;line-height:1.25;font-variant-numeric:tabular-nums;color:var(--muted)}
+.gh-net small{font-size:10px;font-weight:500;color:var(--muted)}
+.gh-net.gain{color:var(--you-text)}.gh-net.loss{color:var(--cpu-text)}
+.gd-scroll:focus{outline:none}
+.gh-cards{grid-area:cards;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden}
+.gh-hole,.gh-board{display:flex;gap:2px;flex:none}
+.gh-board{padding-left:8px;border-left:1px solid var(--gd-line)}
+.gh-row .ct{display:inline-grid;place-items:center;min-width:25px;height:22px;margin:0;padding:0 3px;font-size:12px;letter-spacing:-.02em;
+  background:linear-gradient(160deg,#FFFFFF,#F1F3F8);color:var(--card-ink);box-shadow:0 0 0 1px rgba(13,15,19,.1)}
+.gh-row .ct.red{color:var(--card-red)}
+.gh-row .ct.none{background:none;box-shadow:none;color:var(--muted)}
+.gh-board .ct{opacity:.86}
+
+@media (max-width:420px){
+  .gd-head{padding:18px 16px 10px}
+  .gd-scroll{padding:2px 16px 12px}
+  .gd-foot{padding:8px 16px 14px}
+  .gh-row{gap:5px 8px}
+  .gh-row .ct{min-width:22px;height:20px;font-size:11px}
+}
+@media (max-height:500px){
+  .gd-head{padding:12px 16px 8px}
+  .gd-head h2{font-size:18px}
+  .gd-sum{font-size:13px;margin-top:2px}
+  .gd-empty{min-height:72px}
+  .gd-foot{padding:6px 16px 10px}
+  .gd-write{min-height:36px}
+}
+@media (max-height:320px){
+  dialog.glass-dlg{--gd-max:min(92dvh,calc(var(--app-h,100dvh)*.92))}
+  .gd-head{padding:8px 16px 6px}
+  .gd-head .eyebrow,.gd-sum{display:none}
+  .gd-head h2{font-size:16px;margin:0}
+  .glass-dlg .x{top:4px;right:4px;width:28px;height:28px}
+}
+
+/* ===== table chat (PRIVATE only) : bubbles lane, chat button, composer, keyboard — src/ui/chat.js, src/ui/viewport.js ===== */
+:root{--cb-bg:rgba(255,255,255,.86);--cb-edge:rgba(255,255,255,.95);--cb-ink:#0D0F13;--cb-shadow:0 14px 28px -16px rgba(22,26,44,.6),0 1px 3px -1px rgba(22,26,44,.2)}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--cb-bg:rgba(32,35,43,.86);--cb-edge:rgba(255,255,255,.16);--cb-ink:#F1F2F5;--cb-shadow:0 14px 30px -14px rgba(0,0,0,.95),0 1px 3px -1px rgba(0,0,0,.5)} }
+:root[data-theme="dark"]{--cb-bg:rgba(32,35,43,.86);--cb-edge:rgba(255,255,255,.16);--cb-ink:#F1F2F5;--cb-shadow:0 14px 30px -14px rgba(0,0,0,.95),0 1px 3px -1px rgba(0,0,0,.5)}
+/* the lane : between the board and the hero's cards (fitTable keeps it clear of every seat, bet and the board).
+   It lies over the table's grid area (not inside #table) so it keeps its size when the table is scaled down for the keyboard */
+.chat-lane{grid-area:table;position:absolute;z-index:4;left:50%;transform:translateX(-50%);width:min(56%,calc(var(--cw)*8 + 80px));height:var(--lane-h);padding-bottom:6px;
+  --cf:clamp(12px,calc(var(--cw)*.3),15px);--lgap:max(6px,calc(var(--cw)*.16));--lane-h:calc(var(--cf)*4.1 + 15px);
+  --k:calc(var(--kbm,0)*var(--kbm,0));top:calc((50% + var(--cw)*.69 + var(--lgap) + var(--lane-dy,0px))*(1 - var(--k)) + (100% - var(--lane-h))*var(--k));
+  display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;pointer-events:none}
+.chat-lane[hidden]{display:none}
+.chat-lane.l1{--lane-h:calc(var(--cf)*3.45 + 9px)}
+/* no room on the table (small phones, 5–6 players) : one bubble at a time over the info row, which steps aside meanwhile */
+.chat-lane.top{grid-area:info;top:0;height:100%;width:100%!important;padding-bottom:0;justify-content:center;--cf:12px}
+.chat-lane.top .cb{padding:3px 8px 3px 6px}
+body.land[data-screen="game"] .chat-lane.top{top:58px;height:calc(100% - 58px)}   /* below the header, like .tinfo */
+.chat-lane.top .cb-in{-webkit-line-clamp:1;line-height:1.3}
+.chat-lane.top .cb::after{display:none}
+.tinfo{transition:opacity .35s cubic-bezier(.2,.8,.2,1)}
+.stage:has(.chat-lane.top .cb:not(.gone)) .tinfo{opacity:0}
+.cb{position:relative;flex:none;max-width:100%;color:var(--cb-ink);background:var(--cb-bg);
+  border:1px solid var(--cb-edge);border-left:3px solid var(--cpu);box-shadow:var(--cb-shadow),inset 0 1px 0 var(--cb-edge);
+  -webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);
+  padding:calc(var(--cf)*.3) calc(var(--cf)*.7) calc(var(--cf)*.34) calc(var(--cf)*.5);transition:opacity .45s cubic-bezier(.2,.8,.2,1)}
+.cb.you{border-left-color:var(--you);background:linear-gradient(var(--you-soft),var(--you-soft)),var(--cb-bg)}
+.cb::after{content:"";position:absolute;left:-3px;top:100%;width:7px;height:6px;background:var(--cpu);clip-path:polygon(0 0,100% 0,0 100%);transition:opacity .3s}
+.cb.you::after{background:var(--you)}
+.cb.old{opacity:.62}
+.cb.old::after,.cb.gone::after{opacity:0}
+.cb-in{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:var(--cf);line-height:1.4;font-weight:500;overflow-wrap:anywhere;-webkit-user-select:text;user-select:text}
+.cb-n{display:inline-block;max-width:8em;margin-right:.5em;padding:0 .4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top;margin-top:.24em;
+  font-family:var(--f-num);font-size:.72em;font-weight:700;letter-spacing:.05em;line-height:1.5;background:var(--cpu);color:var(--cpu-ink)}
+.cb.you .cb-n{background:var(--you);color:#fff}
+/* who spoke : the plate's edge lights up once in the speaker's colour */
+.seat.cping .sp{animation:cping 1.5s cubic-bezier(.2,.8,.2,1)}
+.seat.cping-y .sp{animation-name:cpingY}
+@keyframes cping{0%{box-shadow:0 0 0 0 rgba(254,122,71,0),var(--shadow)}16%{box-shadow:0 0 0 2px var(--cpu),0 0 20px 2px rgba(254,122,71,.5),var(--shadow)}100%{box-shadow:0 0 0 0 rgba(254,122,71,0),var(--shadow)}}
+@keyframes cpingY{0%{box-shadow:0 0 0 0 rgba(51,107,135,0),var(--shadow)}16%{box-shadow:0 0 0 2px var(--you),0 0 20px 2px rgba(51,107,135,.5),var(--shadow)}100%{box-shadow:0 0 0 0 rgba(51,107,135,0),var(--shadow)}}
+/* the chat button : bottom-left corner of the table, just above the dock (fitTable keeps it clear of the seats) */
+.chat-btn{--cbs:clamp(44px,calc(var(--cw)*1.05),52px);position:absolute;z-index:4;left:0;bottom:0;width:var(--cbs);height:var(--cbs);padding:0;display:grid;place-items:center;cursor:pointer;color:var(--ink);
+  background:linear-gradient(160deg,var(--glass-hi),var(--glass-lo));border:1px solid var(--edge);box-shadow:var(--shadow),inset 0 1px 0 var(--edge);
+  -webkit-backdrop-filter:blur(14px) saturate(150%);backdrop-filter:blur(14px) saturate(150%);transition:transform .12s,background .2s,color .2s}
+.chat-btn[hidden]{display:none}
+.chat-btn::before{content:"";position:absolute;left:-1px;top:-1px;bottom:-1px;width:3px;background:var(--you)}
+.chat-btn svg{width:46%;height:46%}
+.chat-btn[aria-pressed="true"]{background:var(--you);color:#fff}
+.chat-btn:active{transform:scale(.95)}
+@media (hover:hover){.chat-btn:hover{border-color:var(--you)}}
+/* landscape : the button leaves the table and sits right under the dock in the right column (chat.js placeBtn sets left/top) */
+.chat-btn.side{grid-area:auto;left:0;top:0;bottom:auto;z-index:6;--cbs:44px}
+/* the composer takes the dock's place (same box, the dock's own content waits underneath) */
+.dock.cz>:not(.composer){visibility:hidden}
+body.land .dock.cz{position:relative}
+.composer{position:absolute;inset:0;z-index:7;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);align-content:center;gap:6px;padding:8px 10px 10px}
+.composer[hidden]{display:none}
+.cz-top{display:flex;align-items:center;gap:8px;min-height:20px}
+.cz-turn{display:flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--you);background:var(--you-soft);color:var(--you-text);cursor:pointer;
+  font-family:var(--f-num);font-weight:700;font-size:10px;letter-spacing:.14em;line-height:14px}
+.cz-turn[hidden]{display:none}
+.cz-turn i{width:6px;height:6px;background:var(--you);animation:bob 1s infinite ease-in-out}
+.cz-left{margin-left:auto;font-family:var(--f-num);font-size:11px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.cz-left.low{color:var(--cpu-text)}
+.cz-x{position:relative;flex:none;width:22px;height:22px;padding:0;border:1px solid var(--hair-2);background:transparent;cursor:pointer}
+.cz-x::before,.cz-x::after{content:"";position:absolute;left:50%;top:50%;width:10px;height:1.5px;background:var(--ink-2);transform:translate(-50%,-50%) rotate(45deg)}
+.cz-x::after{transform:translate(-50%,-50%) rotate(-45deg)}
+.cz-row{display:flex;align-items:stretch;gap:6px;min-height:0;max-height:48px}
+.cz-in{flex:1 1 0;width:0;min-width:0;margin:0;border:1px solid var(--hair-2);border-left:3px solid var(--you);background:var(--glass-hi);color:var(--ink);
+  font-family:var(--f-ui);font-size:16px;font-weight:500;padding:0 12px;outline:none;-webkit-user-select:text;user-select:text}
+.cz-in:focus,.cz-in:focus-visible{border-color:var(--you);outline:none}
+.cz-send{flex:none;aspect-ratio:1;min-width:40px;padding:0;display:grid;place-items:center;border:0;background:linear-gradient(135deg,#3F7894,#2E6480);color:#fff;cursor:pointer;transition:opacity .2s,transform .1s}
+.cz-send:disabled{opacity:.38;cursor:default}
+.cz-send:active:not(:disabled){transform:scale(.96)}
+.cz-send svg{width:20px;height:20px}
+@media (pointer:coarse){.cz-x{width:32px;height:32px}}
+/* software keyboard (viewport.js) : --kbp 0→1 compacts the header, --kbm 0→1 fades the table out when there is no room */
+body.kb .top{padding-top:calc(var(--tp0,10px)*(1 - var(--kbp,0)) + 3px*var(--kbp,0));padding-bottom:calc(var(--tb0,10px)*(1 - var(--kbp,0)) + 3px*var(--kbp,0))}
+body.land .dock{min-height:calc(128px - 40px*var(--kbp,0))}
+/* no room for a usable table (phones with the keyboard up) : the table keeps its layout and is scaled down into the space above
+   the lane, a little faded; the composer and the latest bubbles stay at full size */
+body.kbmin .table{height:var(--t0h);max-height:none;align-self:start;transform-origin:50% 0;
+  transform:scale(calc(1 - (1 - var(--ts1,1))*var(--kbm,0)));opacity:calc(1 - .3*var(--kbm,0))}
