@@ -1,0 +1,27 @@
+{
+  "name": "privatematch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PrivateMatch — 知り合いと気軽にポーカーの SIT & GO を遊ぶアプリ",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test \"test/*.test.js\"",
+    "db:migrate": "node scripts/db.mjs migrate",
+    "deploy:game": "node scripts/deploy-game.mjs"
+  },
+  "dependencies": {
+    "@neon/functions": "^0.11.0",
+    "jose": "^6.2.12",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "neonctl": "^6.4.0",
+    "vite": "^8.3.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
