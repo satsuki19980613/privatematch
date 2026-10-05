@@ -1,0 +1,39 @@
+# プルリクエストと push ごとに、単体テスト（DB の結合テストを含む）とビルドを確かめる。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pmtest
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/pmtest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: テスト用の DB（Neon と同じロールと neon_auth のひな形）にマイグレーションを適用
+        run: |
+          psql -h localhost -U postgres -d pmtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key);'
+          for f in db/migrations/*.sql; do psql -h localhost -U postgres -d pmtest -v ON_ERROR_STOP=1 -q -f "$f"; done
+      - run: npm test
+      - run: npm run build
