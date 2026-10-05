@@ -12,7 +12,7 @@
              ── Data API RPC（読み取り）───────▶  Neon Postgres（RLS 有効・RPC 関数だけ公開）
              ── Function "game"（書き込み）────▶  Neon Function server/game/index.js
   src/history/* ── IndexedDB（成績・ハンド履歴の正本）
-共有ロジック: src/structure.js（設定）/ src/engine.js（ルール）/ server/game/rules.js（部屋）
+共有ロジック: src/structure.js（設定）/ src/engine.js（ルール）/ server/game/rules.js（部屋）/ src/chat.js（チャットの文字の決まり）
 開発専用: src/fakeNet.js（?fake でサーバー無しに全画面を確認。本物の rules.js とエンジンをブラウザで動かす）
 ```
 
@@ -63,6 +63,12 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 - `createRoom` / `joinRoom`（満席で席をシャッフルして開始）/ `leaveRoom`（待機中は離れる。作成者なら中止。進行中は left）
 - `applyRequest(room, uid, { op: 'act', ver, move } | { op: 'sitout' } | { op: 'sitin' }, now)` / `tickRoom(room, uid, now)` → `{ room, record }`
 - `viewsOf(room)`：開始前は `[待機室]`、開始後は席ごとのビュー（`{ ...viewFor, ver: room.ver, room: roomInfo }`）。
+- `postChat(room, uid, text, lastAt, now)` → `{ seat, text }`（text は `normalizeChat` 済み。room は変えない）。メンバーでない → `not_found`、private でない・未開始 → `chat_closed`、文が不正 → `malformed`、同じ席の前の発言（`lastAt`）から 1 秒未満 → `too_fast`。終局後も部屋がある限り送れる。
+
+チャットの文字（`src/chat.js`。サーバーとブラウザの入力欄が共有）
+- 幅の単位：全角（East Asian Width の W / F 相当・絵文字）= 2、それ以外 = 1（コードポイント単位）。上限 `CHAT_MAX_UNITS = 40`（全角 20 文字 / 半角 40 文字）。同じ席の連投は `CHAT_MIN_INTERVAL_MS = 1000` 以上あける。1 部屋 `CHAT_ROOM_MAX = 2000` 件まで。
+- `normalizeChat(s)`：空白類（改行・タブ・NBSP・全角スペースなど）は半角スペースに、制御文字と見えない文字・ゼロ幅・方向制御（`set_nickname` と同じ集合。絵文字どうしをつなぐ ZWJ だけは残す）は削除、NFC、連続スペースは 1 つ、前後を削る。空・上限超え・文字列でなければ `null`（切り詰めない）。
+- `chatUnits(s)` で幅を数え、`clipChat(s)` で入力欄を上限まで切る（書記素の途中では切らない）。
 
 ## 5. HTTP（`server/game/handler.js`。POST のみ・Bearer JWT 必須）
 | op | body | 返り値 |
@@ -73,8 +79,9 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 | `act` | `{ room, ver, move }` | 同上 |
 | `sitout` / `sitin` | `{ room }` | 同上 |
 | `tick` | `{ room }` | 同上（何も無ければ 409 `not_yet`） |
+| `chat` | `{ room, text }` | `{ now, msg: { seq, seat, text, at } }`（ゲームの `ver` は変えない） |
 
-エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`。
+エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
@@ -82,8 +89,9 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 | `profiles` | uid、nickname（1〜16・大文字小文字を無視して一意。制御文字・ゼロ幅・方向制御は不可） |
 | `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
+| `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
 
-RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）。
+RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、private でなければ `[]`）。
 
 ## 7. 端末の記録（`src/history/*`）
 - IndexedDB `privatematch`：`games`（1 試合 1 件）と `hands`（`[roomId, handNo]`）。
@@ -95,4 +103,6 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 - メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、STATS。ランキングは無い。
 - 待機室：部屋番号・招待 URL（`/?room=123456`。Copy / 共有）・参加者・満席で自動開始。
 - 卓：2〜6 席の楕円（自分は下）、操作は Fold / Check / Call / Bet・Raise（プリセット＋スライダー）、Check/Fold の予約、離席 / I'm back、Leave。
+- 卓のチャット（PRIVATE MATCH だけ）：入力ボタンはドックの近く。送った文は自分の手札とボードの間に吹き出しで出る（ふわっと出て消える）。スマホではキーボードに合わせて卓を縮める。同期は `room_poll` の `chat` が増えたら `room_chat` を差分で読む。入室時の履歴は既読扱い。
+- 卓のヘッダ：チャット履歴（未読バッジ）とこの試合のハンド履歴のボタン。どちらも中央のすりガラスのモーダル（PC は Esc で閉じる）。
 - デザインは Multiplier：直角、YOU #336B87、相手 #FE7A47、ライト／ダーク、ガラス質感、`fitTable` による実測フィット。
