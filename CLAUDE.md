@@ -17,7 +17,7 @@
 | 開発サーバー | `npm run dev`（http://localhost:5180。**`?fake` でサーバー無しに全画面を確認できる**） |
 | 単体テスト | `npm test`（`TEST_DATABASE_URL` があれば DB の結合テストも） |
 | ビルド | `npm run build` |
-| デプロイ | GitHub Actions の Deploy（`main` への push で自動。手動で `dev` も選べる） |
+| デプロイ | `main` への push で GitHub Actions の Deploy（Neon）→ 住所をコミット → Cloudflare Pages の GitHub 連携がサイトを公開（docs/SETUP.md） |
 
 ## 3. 規約
 - ルールを変えるときは `src/engine.js` だけを直し（設定は `src/structure.js`）、`npm test` を通す。サーバーとブラウザで二重に実装しない。

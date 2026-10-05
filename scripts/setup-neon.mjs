@@ -1,12 +1,12 @@
 // Neon の準備（何度実行しても同じ結果になる）：node scripts/setup-neon.mjs --branch <branch>
-//   1. ブランチが無ければ作る（既定のブランチから）
+//   1. ブランチが無ければ作る（既定のブランチから）。本番は、その名前が無ければプロジェクトの既定のブランチを使う
 //   2. Neon Auth を有効にし、Google ログインを足す（Neon の共有 OAuth アプリ。自前のクライアントは GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET）
 //   3. Data API を有効にする（認証は Neon Auth）
 //   4. ログインの戻り先として APP_ORIGIN を信頼するドメインに足す（開発ブランチは localhost も許可）
 //   5. Neon Auth と Data API の URL を表示し、GitHub Actions ならステップ出力 auth_url / data_url に書く
 import { branchArg, neon, output, pickUrl } from './neon.mjs';
 
-const branch = branchArg(), DB = 'neondb';
+let branch = branchArg(); const DB = 'neondb';
 const tryNeon = async (...a) => { try { return await neon(...a); } catch (e) { return null; } };
 const json = s => { try { return JSON.parse(s); } catch { return null; } };
 
@@ -14,9 +14,17 @@ const json = s => { try { return JSON.parse(s); } catch { return null; } };
 const branches = json(await neon('branches', 'list', '--output', 'json')) || [];
 const list = Array.isArray(branches) ? branches : branches.branches || [];
 if (!list.some(b => b.name === branch || b.id === branch)) {
-  console.log(`ブランチ ${branch} を作ります`);
-  await neon('branches', 'create', '--name', branch, '--output', 'json');
+  const def = list.find(b => b.default);
+  if (branch !== 'dev' && def) {
+    // 本番：その名前のブランチが無ければ、プロジェクトの既定のブランチ（production / main など）を使う
+    console.log(`ブランチ ${branch} が無いので、既定のブランチ ${def.name} を使います`);
+    branch = def.name;
+  } else {
+    console.log(`ブランチ ${branch} を作ります`);
+    await neon('branches', 'create', '--name', branch, '--output', 'json');
+  }
 }
+output('branch', branch);
 
 // 2. Neon Auth と Google
 let auth = await tryNeon('neon-auth', 'status', '--branch', branch, '--output', 'json');

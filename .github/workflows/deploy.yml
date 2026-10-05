@@ -1,10 +1,12 @@
-# デプロイ（すべて GitHub 上で行う）。
-#   main に push → テスト → Neon の準備・マイグレーション・Function "game" の配備（production）→ サイトのビルドと Cloudflare Pages への配備
+# サーバー側のデプロイ（すべて GitHub 上で行う）。
+#   main に push → テスト → Neon の準備（Neon Auth・Google・Data API）・マイグレーション・Function "game" の配備（production）
+#   → 本番の公開の住所を .env.production / src/prodConfig.js に書いて main にコミット
+#   → Cloudflare Pages（GitHub 連携）がそのコミットを見てサイトをビルド・公開する
 #   Actions タブ → Deploy → Run workflow で、dev ブランチ（開発用の Neon）だけを更新することもできる
 # 必要な設定（docs/SETUP.md）
-#   Secrets:   NEON_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID（任意: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET）
-#   Variables: NEON_PROJECT_ID, CF_PAGES_PROJECT（例 privatematch）, APP_ORIGIN（例 https://privatematch.pages.dev）
-#              任意: NEON_PROD_BRANCH（既定 production）
+#   Neon の GitHub 連携が入れるもの: Secret NEON_API_KEY, Variable NEON_PROJECT_ID
+#   任意: Variables APP_ORIGIN（既定 https://<CF_PAGES_PROJECT>.pages.dev）, CF_PAGES_PROJECT（既定 privatematch）, NEON_PROD_BRANCH（既定 production。無ければ Neon の既定のブランチ）
+#         Secrets GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET（自前の Google OAuth クライアント）
 name: Deploy
 
 on:
@@ -23,7 +25,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   deploy:
@@ -31,12 +33,9 @@ jobs:
     env:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
       NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-      CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'privatematch' }}
-      APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+      APP_ORIGIN: ${{ vars.APP_ORIGIN || format('https://{0}.pages.dev', vars.CF_PAGES_PROJECT || 'privatematch') }}
       TARGET: ${{ inputs.target || 'production' }}
       BRANCH: ${{ (inputs.target || 'production') == 'dev' && 'dev' || (vars.NEON_PROD_BRANCH || 'production') }}
     steps:
@@ -55,13 +54,8 @@ jobs:
           missing=""
           [ -n "$NEON_API_KEY" ] || missing="$missing NEON_API_KEY(secret)"
           [ -n "$NEON_PROJECT_ID" ] || missing="$missing NEON_PROJECT_ID(variable)"
-          if [ "$TARGET" = production ]; then
-            [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN(secret)"
-            [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID(secret)"
-            [ -n "$APP_ORIGIN" ] || missing="$missing APP_ORIGIN(variable)"
-          fi
           if [ -n "$missing" ]; then
-            echo "::warning::デプロイの設定が足りないので配備を飛ばします:$missing（docs/SETUP.md）"
+            echo "::warning::Neon の設定が足りないので配備を飛ばします:$missing（Neon の GitHub 連携でこのリポジトリを選ぶと入ります。docs/SETUP.md）"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -77,36 +71,41 @@ jobs:
         run: node scripts/setup-neon.mjs --branch "$BRANCH"
       - name: マイグレーション
         if: steps.cfg.outputs.ready == 'true'
+        env:
+          NB: ${{ steps.neon.outputs.branch }}
         run: |
-          npm run db:migrate -- --branch "$BRANCH"
-          node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch "$BRANCH" --database neondb --project-id "$NEON_PROJECT_ID" || true
+          npm run db:migrate -- --branch "$NB"
+          node node_modules/neonctl/bin/cli.js data-api refresh-schema --branch "$NB" --database neondb --project-id "$NEON_PROJECT_ID" || true
       - name: Function "game" の配備
         id: fn
         if: steps.cfg.outputs.ready == 'true'
-        run: npm run deploy:game -- --branch "$BRANCH"
-
-      - name: サイトのビルド
-        if: steps.cfg.outputs.ready == 'true' && env.TARGET == 'production'
         env:
-          VITE_NEON_AUTH_URL: ${{ steps.neon.outputs.auth_url }}
-          VITE_NEON_DATA_API_URL: ${{ steps.neon.outputs.data_url }}
-          VITE_GAME_URL: ${{ steps.fn.outputs.game_url }}
-        run: npm run build
-      - name: Cloudflare Pages へ配備
+          NB: ${{ steps.neon.outputs.branch }}
+        run: npm run deploy:game -- --branch "$NB"
+
+      - name: 本番の住所をコミット（Cloudflare Pages がこれを見てサイトを作り直す）
         if: steps.cfg.outputs.ready == 'true' && env.TARGET == 'production'
         env:
           AUTH_URL: ${{ steps.neon.outputs.auth_url }}
+          DATA_URL: ${{ steps.neon.outputs.data_url }}
+          GAME_URL: ${{ steps.fn.outputs.game_url }}
         run: |
-          npx --yes wrangler@4 pages project create "$CF_PAGES_PROJECT" --production-branch main >/dev/null 2>&1 || true
-          printf '%s' "$AUTH_URL" | npx --yes wrangler@4 pages secret put NEON_AUTH_URL --project-name "$CF_PAGES_PROJECT"
-          npx --yes wrangler@4 pages deploy dist --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true
+          node scripts/write-config.mjs
+          if ! git diff --quiet -- .env.production src/prodConfig.js; then
+            npm run build
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git add .env.production src/prodConfig.js
+            git commit -m "chore(deploy): 本番の Neon の住所を更新"
+            git push origin HEAD:main
+          fi
       - name: まとめ
         if: steps.cfg.outputs.ready == 'true'
         run: |
           {
-            echo "### Deploy ($TARGET / Neon branch $BRANCH)"
+            echo "### Deploy ($TARGET / Neon branch ${{ steps.neon.outputs.branch }})"
             echo "- Neon Auth: ${{ steps.neon.outputs.auth_url }}"
             echo "- Data API: ${{ steps.neon.outputs.data_url }}"
             echo "- Function game: ${{ steps.fn.outputs.game_url }}"
-            if [ "$TARGET" = production ]; then echo "- Site: $APP_ORIGIN"; fi
+            if [ "$TARGET" = production ]; then echo "- Site: $APP_ORIGIN（Cloudflare Pages が main からビルド）"; fi
           } >> "$GITHUB_STEP_SUMMARY"
