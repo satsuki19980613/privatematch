@@ -34,7 +34,7 @@ jobs:
         run: |
           set -a; . ./.env.production; set +a
           SITE="$APP_ORIGIN" AUTH_URL="$VITE_NEON_AUTH_URL" DATA_URL="$VITE_NEON_DATA_API_URL" GAME_URL="$VITE_GAME_URL" node scripts/live-check.mjs prod
-      - name: 本番の Neon Auth の設定（表示だけ）
+      - name: 本番の Neon Auth の設定（Google だけか）
         if: always() && vars.NEON_PROJECT_ID != ''
         run: |
           C="node node_modules/neonctl/bin/cli.js --project-id $NEON_PROJECT_ID --no-color"
@@ -42,7 +42,8 @@ jobs:
           echo "branch: $B"
           for s in "oauth-provider list" "domain list"; do echo "== $s"; $C neon-auth $s --branch "$B" || true; done
           echo "== config email-password get"; ep=$($C neon-auth config email-password get --branch "$B" || true); echo "$ep"
-          if echo "$ep" | grep -Eq 'Enabled: +true'; then echo "::warning::本番の Neon Auth でメールとパスワードの登録が開いています（main への Deploy で閉じる）"; fi
+          # 本番は Google だけ（scripts/setup-neon.mjs が閉じる）。開いていたら失敗にする
+          if echo "$ep" | grep -Eq 'Enabled: +true'; then echo "::error::本番の Neon Auth でメールとパスワードの登録が開いています"; exit 1; fi
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROD_BRANCH: ${{ vars.NEON_PROD_BRANCH }}
