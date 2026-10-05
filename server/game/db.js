@@ -1,9 +1,11 @@
 // game サーバーの DB 側（DATABASE_URL = データベースの所有者で動く）。1 リクエスト = 1 トランザクション。
 //   create / join : 本人の profiles 行をロック（同じ人の同時操作を直列にする）→ 居る部屋の確認 → 部屋の作成・参加（満席で開始）
 //   leave / act / sitin / sitout / tick : rooms 行をロック（for update）→ ルールを適用 → 保存（ハンドが終わっていれば room_hands に記録）
+//   chat : rooms 行をロック → その席の最後の発言時刻（DB の時計）→ postChat → chat_seq を +1 して room_chat に追加（rooms.ver は変えない）
 // ロックの順番は常に profiles → rooms。
 import { randomUUID } from 'node:crypto';
-import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf } from './rules.js';
+import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat } from './rules.js';
+import { CHAT_ROOM_MAX } from '../../src/chat.js';
 
 const LOCK_TIMEOUT = '5s';
 // 山札のシャッフルに使う乱数（Math.random より良いもの。53 bit）
@@ -107,5 +109,23 @@ export function makeDb(pool, deps = {}) {
     leave: step((room, uid) => leaveRoom(room, uid, now())),
     request: step((room, uid, req) => applyRequest(room, uid, req, now())),
     tick: step((room, uid) => tickRoom(room, uid, now())),
+
+    // チャットの発言。=> { now, msg: { seq, seat, text, at } }（時刻は DB の時計。room_chat の at と同じ）
+    chat: (uid, id, text) => tx(pool, async c => {
+      const r = await c.query('select kind,started,members,chat_seq from public.rooms where id=$1 for update', [id]);
+      if (!r.rows[0]) throw new MoveError('not_found');
+      const room = r.rows[0], seat = room.members.indexOf(uid);
+      // 時刻はミリ秒で切りそろえる（room_chat の at = floor(created_at の epoch ms) と一致させる）
+      const t = await c.query(`select floor(extract(epoch from clock_timestamp())*1000)::float8 as now_ms,
+          (select (extract(epoch from max(created_at))*1000)::float8 from public.room_chat where room=$1 and seat=$2) as last_ms`, [id, seat]);
+      const at = t.rows[0].now_ms;
+      const out = postChat(room, uid, text, t.rows[0].last_ms, at);
+      if (room.chat_seq >= CHAT_ROOM_MAX) throw new MoveError('chat_full');
+      const u = await c.query('update public.rooms set chat_seq=chat_seq+1 where id=$1 returning chat_seq', [id]);
+      const seq = u.rows[0].chat_seq;
+      await c.query("insert into public.room_chat(room,seq,seat,text,created_at) values($1,$2,$3,$4,'epoch'::timestamptz + $5::bigint * interval '1 millisecond')",
+        [id, seq, out.seat, out.text, at]);
+      return { now: at, msg: { seq, seat: out.seat, text: out.text, at } };
+    }),
   };
 }
