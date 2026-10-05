@@ -50,7 +50,8 @@ test('clipChat：上限ちょうどまで。書記素の途中では切らない
   assert.equal(clipChat('a'.repeat(38) + 'あい'), 'a'.repeat(38) + 'あ');
   assert.equal(clipChat('a'.repeat(39) + '😀'), 'a'.repeat(39));             // サロゲートペアを割らない
   assert.equal(clipChat('a'.repeat(37) + '👍🏽'), 'a'.repeat(37));            // 絵文字＋肌の色（4）を割らない
-  assert.equal(clipChat('a'.repeat(39) + 'e' + ACUTE), 'a'.repeat(39));     // 結合文字を割らない
+  assert.equal(clipChat('a'.repeat(40) + 'e' + ACUTE), 'a'.repeat(40));     // 結合文字を割らない
+  assert.equal(clipChat('a'.repeat(39) + 'e' + ACUTE), 'a'.repeat(39) + 'e' + ACUTE); // 幅は NFC で数える（é = 1）
   const fam = '👨' + ZWJ + '👩' + ZWJ + '👧';                               // 8
   assert.equal(clipChat('a'.repeat(33) + fam), 'a'.repeat(33));
   assert.equal(clipChat('a'.repeat(32) + fam + 'b'), 'a'.repeat(32) + fam);
@@ -304,4 +305,16 @@ describe('DB：チャット（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_UR
     await pool.query('delete from public.rooms where id = $1', [a.room]);
     assert.equal((await pool.query('select count(*)::int n from public.room_chat where room = $1', [a.room])).rows[0].n, 0);
   });
+});
+
+test('clipChat の結果はそのまま送れる（合成除外の文字は NFC で幅が増える）', () => {
+  const s = 'य़'.repeat(40);                 // NFC で 2 文字に分かれる
+  assert.notEqual(normalizeChat(clipChat(s)), null);
+  assert.equal(chatUnits(clipChat(s).normalize('NFC')), 40);
+});
+
+test('normalizeChat：見た目が空（結合文字・異体字セレクタ・タグ文字だけ）は null', () => {
+  for (const s of ['️️', '́́', '\u{E0061}\u{E0062}', '\u{1D173}', ' ️ '])
+    assert.equal(normalizeChat(s), null, JSON.stringify(s));
+  assert.equal(normalizeChat('❤️'), '❤️');
 });
