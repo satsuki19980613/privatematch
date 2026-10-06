@@ -5,7 +5,7 @@
 // 関数は `st` をその場で書き換えて返す。違法な呼び出しは EngineError を投げ、そのとき `st` は変わらない。
 import {
   blindsAt, nextLevel, levelMsOf, payoutsFor, normalizeConfig, BASE_BB,
-  ACTION_MS, TIME_BANK_MS, AUTO_TO_SITOUT, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS,
+  ACTION_MS, TIME_BANK_MS, AUTO_TO_SITOUT, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, runoutMs,
 } from './structure.js';
 
 export const RANKCH = '23456789TJQKA';
@@ -174,7 +174,7 @@ function dealHand(st, now, forcedBtn) {
     folded: live.map(x => !x), allIn: Array(n).fill(false),
     toAct: null, streetLastBetTo: 0, lastBetSize: bb, actions: [],
     turnStart: null, deadline: null, phase: 'betting',
-    won: null, shown: null, names: null, eliminated: [], pots: null, startedAt: now, endedAt: null,
+    won: null, shown: null, names: null, eliminated: [], pots: null, runFrom: null, startedAt: now, endedAt: null,
   };
   st.hand = h; st.handNo = h.handNo; st.prevSbPos = pos.sbPos; st.prevBbSeat = pos.bbSeat; st.nextAt = null;
   const put = (s, amt) => { const pay = Math.min(amt, P[s].stack); P[s].stack -= pay; h.commits[s] += pay; return pay; };
@@ -228,6 +228,8 @@ const BOARD_COUNT = [0, 3, 4, 5];
 function advanceStreets(st, now) {
   const h = st.hand;
   if (h.folded.filter(f => !f).length <= 1) return settle(st, now);
+  // 動ける席が 1 人以下：ここで手札を表にして残りのボードを配る（画面はこの枚数からランアウトを見せる）
+  if (h.runFrom == null && h.folded.filter((f, s) => !f && !h.allIn[s]).length <= 1) h.runFrom = h.board.length;
   while (shouldCloseStreet(h) && h.street < 3) {
     h.street++;
     while (h.board.length < BOARD_COUNT[h.street]) h.board.push(h.deck.pop());
@@ -444,6 +446,7 @@ function settle(st, now) {
       pots.push({ amount, eligible, winners });
     }
     h.shown = h.hole.map((c, s) => (contenders.includes(s) ? c.slice() : null));
+    if (h.runFrom == null) h.runFrom = h.board.length;
     h.names = h.hole.map((c, s) => (contenders.includes(s) ? handName(score[s]) : null));
   }
   for (let s = 0; s < n; s++) P[s].stack += won[s];
@@ -466,7 +469,7 @@ function settle(st, now) {
   }
   // 退出していない生存者が 1 人になったら、残りの退出者を待たずに終了（一時停止 → 中止になるのを防ぐ）
   if (stillPlaying(st).length <= 1) return finishWithoutOpponents(st, now);
-  st.nextAt = now + BETWEEN_HANDS_MS;
+  st.nextAt = now + BETWEEN_HANDS_MS + runoutMs(h.runFrom);
 }
 
 /* ---------------- 記録とビュー ---------------- */

@@ -1,11 +1,12 @@
 // 部屋のルール（docs/ARCHITECTURE.md §4）：作成・参加（満席で開始）・退出・アクション・時間で進む処理・ビュー・チャット。
 // 入出力も時計も持たない純関数（now と rnd は引数で受け取る）。fakeNet もブラウザでこれを使う。
 //
-// 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], state, ver, createdAt, startedAt }
+// 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], state, ver, createdAt, startedAt, rematch }
 //   status: 'waiting' | 'running' | 'paused' | 'finished' | 'cancelled'（開始後はエンジンの状態と同じ）
 //   members: 待機中は参加順（先頭が作成者）、開始後は席順。state はエンジンの状態（山札を含む。サーバーだけが持つ）
+//   rematch: 終局後の再戦の受付 { stay: [席]（席に残った順）, gone: [席]（Menu へ去った）, next: { id, code } | null（始まった再戦の部屋） }。無ければ null
 import { newTable, act, tick, sitin, sitout, leave, viewFor, handRecord, dueAt, EngineError } from '../../src/engine.js';
-import { normalizeConfig, WAITING_EXPIRES_MS } from '../../src/structure.js';
+import { normalizeConfig, WAITING_EXPIRES_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../../src/structure.js';
 import { normalizeChat, CHAT_MIN_INTERVAL_MS } from '../../src/chat.js';
 
 export const KINDS = ['private', 'free'];
@@ -26,7 +27,7 @@ export function createRoom({ id, code, kind, uid, name, config, now }) {
   if (!KINDS.includes(kind)) throw new MoveError('malformed');
   const cfg = normalizeConfig(config);
   if (!cfg) throw new MoveError('malformed');
-  return { id, code, kind, host: uid, config: cfg, status: 'waiting', started: false, members: [uid], names: [name], state: null, ver: 1, createdAt: now, startedAt: null };
+  return { id, code, kind, host: uid, config: cfg, status: 'waiting', started: false, members: [uid], names: [name], state: null, ver: 1, createdAt: now, startedAt: null, rematch: null };
 }
 
 /** 参加する。満席になったら席をシャッフルして開始する。=> 新しい room（引数は変えない） */
@@ -67,6 +68,8 @@ function stepped(room, st) {
 export function leaveRoom(room, uid, now) {
   const seat = seatOf(room, uid);
   if (seat < 0) throw new MoveError('not_found');
+  // 終局後・飛んだ後に Menu へ戻る：再戦の対象から外す（作成者なら再戦を始める役が残った人へ移る）
+  if (room.started && (room.status === 'finished' || (live(room) && room.state.players[seat].status === 'out'))) return { room: markGone(room, seat), record: null };
   if (!live(room)) throw new MoveError('game_over');
   if (!room.started) {
     const r = clone(room);
@@ -122,6 +125,62 @@ export function postChat(room, uid, text, lastAt, now) {
   return { seat, text: t };
 }
 
+/* ---------------- 再戦（終局後に席に残った人で、同じ設定の新しい部屋を始める） ---------------- */
+const rematchOf = room => room.rematch ?? { stay: [], gone: [], next: null };
+// ビューと判定に使う形：途中で退出した（left）席も去った扱い。host は作成者の席
+function rematchView(room) {
+  const rm = rematchOf(room), left = room.state.players.map((p, s) => (p.status === 'left' ? s : -1)).filter(s => s >= 0);
+  return { ...rm, gone: [...new Set([...rm.gone, ...left])], host: room.members.indexOf(room.host), closesAt: room.state.endedAt + REMATCH_MS };
+}
+/** 再戦を受け付けているか（終局から REMATCH_MS の間・まだ始まっていない） */
+export const rematchOpen = (room, now) => room.started && room.status === 'finished' && !rematchOf(room).next && now - room.state.endedAt < REMATCH_MS;
+/**
+ * 再戦を始められる席（ビューの rematch でも同じ関数を使う）。rm = { stay, gone, host（作成者の席）}、endedAt = 終局の時刻。
+ * 作成者が残っているか、まだ去っておらず終局から REMATCH_HOST_WAIT_MS 以内なら作成者。そうでなければ先に席に残った人（いなければ null）
+ */
+export function rematchLeader(rm, endedAt, now) {
+  if (rm.stay.includes(rm.host) || (!rm.gone.includes(rm.host) && now - endedAt < REMATCH_HOST_WAIT_MS)) return rm.host;
+  return rm.stay[0] ?? null;
+}
+function markGone(room, seat) {
+  const rm = rematchOf(room);
+  if (rm.gone.includes(seat) && !rm.stay.includes(seat)) return room;
+  const r = clone(room);
+  r.rematch = { ...rm, stay: rm.stay.filter(s => s !== seat), gone: [...rm.gone, seat] }; r.ver++;
+  return r;
+}
+/** 終局後に席に残る（再戦を待つ）。=> { room, record: null } */
+export function stayRoom(room, uid, now) {
+  const seat = seatOf(room, uid);
+  if (seat < 0) throw new MoveError('not_found');
+  if (!rematchOpen(room, now) || room.state.players[seat].status === 'left') throw new MoveError('room_closed');
+  const rm = rematchOf(room);
+  if (rm.stay.includes(seat)) return { room, record: null };
+  const r = clone(room);
+  r.rematch = { ...rm, stay: [...rm.stay, seat], gone: rm.gone.filter(s => s !== seat) }; r.ver++;
+  return { room: r, record: null };
+}
+/**
+ * 再戦を始める（再戦を始められる席の人だけ）。押した人も席に残ったことになる。席に残った人のうち、ほかの部屋に居る人（busy: Set<uid>）は除く。
+ * names: uid → 今の表示名。=> { room: 元の部屋（rematch.next に新しい部屋）, next: 開始済みの新しい部屋（人数 = 残った人数、ほかの設定は同じ）}
+ */
+export function rematchRoom(room, uid, { id, code, names, busy = new Set() }, now, rnd) {
+  const seat = seatOf(room, uid);
+  if (seat < 0) throw new MoveError('not_found');
+  if (!rematchOpen(room, now)) throw new MoveError('room_closed');
+  const rm = rematchOf(room);
+  if (rematchLeader(rematchView(room), room.state.endedAt, now) !== seat) throw new MoveError('not_host');
+  const stay = rm.stay.includes(seat) ? rm.stay : [...rm.stay, seat];
+  const uids = stay.map(s => room.members[s]).filter(u => u === uid || !busy.has(u));
+  if (uids.length < 2) throw new MoveError('not_enough');
+  const next = createRoom({ id, code, kind: room.kind, uid, name: names.get(uid) ?? room.names[seat], config: { ...room.config, players: uids.length }, now });
+  next.members = uids; next.names = uids.map(u => names.get(u) ?? room.names[seatOf(room, u)]);
+  start(next, now, rnd);
+  const r = clone(room);
+  r.rematch = { ...rm, stay, next: { id, code } }; r.ver++;
+  return { room: r, next };
+}
+
 /** 次に何かが起きる時刻（DB の due_ms） */
 export const dueOf = room => (room.started && live(room) ? dueAt(room.state) : null);
 
@@ -136,5 +195,6 @@ export function viewsOf(room) {
   if (!room.started) {
     return [{ lobby: true, ver: room.ver, status: room.status, room: info, members: room.names.slice(), expiresAt: room.createdAt + WAITING_EXPIRES_MS }];
   }
-  return room.members.map((_, seat) => ({ ...viewFor(room.state, seat), ver: room.ver, room: info }));
+  const rm = room.status === 'finished' ? rematchView(room) : null;
+  return room.members.map((_, seat) => ({ ...viewFor(room.state, seat), ver: room.ver, room: info, rematch: rm }));
 }
