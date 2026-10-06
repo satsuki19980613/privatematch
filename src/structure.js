@@ -120,4 +120,18 @@ export const TIME_BANK_MS = 30000;            // 1 試合のタイムバンク�
 export const AUTO_TO_SITOUT = 2;              // 自動処理がこの回数連続したら sitout
 export const BETWEEN_HANDS_MS = 3000;         // ハンド間（結果表示）
 export const WAITING_EXPIRES_MS = 15 * 60000; // 募集の期限
+export const REMATCH_MS = 15 * 60000;         // 終局後の再戦の受付
+export const REMATCH_HOST_WAIT_MS = 60000;    // 作成者が「席に残る」を押さないまま、この時間たったら残った人が再戦を始められる
+
+// ショーダウン（オールインのランアウトを含む）の見せ方の時間（ms）。卓の画面がこの順に見せ、エンジンは次のハンドをその分だけ遅らせる。
+//   gather ベットをポットへ集める（ALL-IN の帯）→ reveal 手札を表に返して勝率を読ませる → street フロップ・ターンを 1 枚ずつ開いて勝率を更新して止める
+//   → river リバー（勝負が残っていれば伏せて置いてからゆっくりめくる）→ 勝者・ポットの移動（BETWEEN_HANDS_MS）。
+//   latency はポーリング（最大 1 秒）で遅れて見始めた人の分。他アプリのストリート間隔は 1〜3 秒（中央値 2 秒前後）で、1 秒以下だと何が起きたか分からない
+export const RUNOUT = { gather: 500, reveal: 1400, street: 1700, river: 2600, latency: 800 };
+/** ショーダウンの演出の長さ。from = 手札を表にした時点のボードの枚数（0/3/4/5。オールインでなければ 5）、null はショーダウン無し */
+export function runoutMs(from) {
+  if (from == null) return 0;
+  const R = RUNOUT;
+  return R.gather + R.reveal + (from < 3 ? R.street : 0) + (from < 4 ? R.street : 0) + (from < 5 ? R.river : 0) + R.latency;
+}
 export const PAUSED_EXPIRES_MS = 10 * 60000;  // 一時停止の期限

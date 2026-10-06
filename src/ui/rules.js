@@ -1,5 +1,5 @@
 // ルールのモーダル：進行・持ち時間・ブラインド構造（3 種）・ゲームモードの pt。説明は画面に出さずここに集める。
-import { BLIND_TABLES, SPEED_LABEL, SPEEDS, GAME_MODES, MODE_IDS, modeLabel, PLAYER_COUNTS, START_BBS, BASE_BB, LEVEL_MS } from '../structure.js';
+import { BLIND_TABLES, SPEED_LABEL, SPEEDS, GAME_MODES, MODE_IDS, modeLabel, PLAYER_COUNTS, START_BBS, BASE_BB, LEVEL_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../structure.js';
 import { $, head, openDlg, fmt } from './util.js';
 
 let tab = 'normal';
@@ -16,8 +16,10 @@ function paint() {
       <dt>レベル</dt><dd>${LEVEL_MS / 60000} 分ごとに上がります。${LEVEL_MS / 60000} 分たつとタイマーが止まり、次のハンドから上のレベルになって、そこからまた数えます。</dd>
       <dt>ボタン</dt><dd>デッドボタン方式。ヘッズアップではボタンが SB です。</dd>
       <dt>持ち時間</dt><dd>1 アクション 15 秒。切れるとタイムバンク（1 試合 30 秒）を使います。尽きるとチェックかフォールドになり、2 回続くと離席扱いになります（I'm back で戻れます）。</dd>
-      <dt>ショーダウン</dt><dd>残った全員が表向きにします。</dd>
+      <dt>ショーダウン</dt><dd>残った全員が表向きにします。オールインで残りのボードを配るときは、手札と勝率を見せてから 1 枚ずつ開き（リバーは勝負が残っていれば伏せて置いてからめくります）、次のハンドはその分だけ待ちます。</dd>
+      <dt>表示</dt><dd>卓のベット・ポット・Call / Raise の額は BB で表示します（スタックはチップと BB）。</dd>
       <dt>退出</dt><dd>途中で退出すると戻れません。チップは卓に残り自動で処理されます。退出していない人が 1 人になったらその人の勝ちです。</dd>
+      <dt>再戦</dt><dd>試合が終わったら「席に残る」で再戦を待てます。作成者が Rematch を押すと、残った人だけで同じ設定の新しい試合が始まります（人数は残った人数）。作成者が Menu に戻ったか、${REMATCH_HOST_WAIT_MS / 60000} 分たっても残らなければ、先に残った人が始められます。受付は終わってから ${REMATCH_MS / 60000} 分です。</dd>
       <dt>一時停止</dt><dd>残っている全員が離席中になると止まり、10 分誰も戻らなければ中止（pt なし）になります。</dd>
       <dt>ブラインド</dt><dd>BB がショートでオールインになっても、ほかに動ける人が 2 人以上いればコールする額は BB 満額です。</dd>
       <dt>記録</dt><dd>成績とハンド履歴はこの端末に保存されます（STATS → EXPORT で書き出せます）。途中で飛んだ試合も、順位と pt が決まった時点で STATS に入ります。</dd>

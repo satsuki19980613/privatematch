@@ -2,9 +2,11 @@
 //   create / join : 本人の profiles 行をロック（同じ人の同時操作を直列にする）→ 居る部屋の確認 → 部屋の作成・参加（満席で開始）
 //   leave / act / sitin / sitout / tick : rooms 行をロック（for update）→ ルールを適用 → 保存（ハンドが終わっていれば room_hands に記録）
 //   chat : rooms 行をロック → その席の最後の発言時刻（DB の時計）→ postChat → chat_seq を +1 して room_chat に追加（rooms.ver は変えない）
+//   stay : rooms 行をロック → 席に残る（終局後の再戦の受付）
+//   rematch : 席に残った人の profiles 行をロック → rooms 行をロック → ほかの部屋に居る人を除いて新しい部屋を作って開始 → 元の部屋に rematch.next
 // ロックの順番は常に profiles → rooms。
 import { randomUUID } from 'node:crypto';
-import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat } from './rules.js';
+import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
 
 const LOCK_TIMEOUT = '5s';
@@ -27,10 +29,10 @@ async function tx(pool, fn) {
   } finally { c.release(); }
 }
 
-const COLS = 'id,code,kind,host,config,status,started,members,names,state,ver,(extract(epoch from created_at)*1000)::float8 as created_ms,(extract(epoch from started_at)*1000)::float8 as started_ms';
+const COLS = 'id,code,kind,host,config,status,started,members,names,state,ver,rematch,(extract(epoch from created_at)*1000)::float8 as created_ms,(extract(epoch from started_at)*1000)::float8 as started_ms';
 const toRoom = r => ({
   id: r.id, code: r.code, kind: r.kind, host: r.host, config: r.config, status: r.status, started: r.started,
-  members: r.members, names: r.names, state: r.state, ver: r.ver, createdAt: Math.round(r.created_ms), startedAt: r.started_ms == null ? null : Math.round(r.started_ms),
+  members: r.members, names: r.names, state: r.state, ver: r.ver, rematch: r.rematch ?? null, createdAt: Math.round(r.created_ms), startedAt: r.started_ms == null ? null : Math.round(r.started_ms),
 });
 
 export function makeDb(pool, deps = {}) {
@@ -59,8 +61,9 @@ export function makeDb(pool, deps = {}) {
   async function save(c, room, record) {
     const views = viewsOf(room), ended = !['waiting', 'running', 'paused'].includes(room.status);
     await c.query(`update public.rooms set status=$2,started=$3,members=$4::uuid[],names=$5::text[],state=$6,ver=$7,views=$8,due_ms=$9,updated_at=now(),
-        started_at=case when $3 and started_at is null then now() else started_at end,ended_at=case when $10 then coalesce(ended_at,now()) else null end where id=$1`,
-      [room.id, room.status, room.started, room.members, room.names, room.state == null ? null : JSON.stringify(room.state), room.ver, JSON.stringify(views), dueOf(room), ended]);
+        started_at=case when $3 and started_at is null then now() else started_at end,ended_at=case when $10 then coalesce(ended_at,now()) else null end,rematch=$11 where id=$1`,
+      [room.id, room.status, room.started, room.members, room.names, room.state == null ? null : JSON.stringify(room.state), room.ver, JSON.stringify(views), dueOf(room), ended,
+        room.rematch == null ? null : JSON.stringify(room.rematch)]);
     if (record) {
       await c.query('insert into public.room_hands(room,hand_no,rec,holes) values($1,$2,$3,$4) on conflict do nothing',
         [room.id, record.rec.handNo, JSON.stringify(record.rec), JSON.stringify(record.holes)]);
@@ -107,6 +110,34 @@ export function makeDb(pool, deps = {}) {
     }),
 
     leave: step((room, uid) => leaveRoom(room, uid, now())),
+    stay: step((room, uid) => stayRoom(room, uid, now())),
+
+    // 再戦：席に残った人で同じ設定の新しい部屋を始める。=> 新しい部屋の reply
+    rematch: (uid, id) => tx(pool, async c => {
+      await c.query('select public.purge_rooms()');
+      // ロックの順番（profiles → rooms）を守るため、先にロックせずに残った人を読み、その人たちの profiles をロックしてから部屋をロックする
+      const pre = await c.query('select members,rematch from public.rooms where id=$1', [id]);
+      if (!pre.rows[0]) throw new MoveError('not_found');
+      const stay = (pre.rows[0].rematch?.stay ?? []).map(s => pre.rows[0].members[s]);
+      const uids = [...new Set([uid, ...stay])].filter(Boolean).sort();
+      const prof = await c.query('select uid,nickname from public.profiles where uid = any($1::uuid[]) order by uid for update', [uids]);
+      if (!prof.rows.some(r => r.uid === uid)) throw new MoveError('no_profile');
+      const names = new Map(prof.rows.map(r => [r.uid, r.nickname]));
+      const room = await load(c, id);
+      const busy = new Set();
+      for (const u of room.members) if (u !== uid && (room.rematch?.stay ?? []).includes(room.members.indexOf(u)) && (!names.has(u) || await activeRoom(c, u))) busy.add(u);
+      for (let i = 0; i < 10; i++) {
+        const out = rematchRoom(room, uid, { id: randomUUID(), code: genCode(rnd), names, busy }, now(), rnd);
+        const next = out.next, views = viewsOf(next);
+        const r = await c.query(`insert into public.rooms(id,code,kind,host,config,status,started,members,names,state,ver,views,due_ms,created_at,started_at)
+            values($1,$2,$3,$4,$5,$6,true,$7::uuid[],$8::text[],$9,$10,$11,$12,to_timestamp($13/1000.0),now()) on conflict do nothing returning id`,
+          [next.id, next.code, next.kind, next.host, JSON.stringify(next.config), next.status, next.members, next.names, JSON.stringify(next.state), next.ver, JSON.stringify(views), dueOf(next), next.createdAt]);
+        if (!r.rows[0]) continue;
+        await save(c, out.room, null);
+        return reply(next, uid, views);
+      }
+      throw new MoveError('busy');
+    }),
     request: step((room, uid, req) => applyRequest(room, uid, req, now())),
     tick: step((room, uid) => tickRoom(room, uid, now())),
 

@@ -12,7 +12,7 @@
              ── Data API RPC（読み取り）───────▶  Neon Postgres（RLS 有効・RPC 関数だけ公開）
              ── Function "game"（書き込み）────▶  Neon Function server/game/index.js
   src/history/* ── IndexedDB（成績・ハンド履歴の正本）
-共有ロジック: src/structure.js（設定）/ src/engine.js（ルール）/ server/game/rules.js（部屋）/ src/chat.js（チャットの文字の決まり）
+共有ロジック: src/structure.js（設定）/ src/engine.js（ルール）/ server/game/rules.js（部屋・再戦）/ src/chat.js（チャットの文字の決まり）/ src/equity.js（演出の勝率）
 開発専用: src/fakeNet.js（?fake でサーバー無しに全画面を確認。本物の rules.js とエンジンをブラウザで動かす）
 ```
 
@@ -27,7 +27,8 @@
 - 人数 2/3/4/5/6、初期チップ 10000/15000/20000/30000 枚 = `startBb` 50/75/100/150（レベル 1 の BB = 200 チップ）、ブラインド構造 `normal`(16) / `slow`(32) / `veryslow`(59)。上昇間隔は選べず 3 分（`LEVEL_MS`。以前の部屋の `config.levelMin` はその値）。
 - SB = BB/2、アンティは表の値を全員が払う。レベルはハンド開始時に `nextLevel` で決める：`now − levelStartAt ≥ 3 分` なら前のハンドのレベル + 1（表の長さまで）にして `levelStartAt = now`（ポーカーチェイスと同じく、3 分たつとタイマーが止まり、次のハンドから上がってそこから数え直す）。
 - ゲームモード（順位 → pt）：`club` `rank-3` `rank-4` `rank-5` `legend-avg` `legend-season` `legend-base`。pt は `payouts.slice(0, players)[place − 1]`。
-- 時間：1 アクション 15 秒、タイムバンク 30 秒（1 試合・補充なし）、自動処理 2 回連続で sitout、ハンド間 3 秒、募集 15 分、一時停止 10 分。
+- 時間：1 アクション 15 秒、タイムバンク 30 秒（1 試合・補充なし）、自動処理 2 回連続で sitout、ハンド間 3 秒（ショーダウンなら + `runoutMs(runFrom)`）、募集 15 分、一時停止 10 分、再戦の受付 15 分（作成者を待つのは 1 分）。
+- ショーダウンの演出 `RUNOUT = { gather 500, reveal 1400, street 1700, river 2600, latency 800 }`（ms）。`runoutMs(from)` = gather + reveal + （フロップ・ターン・リバーのうち未公開の分）+ latency。プリフロップのオールインで 8.7 秒、普通のショーダウン（from = 5）で 2.7 秒。他アプリのストリート間隔（1〜3 秒・中央値 2 秒前後。1 秒以下だと何が起きたか分からないという声）を元に決めた。
 
 ## 3. `src/engine.js` — 2〜6 人の NLHE SIT & GO（純関数・決定論的）
 
@@ -44,7 +45,8 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 
 状態 `st`：`{ ver, config, n, names, startedAt, levelStartAt, players: [{ stack, status, timeBankMs, autoCount, place, pt }], handNo, prevSbPos, prevBbSeat, seed, ctr, hand, nextAt, status, pausedAt, endedAt, winner }`
 - `status`：`running` | `paused` | `finished` | `cancelled`。プレイヤーの `status`：`active` | `sitout` | `left` | `out`。
-- `hand`：`{ handNo, level, sb, bb, ante, btn, sbSeat, bbSeat, street(0-3), deck, hole, board, startStacks, commits, streetBet, folded, allIn, toAct, streetLastBetTo, lastBetSize, actions: [{ seat, kind, betTo, put, auto, street }], turnStart, deadline, phase('betting'|'settled'), won, shown, names, pots, eliminated, startedAt, endedAt }`
+- `hand`：`{ handNo, level, sb, bb, ante, btn, sbSeat, bbSeat, street(0-3), deck, hole, board, startStacks, commits, streetBet, folded, allIn, toAct, streetLastBetTo, lastBetSize, actions: [{ seat, kind, betTo, put, auto, street }], turnStart, deadline, phase('betting'|'settled'), won, shown, names, pots, eliminated, runFrom, startedAt, endedAt }`
+- `runFrom`：ショーダウンで手札を表にした時点のボードの枚数（動ける席が 1 人以下になって残りを配るときはその時点の 0/3/4、普通のショーダウンは 5、フォールドで終われば null）。精算後の `nextAt = endedAt + BETWEEN_HANDS_MS + runoutMs(runFrom)`。
 - `players[s].stack` はハンド中も拠出を引いた値（不変条件：Σstack + Σcommits = n × 開始スタック）。
 
 ルール（pocket-ICM SNG_DESIGN §1）
@@ -52,17 +54,21 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 - 手番：プリフロップは BB の次、ポストフロップはボタンの次から。アンティ → ブラインドの順に `min(stack, 額)`。
 - プリフロップのコールすべき額は BB 満額（BB がショートでオールインでも）。ただし配った時点で動ける人が 1 人だけなら、出ている最高額に合わせれば足りる。
 - 最小レイズ = 直前の上乗せ幅（最低 BB）。最小レイズ未満のオールインは、すでに動いた席のレイズ権を再開しない。レイズできないときの `allin` はコールとして記録する。
-- 動ける席が 1 人以下になったらボードを最後まで配る。ショーダウンは全員表向き。サイドポットは拠出額のレイヤごと（対象者が同じ隣接レイヤは 1 つのポット）、端数はポットごとにボタンの次から。
+- 動ける席が 1 人以下になったらボードを最後まで配る（`runFrom` に配る前の枚数を残す）。ショーダウンは全員表向き。サイドポットは拠出額のレイヤごと（対象者が同じ隣接レイヤは 1 つのポット）、端数はポットごとにボタンの次から。
 - 同じハンドで複数人が飛んだら開始時スタックの多い方が上位。
 - sitout / left の席は手番が来た瞬間に自動処理（チェックできればチェック、それ以外はフォールド）。
 - 退出していない生存者（active / sitout）が 1 人になったら（退出でも脱落でも）その人の勝ちで終了。退出した席は（進行中のハンドの拠出を戻した）スタックの多い順に残りの順位。
 - 生存者が全員 sitout ならハンド間で一時停止、10 分で中止。
 
 ## 4. `server/game/rules.js` — 部屋（純関数。fakeNet も使う）
-`room = { id, code, kind: 'private'|'free', host, config, status, started, members, names, state, ver, createdAt, startedAt }`
-- `createRoom` / `joinRoom`（満席で席をシャッフルして開始）/ `leaveRoom`（待機中は離れる。作成者なら中止。進行中は left）
+`room = { id, code, kind: 'private'|'free', host, config, status, started, members, names, state, ver, createdAt, startedAt, rematch }`
+- `createRoom` / `joinRoom`（満席で席をシャッフルして開始）/ `leaveRoom`（待機中は離れる。作成者なら中止。進行中は left。終局後・飛んだ後は再戦の対象から外れる＝`rematch.gone`）
 - `applyRequest(room, uid, { op: 'act', ver, move } | { op: 'sitout' } | { op: 'sitin' }, now)` / `tickRoom(room, uid, now)` → `{ room, record }`
-- `viewsOf(room)`：開始前は `[待機室]`、開始後は席ごとのビュー（`{ ...viewFor, ver: room.ver, room: roomInfo }`）。
+- `viewsOf(room)`：開始前は `[待機室]`、開始後は席ごとのビュー（`{ ...viewFor, ver: room.ver, room: roomInfo, rematch }`。rematch は終局後だけ `{ stay, gone, next, host, closesAt }`、それ以外は null）。
+- 再戦：`room.rematch = { stay: [席]（残った順）, gone: [席], next: { id, code } | null }`。
+  - `stayRoom(room, uid, now)`：終局（finished）から `REMATCH_MS` 以内で、まだ next が無く、途中で退出していない（left でない）人が席に残る。それ以外は `room_closed`。
+  - `rematchLeader({ stay, gone, host }, endedAt, now)`：作成者が残っているか、去っておらず（gone にも left にもならず）終局から `REMATCH_HOST_WAIT_MS` 以内なら作成者の席。そうでなければ先に残った人の席（いなければ null）。ブラウザもビューの rematch で同じ関数を使う。
+  - `rematchRoom(room, uid, { id, code, names, busy }, now, rnd)` → `{ room, next }`：再戦を始められる席の人だけ（`not_host`）。押した人も残ったことになる。残った人からほかの部屋に居る人（busy）を除き、2 人未満なら `not_enough`。`next` は同じ kind・同じ設定で人数 = 残った人数、作成者 = 押した人、名前は今の表示名、席はシャッフルして開始済み。元の部屋は `rematch.next` を入れて ver + 1。
 - `postChat(room, uid, text, lastAt, now)` → `{ seat, text }`（text は `normalizeChat` 済み。room は変えない）。メンバーでない → `not_found`、private でない・未開始 → `chat_closed`、文が不正 → `malformed`、同じ席の前の発言（`lastAt`）から 1 秒未満 → `too_fast`。終局後も部屋がある限り送れる。
 
 チャットの文字（`src/chat.js`。サーバーとブラウザの入力欄が共有）
@@ -80,14 +86,16 @@ viewFor(st, seat)        // 山札・鍵・他席の手札（公開分以外）�
 | `sitout` / `sitin` | `{ room }` | 同上 |
 | `tick` | `{ room }` | 同上（何も無ければ 409 `not_yet`） |
 | `chat` | `{ room, text }` | `{ now, msg: { seq, seat, text, at } }`（ゲームの `ver` は変えない） |
+| `stay` | `{ room }` | 同上（終局後に席に残る） |
+| `rematch` | `{ room }` | 新しい部屋の `{ room, ver, now, view }`（席に残った人の profiles → 元の部屋の順にロック。ほかの部屋に居る人は除く） |
 
-エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）。
+エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
 |---|---|
 | `profiles` | uid、nickname（1〜16・大文字小文字を無視して一意。制御文字・ゼロ幅・方向制御は不可） |
-| `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms |
+| `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms、rematch（終局後の再戦の受付。`20261008000000_rematch.sql`） |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
 
@@ -104,5 +112,8 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 - 待機室：部屋番号・招待 URL（`/?room=123456`。Copy / 共有）・参加者・満席で自動開始。
 - 卓：2〜6 席の楕円（自分は下）、操作は Fold / Check / Call / Bet・Raise（プリセット＋スライダー）、Check/Fold の予約、離席 / I'm back、Leave。
 - 卓のチャット（PRIVATE MATCH だけ）：入力ボタンはドックの近く。発言は発言した人の席の真上に吹き出しで出る（ふわっと出て消える。1 席に 1 つ）。ほかの席・ベット・ボード・ドック・情報の行・ほかの吹き出しに重ならない置き方を毎フレーム選ぶ：上（少し上へずらすときはしっぽの柄で席につなぐ）→ 札かプレートの横（しっぽは横向き）→ 下（しっぽは上向き）。形は標準・細め・横長と少し小さい文字（11px まで）、とても狭い卓では 1 行の帯（長い文は横に流れる）。それでも吹き出しどうしが重なれば古い方を先に消す（履歴には残る）。発言者の色は YOU と、自分から見た席の順の 5 色（`--pc1`〜`--pc5`）で、吹き出し・チャット履歴・席の合図で共通。スマホではキーボードに合わせて卓を縮める（小さすぎれば卓を縮小表示にし、吹き出しは読める大きさのまま）。デモ（`?demo`）で本物のキーボードが出ないとき（PC・開発者ツールのスマホ表示）は模擬キーボードを出して同じ縮み方を確かめられる。同期は `room_poll` の `chat` が増えたら `room_chat` を差分で読む。入室時の履歴は既読扱い。
+- 卓の金額：ベット・ポット・ドックの POT / CALL / Call・Raise・ベットのシート・勝った額は BB（ポットは下にチップも）。スタックはチップと BB。
+- ショーダウンの演出（`src/ui/table.js`）：精算済みのビューは結果を一度に運ぶので、このハンドの賭けを見ていた卓（またはブラインドだけでオールインになって配った時点で精算済みのハンド）では `RUNOUT` の順に見せる。ベットをポットへ飛ばす（オールインなら ALL-IN の帯）→ 相手の手札を表に → 勝率の札（`equities`：残り 2 枚以下は全通り、それ以上はハンド番号を種にした 40000 回の試行。どの端末でも同じ値）→ フロップ・ターン（開いて勝率を更新して止める）→ リバー（まだ 2 人以上に勝ちの目があれば伏せて置き、端を持ち上げてからめくる。決着していれば普通にめくって早めに結果へ）→ 勝者の 5 枚を浮かせ、ポットから勝者へ。演出の間は勝者・役名・増えたスタック・飛んだ順位・ドックの WINS・結果のダイアログ・端末への記録を伏せる。読み込み直し・裏に回っていたときは結果をそのまま出す。
+- 終局後：結果のダイアログに「席に残る」と Menu。残るとダイアログを閉じて卓に戻り、ドックに REMATCH（残った人数）と、再戦を始められる人には Rematch（2 人以上）、ほかの人には待機の点。席のプレートに STAY。ポーリングは受付の間 1.5 秒ごとに続け、`rematch.next` が出たら残った人は新しい卓へ。Menu は `leave` を送って去った扱いにする（飛んだ後の Menu も同じ）。
 - 卓のヘッダ：チャット履歴（未読バッジ）とこの試合のハンド履歴のボタン。どちらも中央のすりガラスのモーダル（PC は Esc で閉じる）。
 - デザインは Multiplier：直角、YOU #336B87、相手 #FE7A47、ライト／ダーク、ガラス質感、`fitTable` による実測フィット。

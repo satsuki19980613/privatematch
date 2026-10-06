@@ -8,7 +8,7 @@ const CODE = /^[0-9]{6}$/;
 export const STATUS = {
   not_found: 404, no_profile: 403, stale: 409, not_yet: 409, game_over: 409, not_your_turn: 409, busy: 409, not_started: 409,
   room_closed: 409, room_full: 409, in_other_room: 409, illegal: 422, malformed: 422,
-  chat_closed: 409, too_fast: 429, chat_full: 409,
+  chat_closed: 409, too_fast: 429, chat_full: 409, not_host: 409, not_enough: 409,
 };
 
 export function createHandler(deps) {
@@ -46,6 +46,12 @@ export function createHandler(deps) {
         case 'act':
           if (!room || !Number.isInteger(body.ver) || !body.move || typeof body.move !== 'object') return reply(422, { error: 'malformed' });
           return reply(200, await deps.request(uid, room, { op: 'act', ver: body.ver, move: body.move }));
+        case 'stay':
+          if (!room) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.stay(uid, room));
+        case 'rematch':
+          if (!room) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.rematch(uid, room));
         case 'sitout': case 'sitin':
           if (!room) return reply(422, { error: 'malformed' });
           return reply(200, await deps.request(uid, room, { op: body.op }));

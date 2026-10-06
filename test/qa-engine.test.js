@@ -10,7 +10,7 @@ import {
   newTable, act, tick, sitout, sitin, leave, legalActions, viewFor, handRecord, totalChips, eval7, handName, dueAt, EngineError,
 } from '../src/engine.js';
 import {
-  DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, normalizeConfig,
+  DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, normalizeConfig, runoutMs,
   PLAYER_COUNTS, START_BBS, SPEEDS, MODE_IDS,
 } from '../src/structure.js';
 import { createRoom, joinRoom, applyRequest, tickRoom, viewsOf, leaveRoom } from '../server/game/rules.js';
@@ -806,7 +806,8 @@ function checkInvariants(st, total, ctx) {
     assert.equal(sum(h.won), sum(h.commits)); assert.equal(sum(h.pots.map(p => p.amount)), sum(h.commits));
     for (const pot of h.pots) { assert.ok(pot.winners.every(w => pot.eligible.includes(w))); assert.ok(pot.amount > 0); }
     for (let s = 0; s < st.n; s++) if (h.folded[s]) assert.equal(h.won[s] >= 0, true);
-    if (st.status === 'running') assert.equal(st.nextAt, h.endedAt + BETWEEN_HANDS_MS);
+    if (st.status === 'running') assert.equal(st.nextAt, h.endedAt + BETWEEN_HANDS_MS + runoutMs(h.runFrom));
+    assert.equal(h.runFrom == null, !h.shown, `runFrom only on showdown ${ctx}`);
   }
 }
 

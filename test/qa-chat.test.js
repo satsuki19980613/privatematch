@@ -402,7 +402,8 @@ describe('HTTP：op chat（handler）', () => {
 test('マイグレーション（静的）：追加のみ・ver に触らない・room_poll は同じ引数・chat_seq は not null default 0・上限 200 件', () => {
   const dir = new URL('../db/migrations/', import.meta.url);
   const files = readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-  assert.equal(files.at(-1), '20261007000000_chat.sql', 'チャットが最後（追加のみ）');
+  // 追加のみ：チャットは初期化・修正の後ろ（後ろに再戦などが足されるのは良い）
+  assert.ok(files.indexOf('20261007000000_chat.sql') > files.indexOf('20261006000000_hardening.sql'), 'チャットは初期化・修正の後ろ');
   const sql = readFileSync(new URL('20261007000000_chat.sql', dir), 'utf8');
   assert.match(sql, /add column chat_seq int not null default 0/);
   assert.match(sql, /create or replace function public\.room_poll\(p_room uuid, p_ver int\)/);

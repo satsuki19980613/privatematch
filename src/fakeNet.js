@@ -6,7 +6,9 @@
 //   &idle     Bot が動かない（自分の持ち時間・離席を確かめる）
 //   &fast     Bot の思考時間を短く
 //   &chat=many  PRIVATE MATCH の卓で Bot がよく喋る（3〜6 秒に 1 回。上限ちょうどの長い文も混ぜる。見た目の確認用）
-import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo } from '../server/game/rules.js';
+//   &allin    Bot がよくオールインする（ランアウトの演出の確認用）
+//   &short    初期スタックを 2〜4 BB にする（すぐ終局する。再戦の確認用）
+import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader } from '../server/game/rules.js';
 import { legalActions, dueAt, handRecord } from './engine.js';
 import { DEFAULT_CONFIG } from './structure.js';
 import { CHAT_ROOM_MAX } from './chat.js';
@@ -16,6 +18,8 @@ const WAIT = q.has('wait') ? Math.max(0, +q.get('wait') || 0) : 1500;
 const IDLE = q.has('idle');
 const THINK = q.has('fast') ? [200, 500] : [700, 2200];
 const CHATTY = q.get('chat') === 'many';
+const ALLIN = q.has('allin');
+const SHORT = q.has('short');
 const TALK = CHATTY ? [3000, 6000] : [20000, 40000];   // Bot の雑談の間隔
 const ME = '00000000-0000-4000-8000-000000000001';
 const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 'Taro', 'Nana'];
@@ -29,7 +33,15 @@ const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;
 const fail = code => { const e = new Error(code); e.code = code; e.status = code === 'too_fast' ? 429 : 409; return e; };
 const between = ([a, b]) => a + Math.random() * (b - a);
 const pickOf = a => a[Math.floor(Math.random() * a.length)];
-const newRoom = room => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null });
+const newRoom = room => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null });
+// &short：開始直後のスタックを 2〜4 BB に削る（チップの合計の不変条件は保つ：削った分はハンドに関係しない）
+function shorten(room) {
+  if (!SHORT || !room.started) return room;
+  const st = room.state, h = st.hand;
+  st.players.forEach((p, s) => { if (p.stack > 0 && !h.allIn[s]) p.stack = Math.min(p.stack, h.bb * (2 + Math.floor(Math.random() * 3))); });
+  h.startStacks = st.players.map((p, s) => p.stack + h.commits[s]);
+  return room;
+}
 
 // FreeMatch の一覧に並べる、ほかの人が作った部屋
 function seedFree() {
@@ -120,7 +132,8 @@ function botMove(view, seat) {
   if (L.canFold && L.callPut > stack * 0.35 && x < 0.55) return { type: 'fold' };
   if (L.canFold && x < 0.12) return { type: 'fold' };
   if (L.minTo != null && x > 0.82) return { type: 'raise', to: Math.min(L.maxTo, L.minTo + Math.floor(Math.random() * 2) * view.hand.bb) };
-  if (L.minTo != null && x > 0.985) return { type: 'allin' };
+  if (L.minTo != null && x > (ALLIN ? 0.5 : 0.985)) return { type: 'allin' };
+  if (ALLIN && L.canFold) return { type: 'call' };
   return L.canCheck ? { type: 'check' } : { type: 'call' };
 }
 // 呼ばれるたびに時間で進むものを進める：Bot の入室・Bot の手番・時間切れ・次のハンド・Bot のおしゃべり
@@ -133,11 +146,12 @@ function advanceGame(R) {
   let room = R.room;
   if (!room.started && room.status === 'waiting' && room.members.includes(ME) && now >= R.nextJoin) {
     const uid = botUid(); R.bots.add(uid);
-    save(R, { room: joinRoom(room, uid, pickName(room.names), now, Math.random) });
+    save(R, { room: shorten(joinRoom(room, uid, pickName(room.names), now, Math.random)) });
     R.nextJoin = now + WAIT;
     return advanceGame(R);
   }
   room = R.room;
+  if (room.started && room.status === 'finished') return botsAfterGame(R, now);
   if (!room.started || !['running', 'paused'].includes(room.status)) return;
   for (let guard = 0; guard < 20; guard++) {
     const st = R.room.state, h = st.hand;
@@ -154,6 +168,28 @@ function advanceGame(R) {
     if (at == null || now < at + (h && h.phase === 'betting' ? 1500 : 0)) return;
     try { save(R, tickRoom(R.room, R.room.members.find(u => R.bots.has(u)) ?? ME, now)); } catch (e) { return; }
   }
+}
+// 終局後の Bot：7 割が席に残り、残りは去る。再戦を始める役が Bot なら、自分（ME）が残ってから少しして始める
+function botsAfterGame(R, now) {
+  const room = R.room; if (!rematchOpen(room, now)) return;
+  R.stayAt ??= room.members.map(u => (R.bots.has(u) && room.state.players[room.members.indexOf(u)].status !== 'left' ? now + between([1200, 5000]) : null));
+  room.members.forEach((u, s) => {
+    if (R.stayAt[s] == null || now < R.stayAt[s]) return;
+    R.stayAt[s] = null;
+    try { save(R, Math.random() < 0.7 ? stayRoom(R.room, u, now) : leaveRoom(R.room, u, now)); } catch (e) { /* 受付終了 */ }
+  });
+  const rm = viewsOf(R.room)[0].rematch, lead = rematchLeader(rm, R.room.state.endedAt, now), meSeat = R.room.members.indexOf(ME);
+  if (lead == null || !R.bots.has(R.room.members[lead]) || !rm.stay.includes(meSeat) || !rm.stay.includes(lead)) return;
+  R.rematchAt ??= now + 2500;
+  if (now >= R.rematchAt) startRematch(R, R.room.members[lead], now);
+}
+function startRematch(R, uid, now) {
+  const names = new Map(R.room.members.map((u, s) => [u, u === ME ? me.nickname : R.room.names[s]]));
+  const out = rematchRoom(R.room, uid, { id: crypto.randomUUID(), code: genCode(Math.random), names }, now, Math.random);
+  save(R, { room: out.room });
+  const N = { ...newRoom(shorten(out.next)), bots: new Set(out.next.members.filter(u => R.bots.has(u))) };
+  rooms.set(N.room.id, N);
+  return N;
 }
 const mine = () => [...rooms.values()].find(R => ['waiting', 'running', 'paused'].includes(R.room.status) && R.room.members.includes(ME) &&
   (!R.room.started || !['out', 'left'].includes(R.room.state.players[R.room.members.indexOf(ME)].status)));
@@ -224,12 +260,17 @@ export async function game(body) {
         if (!R) throw new MoveError('not_found');
         if (!R.room.members.includes(ME)) {
           const cur = mine(); if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
-          save(R, { room: joinRoom(R.room, ME, me.nickname, now, Math.random) });
+          save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, Math.random)) });
           R.nextJoin = now + WAIT;
         }
         return lag(replyOf(R));
       }
       case 'leave': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, leaveRoom(R.room, ME, now)); return lag(replyOf(R)); }
+      case 'stay': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, stayRoom(R.room, ME, now)); return lag(replyOf(R)); }
+      case 'rematch': {
+        const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');
+        return lag(replyOf(startRematch(R, ME, now)));
+      }
       case 'act': case 'sitin': case 'sitout': {
         const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');
         save(R, applyRequest(R.room, ME, body.op === 'act' ? { op: 'act', ver: body.ver, move: body.move } : { op: body.op }, now));

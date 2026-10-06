@@ -15,7 +15,7 @@
 | 目的 | コマンド |
 |---|---|
 | セットアップ | `npm install` |
-| 開発サーバー | `npm run dev`（http://localhost:5180。**`?fake` でサーバー無しに全画面を確認できる**） |
+| 開発サーバー | `npm run dev`（http://localhost:5180。**`?fake` でサーバー無しに全画面を確認できる**。`&allin`：Bot がよくオールインする（ランアウトの演出）、`&short`：初期スタック 2〜4 BB ですぐ終局（再戦）） |
 | 単体テスト | `npm test`（`TEST_DATABASE_URL` があれば DB の結合テストも） |
 | ビルド | `npm run build` |
 | デプロイ | `main` への push で GitHub Actions の Deploy（Neon）→ 住所をコミット → Cloudflare Pages の GitHub 連携がサイトを公開（docs/SETUP.md） |
