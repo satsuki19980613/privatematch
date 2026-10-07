@@ -126,19 +126,23 @@ export const REMATCH_HOST_WAIT_MS = 60000;    // 作成者が「席に残る」�
 // ショーダウン（オールインのランアウトを含む）の見せ方の時間（ms）。卓の画面がこの順に見せ、エンジンは次のハンドをその分だけ遅らせる。
 //   gather ベットをポットへ集める（ALL-IN の帯）→ reveal 手札を表に返して勝率を読ませる → flop / street フロップ・ターンを開いて勝率を更新して止める
 //   （gather と flop は、速すぎるという声で 1.8 倍にした。もとは 500 / 1700）
-//   → river リバー（勝負が残っていれば伏せて置いてからゆっくりめくる）→ 勝者・ポットの移動（BETWEEN_HANDS_MS）。
+//   → river リバー（勝負が残っていれば伏せて置いてからゆっくりめくり、勝率が決まるまで）→ 勝者・ポットの移動（BETWEEN_HANDS_MS）。
+//   普通のショーダウン（from = 5）は gather → show（手札を表にして見せる）→ 結果。
+//   勝負が決まってから結果へは間をおかずに進む（一間おくのは勝者の演出 GIF を出すときだけ。FX.wait）
 //   latency はポーリング（最大 1 秒）で遅れて見始めた人の分。他アプリのストリート間隔は 1〜3 秒（中央値 2 秒前後）で、1 秒以下だと何が起きたか分からない
-export const RUNOUT = { gather: 900, reveal: 1400, flop: 3060, street: 1700, river: 2600, latency: 800 };
+export const RUNOUT = { gather: 900, reveal: 1400, flop: 3060, street: 1700, river: 2000, show: 800, latency: 800 };
 /** ショーダウンの演出の長さ。from = 手札を表にした時点のボードの枚数（0/3/4/5。オールインでなければ 5）、null はショーダウン無し */
 export function runoutMs(from) {
   if (from == null) return 0;
   const R = RUNOUT;
-  return R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + (from < 5 ? R.river : 0) + R.latency;
+  if (from >= 5) return R.gather + R.show + R.latency;
+  return R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + R.river + R.latency;
 }
-// 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（RUNOUT の結果の間）おいてから卓の中央に出し、
-//   消してボードに戻ってから、ポットを勝者へ動かす。in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで
+// 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（wait）おいてから卓の中央に出し、
+//   消してボードに戻ってから、ポットを勝者へ動かす。wait 一間 / in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで。
+//   GIF を出さないハンドは一間もおかない
 //   （out と gap は、消えてからが速すぎるという声で 1.8 倍にした。もとは 320 / 250）。
 //   出す席があるハンドは、エンジンが次のハンドを FX_MS だけ遅らせる
-export const FX = { in: 280, show: 2600, out: 576, gap: 450 };
-export const FX_MS = FX.in + FX.show + FX.out + FX.gap;
+export const FX = { wait: 600, in: 280, show: 2600, out: 576, gap: 450 };
+export const FX_MS = FX.wait + FX.in + FX.show + FX.out + FX.gap;
 export const PAUSED_EXPIRES_MS = 10 * 60000;  // 一時停止の期限

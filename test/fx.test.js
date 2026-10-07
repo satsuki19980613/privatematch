@@ -42,7 +42,7 @@ test('fxSeat：取り分（won − 拠出）がいちばん多い 1 人。GIF �
 });
 
 test('engine：勝者が GIF を設定しているショーダウンだけ、次のハンドを FX_MS 遅らせる（fx は状態とビューに入る）', () => {
-  assert.equal(FX_MS, FX.in + FX.show + FX.out + FX.gap);
+  assert.equal(FX_MS, FX.wait + FX.in + FX.show + FX.out + FX.gap);
   const cfg = { ...DEFAULT_CONFIG, players: 2, startBb: 50 }, cfg3 = { ...DEFAULT_CONFIG, players: 3, startBb: 50 };
   const seen = { fx: 0, plain: 0 }, FXS = ['crown', null, 'gg'];
   // 3 人：先に動く人がオールイン、次がコール、残りは降りる（誰が勝っても試合は続く）

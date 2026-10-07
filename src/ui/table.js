@@ -505,20 +505,26 @@ function startRunout(v) {
   const ro = t.ro = { handNo: h.handNo, from, board: from, back: false, reveal: false, tense: false, eq: null, eqShow: null, flipMs: 420, stagger: 110, done: false, timers: [] };
   const at = (ms, f) => ro.timers.push(setTimeout(() => { if (T === t && t.ro === ro && !ro.done) f(); }, ms));
   const eqAt = n => equities(h.shown, h.board.slice(0, n), { seed: h.handNo * 7919 + n });
-  // 勝負が決まって一間おいたところ（y）で結果へ。勝者の演出 GIF があれば先に中央に出し、消してボードに戻ってからポットを勝者へ
-  const fs = fxOf(v), extra = fs != null ? FX_MS : 0;
-  const finale = y => {
-    if (fs == null) return at(y, () => endRunout(true));
+  // 勝負が決まった時刻 won から結果へ。勝者の演出 GIF があるときだけ一間（FX.wait）おいて中央に出し、消してボードに戻ってからポットを勝者へ。
+  // GIF が無ければ間をおかずにすぐ結果へ。=> 結果へ移る時刻
+  const fs = fxOf(v);
+  const finale = won => {
+    if (fs == null) { at(won, () => endRunout(true)); return won; }
+    const y = won + FX.wait;
     at(y, () => { if (!fxshow.play($('#table'), v.fx[fs], v.names[fs], fs === v.seat)) endRunout(true); });   // 読み込めていなければ出さずに結果へ
     at(y + FX.in + FX.show, () => fxshow.hide());
-    at(y + FX_MS, () => endRunout(true));
+    at(won + FX_MS, () => endRunout(true));
+    return won + FX_MS;
   };
+  const holdTo = end => { t.holdUntil = Math.max(t.holdUntil, Date.now() + end + PACE.beat); };
   const seats = h.shown.map((c, s) => (c ? s : -1)).filter(s => s >= 0);
   gather();
   if (from < 5 || seats.some(s => h.allIn[s])) banner('ALL-IN');
   let x = R.gather;
   at(x, () => { ro.reveal = true; render(); revealHoles(); });
-  if (from < 5) at(x + 450, () => setEq(eqAt(from)));
+  // 普通のショーダウン：手札を表にして見せたら結果へ
+  if (from >= 5) { holdTo(finale(x + R.show)); return; }
+  at(x + 450, () => setEq(eqAt(from)));
   x += R.reveal;
   for (const n of [3, 4]) {
     if (from >= n) continue;
@@ -528,7 +534,6 @@ function startRunout(v) {
     at(x + eqAtMs, () => setEq(eqAt(n)));
     x += flop ? R.flop : R.street;
   }
-  if (from >= 5) { finale(x); t.holdUntil = Math.max(t.holdUntil, Date.now() + x + extra + PACE.beat); return; }
   // リバー：まだ勝ちの目が 2 人以上にある（引き分けしかない場合を除く）なら溜める
   const pre = eqAt(4), alive = pre.filter(e => e > 0);
   const tense = alive.length > 1 && alive.some(e => Math.abs(e - alive[0]) > 1e-9);
@@ -538,14 +543,12 @@ function startRunout(v) {
     at(x + RIVER.peelAt, () => riverPeel());
     at(x + RIVER.turnAt, () => riverTurn(() => { ro.back = false; ro.board = 5; T.sh.board = 5; render(); }));
     at(x + 1850, () => { ro.tense = false; setEq(eqAt(5)); });
-    finale(x + R.river);
-    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + R.river + extra + PACE.beat);
+    holdTo(finale(x + R.river));   // 表が見えて勝率が決まったところ
   } else {
     // 決着がついている：普通にめくって早めに結果へ（次のハンドまでの時間は、そのぶん結果を長く見せる）
     at(x, () => { ro.board = 5; ro.flipMs = 460; render(); });
     at(x + 550, () => setEq(eqAt(5)));
-    finale(x + 1300);
-    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + 1300 + extra + PACE.beat);
+    holdTo(finale(x + 700));
   }
 }
 function endRunout(show) {
