@@ -78,6 +78,7 @@ function mainHTML() {
     <button class="mbtn" id="setMBtn" type="button"><span>SETTINGS<small>${fxAvailable() ? 'ベットサイズ・演出 GIF' : 'ベットサイズ'}</small></span></button>
     ${showcase() ? `<div class="list-h"><span class="eyebrow">SHOWCASE</span></div>
     <button class="mbtn" data-demo="river" type="button"><span>オールイン<small>リバーまで勝負が残るオールイン</small></span><span class="rt">▶</span></button>
+    <button class="mbtn" data-demo="fx" type="button"><span>演出 GIF<small>ショーダウンで勝った人の GIF（SETTINGS で選んだ GIF も）</small></span><span class="rt">▶</span></button>
     <button class="mbtn" data-demo="flow" type="button"><span>3 人で打つ<small>ベットの操作・街が変わるときの間</small></span><span class="rt">▶</span></button>
     <button class="mbtn" data-demo="rematch" type="button"><span>再戦<small>数ハンドで終わる試合 → 席に残る → Rematch</small></span><span class="rt">▶</span></button>` : ''}`;
 }
