@@ -5,7 +5,7 @@ import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf, RUNOUT, runoutMs, FX, FX
 import { equities, pctOf, bestFive } from '../equity.js';
 import { PACE, plan, nextToApply, flipOf } from '../pace.js';
 import { rematchLeader } from '../../server/game/rules.js';
-import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb } from './util.js';
+import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb, localGet, localSet } from './util.js';
 import { syncRoom } from '../history/sync.js';
 import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
@@ -26,7 +26,7 @@ export function enter(id) {
   leave();
   T = { id, ver: -1, v: null, busy: false, timer: 0, lockUntil: 0, pre: null, rs: null, resultShown: false, tickAt: 0, tickBusy: false,
     clockCache: null, sh: { handNo: -1, board: -1, settled: -1, revealed: -1, bet: [], init: false }, synced: 0, syncT: 0, leaving: false,
-    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null };
+    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, settledAt: 0, resT: 0 };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
   chat.start(id);
   // 前の卓の描画の記録も消す（同じ人数・同じ席の卓に入り直したとき＝再戦で、席を作り直さずに止まっていた）
@@ -34,6 +34,7 @@ export function enter(id) {
   setHTML($('#dockMain'), '<span class="dk-title">…</span><span class="dots"><i></i><i></i><i></i></span>');
   $('#dock').classList.add('idle');
   document.body.dataset.screen = 'game';
+  $('#table').classList.toggle('u-chip', chipUnit);
   syncHeader();
   refit();
   poll();
@@ -42,7 +43,7 @@ export function enter(id) {
 export function leave() {
   if (!T) return;
   document.querySelectorAll('.rsheet').forEach(e => e.remove());
-  clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT); clearTimeout(T.pumpT);
+  clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT); clearTimeout(T.pumpT); clearTimeout(T.resT);
   if (T.ro) { T.ro.done = true; T.ro.timers.forEach(clearTimeout); }
   if (T.sg) { T.sg.done = true; T.sg.timers.forEach(clearTimeout); }
   document.querySelectorAll('.fly,.ai-banner,.dock-ghost').forEach(e => e.remove());
@@ -206,6 +207,10 @@ function finishStage(show) {
 function checkResult() {
   const t = T, v = t.v; if (!v || veiled()) return;   // 結果を伏せている間（ショーダウンの演出など）は出さない
   const me = v.players[v.seat], ended = v.status === 'finished' || v.status === 'cancelled';
+  // 勝負が決まったハンドを見せた直後は、ボード・勝者・チップの動きを見てもらってから出す（PACE.result。すぐ出すとボードが見えないという声）
+  const want = (ended && !t.overShown) || (!ended && me.status === 'out' && !t.resultShown);
+  const wait = want ? t.settledAt + PACE.result - Date.now() : 0;
+  if (wait > 0) { clearTimeout(t.resT); t.resT = setTimeout(() => { if (T === t) checkResult(); }, wait + 20); return; }
   if (ended && !t.overShown) { t.overShown = true; showResult(); return; }
   if (ended && $('#overDlg').open) { showResult(); return; }   // 開いている間は席に残った人を更新する
   if (!ended && me.status === 'out' && !t.resultShown) showResult();
@@ -283,6 +288,15 @@ function toMenu() {
   const v = t.v, me = v && v.players[v.seat];
   if (v && (v.status === 'finished' || me.status === 'out')) net().game({ op: 'leave', room: t.id }).catch(() => {});
   closeOver(); app.nav.toMenu();
+}
+
+/* ===================== スタックの単位（BB / チップ数） ===================== */
+// 端末に保存（pm-stk）。描くのは両方で、#table.u-chip で見せる方を切り替える（CSS でふわっと入れ替える。描き直さない）
+let chipUnit = localGet('pm-stk') === 'chip';
+export function toggleUnit() {
+  chipUnit = !chipUnit;
+  localSet('pm-stk', chipUnit ? 'chip' : 'bb');
+  $('#table').classList.toggle('u-chip', chipUnit);
 }
 
 /* ===================== 席の配置 ===================== */
@@ -383,7 +397,8 @@ function seatHTML(s) {
   let cards = '';
   if (h && inHand && !out) {
     const hole = h.hole[s];
-    if (hole && !(ro && !ro.reveal && !me)) cards = hole.map(c => cardHTML(c, { dim: folded && !settled, hit: hits.has(c) })).join('');
+    // 相手の表になった札は、演出で返すまで裏（ランアウトが始まる前の一拍＝結果を伏せている間も。ここで表を描くと一瞬見えてしまっていた）
+    if (hole && (me || !vl || (ro && ro.reveal))) cards = hole.map(c => cardHTML(c, { dim: folded && !settled, hit: hits.has(c) })).join('');
     else if (!folded && !settled) cards = cardHTML(null) + cardHTML(null);
   }
   if (ro && ro.eq && h.shown && h.shown[s]) cards += eqHTML(ro, s);
@@ -393,7 +408,7 @@ function seatHTML(s) {
   if (ro && inHand && !out) note = folded ? 'FOLD' : allIn ? '<span class="ai">ALL-IN</span>' : '';
   else if (winner) note = `${h.won[s] > h.commits[s] ? `<span class="w up">+${fmtBb(h.won[s] - h.commits[s], bb)} BB</span>` : '<span class="w up">CHOP</span>'}${h.names && h.names[s] ? `<span class="hn">${esc(h.names[s])}</span>` : ''}`;
   else if (settled && h.names && h.names[s]) note = `<span class="hn">${esc(h.names[s])}</span>`;
-  else if (p.status === 'out') note = p.place ? ordinal(p.place).toUpperCase() : 'OUT';
+  else if (p.status === 'out' && !(vl && h.eliminated.some(e => e.seat === s))) note = p.place ? ordinal(p.place).toUpperCase() : 'OUT';   // このハンドで飛んだ順位は演出の後
   else if (p.status === 'left') note = 'LEFT';
   else if (la && !acting) note = `<span class="pl k-${la.kind}" data-i="${la.i}">${PL[la.kind]}</span>`;
   else if (folded) note = 'FOLD';
@@ -406,8 +421,9 @@ function seatHTML(s) {
   const bets = shownBets(), bet = bets && bets[s] > 0 ? `<div class="bchip"><i></i><b>${fmtBb(bets[s], bb)}<small>BB</small></b></div>` : '';
   // 結果を伏せている間は配る前、遷移の途中はまだ見せていないベットを足したスタック
   const stack = p.stack - (vl && h.won ? h.won[s] : 0) + (sg && sg.adj ? sg.adj[s] : 0);
+  // スタックは BB かチップ数のどちらか（#table.u-chip。スタックを押すと切り替わり、ふわっと入れ替わる）
   return `<div class="hole">${cards}</div><div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span></div>
-    <div class="stk"><b data-stk="${s}">${fmt(stack)}</b><small>${fmtBb(stack, bb)} BB</small></div><div class="note">${stayTag(v, s)}${note}</div>${clk}${dbtn}</div>${bet}`;
+    <div class="stk" data-stk="${s}"><span class="su bb"><b>${fmtBb(stack, bb)}</b><small>BB</small></span><span class="su ch"><b>${fmt(stack)}</b></span></div><div class="note">${stayTag(v, s)}${note}</div>${clk}${dbtn}</div>${bet}`;
 }
 /** いま見せるベット（遷移の途中ならその時点のもの。精算済みなら無し） */
 function shownBets() {
@@ -462,13 +478,14 @@ function afterRender() {
   if (settled && sh.settled !== h.handNo) {
     sh.settled = h.handNo;
     if (sh.init) {
+      t.settledAt = Date.now();
       // 相手の手札を表に返し（演出で返していなければ）、勝った席と役の札を弾ませ、ポットから勝った席へチップを飛ばす
       if (sh.revealed !== h.handNo) document.querySelectorAll('.seat.opp .hole .card:not(.back)').forEach((c, i) => flip(c, 120 + i * 90));
       // （勝った席の弾み・役の札・チップの動きは 1.8 倍ゆっくり。PACE.chip）
       document.querySelectorAll('.sp.win').forEach(e => e.animate([{ transform: 'none' }, { transform: 'scale(1.06)', offset: .35 }, { transform: 'none' }], { duration: 1000, easing: EASE }));
       document.querySelectorAll('.card.hit').forEach((c, i) => c.animate([{ transform: 'none' }, { transform: 'translateY(-5px)', offset: .4 }, { transform: 'none' }], { duration: 1000, delay: i * 80, easing: EASE }));
       const pot = $('#pot b');
-      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"]`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 120, null, PACE.chip); });
+      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"] .su.${chipUnit ? 'ch' : 'bb'} b`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 120, null, PACE.chip); });
     }
   }
   // 増えたベットのチップと、新しく見せたアクションの札を出す（PACE.pop）

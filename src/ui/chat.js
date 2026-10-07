@@ -2,7 +2,7 @@
 // table.js から start / stop / onPoll / onView を呼ぶ。fitTable は入力ボタンを fitLane / fitsLane で衝突判定に入れる。
 // ヘッダの履歴ボタン（#chatLogBtn）とモーダルは ingame.js（chatEnabled / messages / subscribe / unread / markRead を使う）。
 import { $, app, esc, toast, REDUCE, EASE } from './util.js';
-import { settleSoon, snapshot } from './viewport.js';
+import { settleSoon, snapshot, expectKeyboard } from './viewport.js';
 import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, chatUnits, clipChat, normalizeChat } from '../chat.js';
 
 const S = {
@@ -34,9 +34,10 @@ export function openComposer() {
     if (!REDUCE) cz.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE });
     syncTurn(); syncLeft();
   }
-  const i = $('#chatIn');
-  if (document.activeElement !== i) snapshot();
+  const i = $('#chatIn'), was = document.activeElement === i;
+  if (!was) snapshot();
   try { i.focus({ preventScroll: true }); } catch (e) { i.focus(); }
+  if (!was) expectKeyboard(true);   // 卓の縮小をキーボードと同時に始める（2 回目から。viewport.js）
 }
 
 /* ===================== table.js からのフック ===================== */
@@ -119,7 +120,7 @@ async function send() {
   S.msgs.push(local); S.lastSent = Date.now();
   i.value = ''; syncLeft();
   const b = bubble(local); notify();
-  if (coarse()) closeComposer();
+  // 続けて打てるように、送っても入力欄とキーボードはそのまま（閉じるのは入力ボタン・×・外側を押したとき）
   try {
     const r = await app.net.game({ op: 'chat', room: S.room, text });
     if (tk !== S.token) return;
@@ -152,7 +153,6 @@ function setOn(on) {
 const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg>';
 const composer = () => $('#composer');
 const isOpen = () => { const c = composer(); return !!c && !c.hidden; };
-const coarse = () => matchMedia('(pointer:coarse)').matches;
 let composing = false;
 
 function ensureComposer() {
@@ -207,6 +207,7 @@ function closeComposer(silent) {
   cz.hidden = true; $('#dock').classList.remove('cz');
   $('#chatBtn')?.setAttribute('aria-pressed', 'false');
   if (i && document.activeElement === i) i.blur();
+  expectKeyboard(false);   // 戻す動きもキーボードが下がるのと同時に
   settleSoon();
   if (!silent && !REDUCE) { const m = $('#dockMain'); if (m) m.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: EASE }); }
 }

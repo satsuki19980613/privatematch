@@ -130,6 +130,7 @@ export function init() {
   seats.addEventListener('mousedown', e => { if (e.target.closest('.seat')) e.preventDefault(); });
   seats.addEventListener('click', e => {
     const s = e.target.closest('.seat'); if (!s || composer) return;
+    if (e.target.closest('.stk')) return table.toggleUnit();   // スタックを押す：BB / チップ数の切り替え（全員の席）
     openPlayer(+s.dataset.seat);
   });
   seats.addEventListener('keydown', e => {

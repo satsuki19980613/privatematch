@@ -9,6 +9,11 @@
 //   together in one animation; the target card size is measured first at the final height with the final classes.
 //   When the visible area is too small for a usable table, the table fades out (--kbm) and only the composer and the
 //   latest bubbles stay. iOS: the page is kept at scroll 0 and the frame follows the visual viewport's offsetTop.
+// - Predicted glide (expectKeyboard): a phone reports the keyboard's height only once it is (nearly) up, so the table used to
+//   shrink after the keyboard had already covered the dock — two separate moves. The keyboard's height is remembered per screen
+//   size (localStorage pm-kbh), and from the second time on the glide starts together with the keyboard when the chat input
+//   opens (and the glide back starts when it closes). Heights reported while the keyboard is still moving toward where the glide
+//   is already heading are not followed; once it has settled, the real height wins.
 const ANDROID_NAV_PX = 48;
 const KB_PX = 100;          // a drop of the visible height larger than this while the chat input has focus = keyboard
 const DUR = 340;
@@ -36,6 +41,9 @@ const visible = () => real() - simPx();
 // current values (what is on screen) and the running animation
 const cur = { h: 0, kbp: 0, kbm: 0 };
 let anim = null, baseW = 0, baseH = 0, lastW = 0, preKbCw = 0, t0h = 0;
+// the predicted glide (expectKeyboard): { up, h, until }
+const PRED_MS = 1100;
+let pred = null, predT = 0;
 export const gliding = () => !!anim;
 // the layout before the keyboard: card size, the table's height (kept while it is scaled) and the header padding (the kb rules
 // interpolate from it). Taken when the chat input is about to get focus, i.e. before the keyboard changes anything.
@@ -119,6 +127,7 @@ function finish(to) {
 
 function apply() {
   const r = real(); if (!(r > 0)) return;
+  if (pred && performance.now() >= pred.until) pred = null;
   const w = window.innerWidth;
   const { top, bottom } = probeInsets();
   const edgeToEdge = /Android/i.test(navigator.userAgent) && top > 0 && bottom === 0;
@@ -135,8 +144,15 @@ function apply() {
   const kb = focused && baseH - h > KB_PX;
   const wasKb = document.body.classList.contains('kb');
   const inGame = document.body.dataset.screen === 'game';
+  // the keyboard is still on its way to where the predicted glide is heading: keep going
+  if (pred && !turned && w === lastW && (pred.up ? focused && h > pred.h : !focused && h < pred.h)) return;
+  if (kb && !sim.on && !turned && w === lastW) remember(baseH - h);
   if (anim && anim.to.h === h && !!anim.to.kbp === kb) return;   // already heading there
-  if (inGame && cur.h && w === lastW && (kb || wasKb) && H.measure) { lastW = w; glide(h, kb); return; }
+  if (inGame && cur.h && w === lastW && (kb || wasKb) && H.measure) {
+    lastW = w;
+    if (!anim && kb && wasKb && Math.abs(cur.h - h) < .5) return;   // already there
+    glide(h, kb); return;
+  }
   // turned with the keyboard up: lay the table out for the new orientation without the keyboard first, then glide down to it
   if (inGame && turned && kb && H.measure) {
     if (anim) { cancelAnimationFrame(anim.raf); anim = null; }
@@ -236,6 +252,32 @@ addEventListener('scroll', () => { if (window.scrollY || window.scrollX) window.
 if (window.visualViewport) {
   visualViewport.addEventListener('resize', () => (H.focused() || document.body.classList.contains('kb') ? now() : later()));
   visualViewport.addEventListener('scroll', follow);
+}
+// the keyboard's height per screen size (the width and the height without the keyboard)
+const kbKey = () => baseW + 'x' + baseH;
+function kbMem() { try { return JSON.parse(localStorage.getItem('pm-kbh') || '{}') || {}; } catch (e) { return {}; } }
+function remember(px) {
+  if (!(px > KB_PX && px < baseH * .8)) return;
+  const m = kbMem(), k = kbKey(); if (m[k] === px) return;
+  m[k] = px;
+  try { localStorage.setItem('pm-kbh', JSON.stringify(m)); } catch (e) { /* private mode */ }
+}
+/** the chat input opens (up) / closes: start the glide now instead of when the phone reports the keyboard (see the top) */
+export function expectKeyboard(up) {
+  const b = document.body;
+  if (b.dataset.screen !== 'game' || !H.measure || !cur.h || sim.on || simAllowed() || window.innerWidth !== lastW || !matchMedia('(pointer:coarse)').matches) return;
+  let h;
+  if (up) {
+    if (b.classList.contains('kb') || anim) return;
+    const px = kbMem()[kbKey()]; if (!px) return;   // the first time: wait for the keyboard as before
+    h = baseH - px;
+  } else {
+    if (!b.classList.contains('kb')) return;
+    h = baseH;
+  }
+  pred = { up, h, until: performance.now() + PRED_MS };
+  clearTimeout(predT); predT = setTimeout(() => { pred = null; apply(); }, PRED_MS + 20);   // then the real height wins (or no keyboard came)
+  glide(h, up);
 }
 /** the chat input lost focus: if no resize follows (keyboard already gone / hardware keyboard), settle anyway */
 export function settleSoon() { setTimeout(() => { if (!H.focused()) apply(); }, 650); }

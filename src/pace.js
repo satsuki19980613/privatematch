@@ -17,10 +17,11 @@
 //   controlsIn 250 / lock 400         （controlsIn は今は使わない：ドックの形を変えず、ボタンも浮かせない）出てから押せるまで（誤タップ防止。Chrome は許可ダイアログのボタンを 500ms 無効化）。
 //                                     出来事から押せるまでの合計は 1 秒以内（Nielsen の 1 秒）
 //   sheetIn 240 / sheetOut 200        パネルを開く・閉じる（出る方を長く）
+//   result 3000                       ハンドが決まって飛んだ・終局したとき、結果のダイアログを出すまで（ボードと勝者を見せる）
 //   maxLag 3000                       これ以上遅れたら途中を飛ばして最新を出す（サーバーの持ち時間を削りすぎない）
 export const PACE = {
   beat: 550, pop: 220, show: 300, gather: 612, gap: 160, flip: 260, flipStagger: 110, flopFlip: 468, flopStagger: 198, deal: 360, dealStagger: 144,
-  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, chip: 1170, win: 1290, preflop: 600, maxLag: 3000,
+  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, chip: 1170, win: 1290, preflop: 600, result: 3000, maxLag: 3000,
 };
 /** 街の札を返す速さ（from = 返す前のボードの枚数）。フロップを含むときは 1.8 倍ゆっくり、ターン・リバーはそのまま */
 export const flipOf = (from, P = PACE) => (from < 3 ? { ms: P.flopFlip, stagger: P.flopStagger } : { ms: P.flip, stagger: P.flipStagger });

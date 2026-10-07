@@ -232,7 +232,10 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .opp-s .gem{background:linear-gradient(135deg,#fff,var(--cpu) 65%)}
 .me-s .gem{background:linear-gradient(135deg,#fff,var(--you) 65%)}
 .nm{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.stk{display:flex;align-items:baseline;justify-content:space-between;gap:6px;line-height:1.1;min-width:0}
+.stk{display:grid;line-height:1.1;min-width:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+/* BB とチップ数を同じ場所に重ね、見せる方だけ出す（#table.u-chip。押すとふわっと入れ替わる） */
+.stk .su{grid-area:1/1;display:flex;align-items:baseline;gap:4px;min-width:0;transition:opacity .32s ease,transform .32s ease}
+.table:not(.u-chip) .stk .ch,.table.u-chip .stk .bb{opacity:0;transform:translateY(3px);pointer-events:none}
 .stk b{font-family:var(--f-num);font-weight:600;font-size:max(15px,calc(var(--cw)*.4));letter-spacing:-.04em;font-variant-numeric:tabular-nums}
 .stk small{font-family:var(--f-num);font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--muted);white-space:nowrap}
 .note{display:flex;align-items:center;gap:6px;height:15px;white-space:nowrap;overflow:hidden;font-family:var(--f-num);font-weight:700;letter-spacing:.06em;color:var(--muted);font-size:10px}
@@ -312,9 +315,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .dock .dk-top .dk-away{margin-left:auto;padding:2px 9px;min-height:0;font-size:11px;line-height:16px}
 .dk-pre{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--hair-2);background:transparent;color:var(--ink-2);
   font-family:var(--f-num);font-weight:700;font-size:13px;letter-spacing:.02em;cursor:pointer;white-space:nowrap}
-.dk-pre::before{content:"";width:13px;height:13px;border:1.5px solid currentColor;flex:none}
 .dk-pre[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.dk-pre[aria-pressed="true"]::before{background:var(--bg);border-color:var(--bg)}
 .dk-sp{flex:2 1 0}
 .dock .secs{margin-left:auto}
 .dock .dk-stats+.secs{margin-left:8px}
@@ -669,7 +670,7 @@ body.land .seat.me .hole{margin:0}
   .dock .btn,.dock .dk-pre{min-height:40px}
   input[type=range]{height:40px}
 }
-@media (max-width:340px){ .brand{display:none} .table{--pw:92px} .opp-s .stk small{display:none} }
+@media (max-width:340px){ .brand{display:none} .table{--pw:92px} }
 .note .hn{font-size:.92em}
 .hs-stat{align-content:start}
 .hs-grid .hs-stat:last-child{grid-column:1/-1}
@@ -678,7 +679,6 @@ body.land .seat.me .hole{margin:0}
 .hg-cfg-n{flex:none}
 /* seat plates: room for "19,850 99.8 BB" */
 .sp{padding-inline:6px}
-.stk{gap:4px}
 .stk small{letter-spacing:0}
 .sp.opp-s .stk b{font-size:max(15px,calc(var(--cw)*.34))}
 .dock.idle .dk-title{min-width:4em;flex:1 1 4em}
