@@ -8,6 +8,7 @@ import * as table from './ui/table.js';
 import * as stats from './ui/stats.js';
 import * as ingame from './ui/ingame.js';
 import { openRules } from './ui/rules.js';
+import { openSettings, onSizesChange } from './ui/settings.js';
 import { syncRecent } from './history/sync.js';
 
 app.net = realNet; // http://localhost:<port>/?fake では src/fakeNet.js に差し替える（開発のみ）
@@ -74,6 +75,8 @@ function takeInvite() {
 
 /* ---------- ヘッダ・ダイアログ ---------- */
 $('#rulesBtn').addEventListener('click', openRules);
+$('#setBtn').addEventListener('click', openSettings);
+onSizesChange(table.sizesChanged);
 $('#leaveBtn').addEventListener('click', table.askLeave);
 ingame.init(); // チャット履歴・ハンド履歴のボタンとモーダル
 $('#themeToggle').addEventListener('click', () => {
