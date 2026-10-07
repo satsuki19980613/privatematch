@@ -53,12 +53,12 @@ export function fmtPt(v) {
 export const fmtBb = (chips, bb) => { const v = Math.round((chips / (bb || 1)) * 10) / 10; return (v % 1 === 0 ? String(v) : v.toFixed(1)); };
 
 // 2 つの要素の間をチップの数字が飛ぶ演出
-export function fly(fromEl, toEl, label, cls, delay = 0, done) {
+export function fly(fromEl, toEl, label, cls, delay = 0, done, D = 650) {
   if (REDUCE || !fromEl || !toEl || document.hidden) { done && done(); return; }
   const ra = fromEl.getBoundingClientRect(), rb = toEl.getBoundingClientRect();
   const el = document.createElement('div'); el.className = 'fly ' + cls; el.textContent = label; document.body.appendChild(el);
   const w = el.offsetWidth, h = el.offsetHeight, x0 = ra.left + ra.width / 2 - w / 2, y0 = ra.top + ra.height / 2 - h / 2,
-    x1 = rb.left + rb.width / 2 - w / 2, y1 = rb.top + rb.height / 2 - h / 2, D = 650;
+    x1 = rb.left + rb.width / 2 - w / 2, y1 = rb.top + rb.height / 2 - h / 2;
   const an = el.animate([
     { transform: `translate(${x0}px,${y0}px) scale(.8)`, opacity: 0 },
     { transform: `translate(${x0}px,${y0}px) scale(1)`, opacity: 1, offset: .15 },

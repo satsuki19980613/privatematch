@@ -3,13 +3,14 @@
 import { legalActions, dueAt } from '../engine.js';
 import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf, RUNOUT, runoutMs } from '../structure.js';
 import { equities, pctOf, bestFive } from '../equity.js';
+import { PACE, plan, nextToApply } from '../pace.js';
 import { rematchLeader } from '../../server/game/rules.js';
 import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb } from './util.js';
 import { syncRoom } from '../history/sync.js';
 import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
 
-const GRACE_MS = 1500, LOCK_MS = 350;
+const GRACE_MS = 1500;
 const sum = a => a.reduce((s, x) => s + x, 0);
 const net = () => app.net;
 
@@ -20,7 +21,7 @@ export function enter(id) {
   leave();
   T = { id, ver: -1, v: null, busy: false, timer: 0, lockUntil: 0, pre: null, rs: null, resultShown: false, tickAt: 0, tickBusy: false,
     clockCache: null, sh: { handNo: -1, board: -1, settled: -1, revealed: -1, bet: [], init: false }, synced: 0, syncT: 0, leaving: false,
-    ro: null, winC: null, rmBusy: false, endSynced: false };
+    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, dockIdle: true };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
   chat.start(id);
   for (const s of ['#seats', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(s); e.innerHTML = ''; e._h = null; }
@@ -34,9 +35,10 @@ export function enter(id) {
 }
 export function leave() {
   if (!T) return;
-  const h = $('#rsheet'); if (h) h.remove();
-  clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT);
+  document.querySelectorAll('.rsheet').forEach(e => e.remove());
+  clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT); clearTimeout(T.pumpT);
   if (T.ro) { T.ro.done = true; T.ro.timers.forEach(clearTimeout); }
+  if (T.sg) { T.sg.done = true; T.sg.timers.forEach(clearTimeout); }
   document.querySelectorAll('.fly,.ai-banner').forEach(e => e.remove());
   $('#table').classList.remove('tense');
   for (const d of ['#overDlg', '#leaveDlg']) if ($(d).open) $(d).close();
@@ -65,7 +67,7 @@ export function askLeave() {
   $('#leaveOk').onclick = async () => {
     if (T !== t || t.leaving) return;
     t.leaving = true; $('#leaveOk').disabled = true; syncHeader();
-    try { const r = await net().game({ op: 'leave', room: t.id }); if (T === t) { clock.offset = r.now - Date.now(); apply(r.view); } }
+    try { const r = await net().game({ op: 'leave', room: t.id }); if (T === t) { clock.offset = r.now - Date.now(); receive(r.view, true); } }
     catch (e) { /* もう終わっていれば同じこと */ }
     $('#leaveDlg').close();
     if (T === t) { await syncRoom(t.id); if (T === t) app.nav.toMenu(); }
@@ -79,7 +81,7 @@ async function poll() {
     const r = await net().rpc('room_poll', { p_room: t.id, p_ver: t.ver });
     if (t !== T) return;
     clock.offset = r.now - Date.now();
-    if (r.view && !t.busy) apply(r.view);
+    if (r.view && !t.busy) receive(r.view);
     if (t !== T) return;   // 再戦の卓へ移った
     chat.onPoll(r.chat);
   } catch (e) {
@@ -106,39 +108,93 @@ async function maybeTick() {
   t.tickBusy = true;
   try {
     const r = await net().game({ op: 'tick', room: t.id });
-    if (t === T) { clock.offset = r.now - Date.now(); apply(r.view); }
+    if (t === T) { clock.offset = r.now - Date.now(); receive(r.view); }
   } catch (e) {
     if (t === T) t.tickAt = Date.now() + (e.code === 'not_yet' ? 500 + Math.random() * 500 : 1500);
   } finally { t.tickBusy = false; }
 }
 
-/* ===================== ビューの適用 ===================== */
-function apply(v) {
+/* ===================== ビューの受け取りと適用 ===================== */
+// 受け取ったビューは列に並べ、前の遷移を見せ終わってから（PACE。src/pace.js）1 つずつ当てる。遷移を重ねないので、
+// 画面の状態（ベットのシート・手番の合図・操作ボタン）が古いビューと新しいビューの間で食い違うことが無い。
+// now = 自分の操作の返事など、待たずにすぐ当てる（並んでいるものも含めて最新まで飛ばす）
+function receive(v, now) {
+  const t = T; if (!t || !v || v.lobby) return;
+  const top = t.q.length ? t.q[t.q.length - 1].v.ver : t.ver;
+  if (v.ver <= top) return;
+  t.q.push({ v, at: Date.now() });
+  if (now) { const last = t.q[t.q.length - 1]; t.q = []; apply(last.v, true); return; }
+  pump();
+}
+function pump() {
+  const t = T; if (!t) return;
+  clearTimeout(t.pumpT);
+  for (let guard = 0; guard < 50 && T === t && t.q.length; guard++) {
+    // 裏に回っている間は動きを見せないので、最新だけを当てる
+    const n = document.hidden ? { take: t.q[t.q.length - 1], late: true } : nextToApply(t.q, t.holdUntil, Date.now());
+    if (!n.take) { t.pumpT = setTimeout(pump, n.wait + 5); renderDock(); return; }
+    t.q = n.late ? [] : t.q.slice(1);
+    apply(n.take.v, n.late);
+  }
+}
+document.addEventListener('visibilitychange', () => { if (T) pump(); });
+function apply(v, instant) {
   const t = T; if (!v || v.ver <= t.ver || v.lobby) return;
   // 再戦が始まった：席に残っていれば新しい卓へ
   if (v.rematch && v.rematch.next && v.rematch.stay.includes(v.seat)) { closeOver(); toast('REMATCH'); app.nav.enterTable(v.rematch.next.id); return; }
   const prev = t.v;
   t.v = v; t.ver = v.ver;
   const h = v.hand;
-  if (t.ro && !t.ro.done && (!h || h.handNo !== t.ro.handNo)) endRunout(false);   // 演出の途中で次のハンドが来た
-  // 卓を見ていたら、精算の結果を順に見せる（このハンドの賭けの続き、またはブラインドだけでオールインになって配った時点で精算済みのハンド。
-  // 読み込み直し・裏に回っていたときは結果をそのまま）
-  const seen = prev && prev.hand && (prev.hand.handNo === h?.handNo ? prev.hand.phase === 'betting' : prev.hand.handNo === h?.handNo - 1);
-  if (h && h.phase === 'settled' && h.runFrom != null && h.shown && seen && !document.hidden) startRunout(v);
-  if (h && h.toAct === v.seat && (!prev || !prev.hand || prev.hand.toAct !== v.seat || prev.hand.handNo !== h.handNo)) t.lockUntil = Date.now() + LOCK_MS;
-  if (t.rs && !(h && h.toAct === v.seat && h.phase === 'betting')) closeSheet();
+  if (t.ro && !t.ro.done && (!h || h.handNo !== t.ro.handNo)) endRunout(false);   // 演出の途中で次のハンドが来た（遅れて飛ばしたとき）
+  endStage();
+  // 前のビューからの遷移を順に見せる（読み込み直し・裏に回っていた・遅れて飛ばしたときは結果をそのまま）
+  const p = !instant && t.sh.init && !document.hidden ? plan(prev, v) : null;
+  if (p && p.kind !== 'init' && p.kind !== 'none') startStage(p, v);
+  t.holdUntil = Date.now() + (p ? p.hold : 0);
+  if (h && h.toAct === v.seat && (!prev || !prev.hand || prev.hand.toAct !== v.seat || prev.hand.handNo !== h.handNo || prev.hand.street !== h.street))
+    t.lockUntil = Date.now() + (p ? p.turnAt : 0) + PACE.lock;
+  // ベットのシートは開いたときの手番のものだけ（手番が移った・街やハンドが変わった・遷移を見せ始めた）
+  if ((t.rs || sheetOpen()) && (!(h && h.toAct === v.seat && h.phase === 'betting' && v.status === 'running') || !t.rs || t.rs.handNo !== h.handNo || t.rs.street !== h.street || stage())) closeSheet();
   // 終わったハンドを端末に写す（少し待ってまとめて）
   // （演出の間はハンド履歴に結果が出ないよう、終わってから）
-  if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (runout() ? runoutMs(h.runFrom) : 0)); }
+  if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (p && p.veil ? p.hold + runoutMs(h.runFrom) : 0)); }
   chat.onView(v);
   render();
-  autoPre();
+  if (!stage()) autoPre();
   checkResult();
+}
+
+/* ---------- 遷移を 1 拍ずつ見せる（src/pace.js の plan を時間どおりに当てる） ---------- */
+/** 見せている途中の遷移（無ければ null）。bets / shown / board は、その時点で見せるベット・アクションの数・ボードの枚数 */
+function stage() {
+  const t = T, h = t && t.v && t.v.hand;
+  return t && t.sg && !t.sg.done && h && t.sg.handNo === h.handNo ? t.sg : null;
+}
+/** 結果を伏せている間（ショーダウンの演出、フォールドで終わる前の一拍）なら その状態 */
+function veiled() { const sg = stage(); return runout() || (sg && sg.veil ? sg : null); }
+function startStage(p, v) {
+  const t = T, h = v.hand;
+  const sg = t.sg = { handNo: h.handNo, kind: p.kind, veil: p.veil, board: p.board, bets: p.bets0, shown: p.shown0, street: p.street0, adj: null,
+    turnAt: Date.now() + p.turnAt, timers: [], done: false };
+  const at = (ms, f) => sg.timers.push(setTimeout(() => { if (T === t && t.sg === sg && !sg.done) f(); }, ms));
+  p.steps.forEach((st, i) => {
+    const go = () => { Object.assign(sg, { bets: st.bets, shown: st.shown, street: st.street, adj: st.adj }); if (i) render(); };
+    if (i === 0) go(); else at(st.at, go);
+  });
+  if (p.gatherAt != null) at(p.gatherAt, () => { gather(); sg.bets = sg.bets && sg.bets.map(() => 0); sg.adj = null; render(); });
+  if (p.revealAt != null) at(p.revealAt, () => { sg.board = null; sg.veil = false; sg.shown = null; sg.street = null; render(); });
+  if (p.runoutAt != null) at(p.runoutAt, () => { finishStage(false); startRunout(v); render(); });
+  else at(p.turnAt, () => finishStage(true));
+}
+function endStage() { const sg = T && T.sg; if (sg && !sg.done) { sg.done = true; sg.timers.forEach(clearTimeout); } }
+function finishStage(show) {
+  endStage();
+  if (show) { render(); autoPre(); checkResult(); }
 }
 
 /* ---------- 結果 ---------- */
 function checkResult() {
-  const t = T, v = t.v; if (!v || runout()) return;   // ショーダウンの演出が終わってから
+  const t = T, v = t.v; if (!v || veiled()) return;   // 結果を伏せている間（ショーダウンの演出など）は出さない
   const me = v.players[v.seat], ended = v.status === 'finished' || v.status === 'cancelled';
   if (ended && !t.overShown) { t.overShown = true; showResult(); return; }
   if (ended && $('#overDlg').open) { showResult(); return; }   // 開いている間は席に残った人を更新する
@@ -187,7 +243,7 @@ async function stay() {
   try {
     const r = await net().game({ op: 'stay', room: t.id });
     if (T !== t) return;
-    t.rmBusy = false; clock.offset = r.now - Date.now(); apply(r.view); closeOver(); render(); poll();
+    t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); poll();
   } catch (e) {
     if (T !== t) return;
     t.rmBusy = false; toast(e.code === 'room_closed' ? '再戦の受付は終わりました' : '通信エラー。もう一度');
@@ -242,17 +298,17 @@ function ensureSeats(v) {
 const PL = { fold: 'FOLD', check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE', allin: 'ALL-IN' };
 function render() {
   const t = T; if (!t || !t.v) return;
-  const v = t.v, h = v.hand, ro = runout();
+  const v = t.v, h = v.hand, ro = runout(), sg = stage();
   syncHeader(); ensureSeats(v);
   let ch = renderInfo();
   for (let s = 0; s < v.n; s++) ch = setHTML($('#seat' + s), seatHTML(s)) || ch;
-  const pot = h ? (h.phase === 'settled' && !ro ? sum(h.won) : sum(h.commits)) : 0;
+  const pot = h ? (h.phase === 'settled' && !veiled() ? sum(h.won) : sum(h.commits)) : 0;
   ch = setHTML($('#pot'), `<span>POT</span><b>${fmtBb(pot, h ? h.bb : 1)}<i>BB</i></b>${pot ? `<small>${fmt(pot)}</small>` : ''}`) || ch;
   $('#pot').classList.toggle('zero', !pot);
   // ボード：演出の間は開いた分だけ（リバーを伏せて置いている間は裏の札）
-  const board = h ? h.board : [], nb = ro ? ro.board : board.length, hits = winCards(h);
+  const board = h ? h.board : [], nb = ro ? ro.board : sg && sg.board != null ? sg.board : board.length, hits = winCards(h);
   ch = setHTML($('#boardC'), Array.from({ length: 5 }, (_, i) => i < nb && board[i] != null ? cardHTML(board[i], { hit: hits.has(board[i]) })
-    : ro && ro.back && i === nb ? cardHTML(null) : '<div class="slot"></div>').join('')) || ch;
+    : ro && ro.back && i === nb ? riverHTML(board[nb]) : '<div class="slot"></div>').join('')) || ch;
   $('#table').classList.toggle('tense', !!(ro && ro.tense));
   ch = renderDock() || ch;
   afterRender();
@@ -263,7 +319,7 @@ function render() {
 function renderInfo() {
   const v = T.v, h = v.hand, c = v.config;
   const lv = h ? h.level : 1, bl = BLIND_TABLES[c.speed][lv - 1] || [0, 0];
-  const alive = v.players.filter(p => p.status !== 'out').length + (runout() ? h.eliminated.length : 0);
+  const alive = v.players.filter(p => p.status !== 'out').length + (veiled() ? h.eliminated.length : 0);
   return setHTML($('#tInfo'), `<div class="lv"><b>${fmt(bl[0] / 2)}/${fmt(bl[0])}</b><span>(${fmt(bl[1])}) LV ${lv}</span></div>
     <div class="nx" id="nx"><span>NEXT</span><b id="nxv"></b></div>
     <div class="pz"><span class="mx">${alive}/${v.n}</span><b>#${esc(v.room.code)}</b></div>`);
@@ -288,18 +344,23 @@ function clockBarHTML(s) {
   return T.clockCache.html;
 }
 
-/** その席のこのストリートの最後のアクション */
-function lastAction(h, s) {
-  for (let i = h.actions.length - 1; i >= 0; i--) { const a = h.actions[i]; if (a.street !== h.street) break; if (a.seat === s) return a; }
+/** その席のこのストリートの最後のアクション（遷移を見せている途中なら、見せたところまでのその街のもの） */
+function lastAction(h, s, sg) {
+  const n = sg && sg.shown != null ? sg.shown : h.actions.length, street = sg && sg.street != null ? sg.street : h.street;
+  for (let i = n - 1; i >= 0; i--) { const a = h.actions[i]; if (a.street !== street) break; if (a.seat === s) return { ...a, i }; }
   return null;
 }
+/** 見せている途中で、まだ見せていないアクションにその席の kind があるか（フォールド・オールインを先に見せない） */
+const hiddenKind = (h, s, sg, kind) => !!(sg && sg.shown != null && h.actions.slice(sg.shown).some(a => a.seat === s && a.kind === kind));
 function seatHTML(s) {
-  const v = T.v, h = v.hand, me = s === v.seat, p = v.players[s], bb = h ? h.bb : 200, ro = runout();
-  // settled = 結果を見せてよい（ショーダウンの演出の間は、まだ賭けの直後のように見せる）
-  const done = h && h.phase === 'settled', settled = done && !ro, inHand = h && h.startStacks[s] > 0;
+  const v = T.v, h = v.hand, me = s === v.seat, p = v.players[s], bb = h ? h.bb : 200, ro = runout(), sg = stage(), vl = veiled();
+  // settled = 結果を見せてよい（ショーダウンの演出・フォールドで終わる前の一拍の間は、まだ賭けの直後のように見せる）
+  const done = h && h.phase === 'settled', settled = done && !vl, inHand = h && h.startStacks[s] > 0;
   const out = p.status === 'out' && !(done && h.eliminated.some(e => e.seat === s));
-  const folded = h && inHand && h.folded[s];
-  const acting = h && v.status === 'running' && h.phase === 'betting' && h.toAct === s;
+  const folded = h && inHand && h.folded[s] && !hiddenKind(h, s, sg, 'fold');
+  const allIn = h && inHand && h.allIn[s] && !hiddenKind(h, s, sg, 'allin');
+  // 手番の合図は遷移を見せ終わってから
+  const acting = h && v.status === 'running' && h.phase === 'betting' && h.toAct === s && !sg;
   const winner = settled && isWinner(h, s), hits = winCards(h);
   const cls = ['sp', me ? 'me-s' : 'opp-s', acting ? 'act' : '', folded && !settled ? 'fold' : '', out ? 'out' : '', winner ? 'win' : ''].filter(Boolean).join(' ');
   // 手札（演出で表に返すまでは相手の札は裏）
@@ -312,24 +373,32 @@ function seatHTML(s) {
   if (ro && ro.eq && h.shown && h.shown[s]) cards += eqHTML(ro, s);
   // 札の下の 1 行：結果 > 最後のアクション > 状態
   let note = '';
-  const la = h && !done ? lastAction(h, s) : null;
-  if (ro && inHand && !out) note = folded ? 'FOLD' : h.allIn[s] ? '<span class="ai">ALL-IN</span>' : '';
+  const la = h && (!done || sg) ? lastAction(h, s, sg) : null;
+  if (ro && inHand && !out) note = folded ? 'FOLD' : allIn ? '<span class="ai">ALL-IN</span>' : '';
   else if (winner) note = `${h.won[s] > h.commits[s] ? `<span class="w up">+${fmtBb(h.won[s] - h.commits[s], bb)} BB</span>` : '<span class="w up">CHOP</span>'}${h.names && h.names[s] ? `<span class="hn">${esc(h.names[s])}</span>` : ''}`;
   else if (settled && h.names && h.names[s]) note = `<span class="hn">${esc(h.names[s])}</span>`;
   else if (p.status === 'out') note = p.place ? ordinal(p.place).toUpperCase() : 'OUT';
   else if (p.status === 'left') note = 'LEFT';
-  else if (la && !acting) note = `<span class="pl k-${la.kind}">${PL[la.kind]}</span>`;
+  else if (la && !acting) note = `<span class="pl k-${la.kind}" data-i="${la.i}">${PL[la.kind]}</span>`;
   else if (folded) note = 'FOLD';
-  else if (h && h.allIn[s] && inHand) note = '<span class="ai">ALL-IN</span>';
+  else if (allIn) note = '<span class="ai">ALL-IN</span>';
   else if (p.status === 'sitout') note = 'AWAY';
   if (p.status === 'sitout' && note && !note.includes('AWAY') && !settled) note += '<span class="away">AWAY</span>';
   const name = me ? 'YOU' : esc(v.names[s]);
   const dbtn = h && h.btn === s && !out ? '<b class="dbtn" title="Dealer">D</b>' : '';
   const clk = acting ? clockBarHTML(s) : '';
-  const bet = h && !done && h.streetBet[s] > 0 ? `<div class="bchip"><i></i><b>${fmtBb(h.streetBet[s], bb)}<small>BB</small></b></div>` : '';
-  const stack = ro && h.won ? p.stack - h.won[s] : p.stack;   // 演出の間は配る前のスタック
+  const bets = shownBets(), bet = bets && bets[s] > 0 ? `<div class="bchip"><i></i><b>${fmtBb(bets[s], bb)}<small>BB</small></b></div>` : '';
+  // 結果を伏せている間は配る前、遷移の途中はまだ見せていないベットを足したスタック
+  const stack = p.stack - (vl && h.won ? h.won[s] : 0) + (sg && sg.adj ? sg.adj[s] : 0);
   return `<div class="hole">${cards}</div><div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span></div>
     <div class="stk"><b data-stk="${s}">${fmt(stack)}</b><small>${fmtBb(stack, bb)} BB</small></div><div class="note">${stayTag(v, s)}${note}</div>${clk}${dbtn}</div>${bet}`;
+}
+/** いま見せるベット（遷移の途中ならその時点のもの。精算済みなら無し） */
+function shownBets() {
+  const h = T.v.hand, sg = stage();
+  if (!h) return null;
+  if (sg && sg.bets) return sg.bets;
+  return h.phase === 'settled' ? null : h.streetBet;
 }
 /** 勝率の札（演出の間だけ。数字は ro.eqShow を数えながら動かす） */
 function eqHTML(ro, s) {
@@ -339,7 +408,7 @@ function eqHTML(ro, s) {
 /** ショーダウンで勝った役の札（勝った席の 5 枚。結果を見せてよいときだけ） */
 const NONE = new Set();
 function winCards(h) {
-  if (!h || h.phase !== 'settled' || !h.shown || h.board.length < 5 || runout()) return NONE;
+  if (!h || h.phase !== 'settled' || !h.shown || h.board.length < 5 || veiled()) return NONE;
   if (T.winC && T.winC.handNo === h.handNo) return T.winC.set;
   const set = new Set();
   for (const pot of h.pots) if (pot.eligible.length > 1) for (const s of pot.winners) for (const c of bestFive([...h.shown[s], ...h.board])) set.add(c);
@@ -355,17 +424,23 @@ function isWinner(h, s) {
 
 /* ---------- 描画のあとの演出 ---------- */
 function afterRender() {
-  const t = T, v = t.v, h = v.hand, sh = t.sh, ro = runout();
+  const t = T, v = t.v, h = v.hand, sh = t.sh, ro = runout(), sg = stage();
   if (!h) return;
-  const board = ro ? ro.board : h.board.length, settled = h.phase === 'settled' && !ro;
-  if (REDUCE) { sh.init = true; sh.handNo = h.handNo; sh.board = board; sh.bet = h.streetBet.slice(); sh.settled = settled ? h.handNo : sh.settled; return; }
-  const flip = (el, delay, ms = 420) => el && el.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: ms, delay, easing: EASE, fill: 'backwards' });
+  const board = ro ? ro.board : sg && sg.board != null ? sg.board : h.board.length, settled = h.phase === 'settled' && !veiled();
+  const bets = shownBets() || [];
+  const keepNotes = () => { sh.la = [...document.querySelectorAll('#seats .note .pl[data-i]')].map(e => e.dataset.i); };
+  if (REDUCE) { sh.init = true; sh.handNo = h.handNo; sh.board = board; sh.bet = bets.slice(); sh.settled = settled ? h.handNo : sh.settled; keepNotes(); return; }
+  const flip = (el, delay, ms = PACE.flip + 120) => el && el.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: ms, delay, easing: EASE, fill: 'backwards' });
   const cards = [...document.querySelectorAll('#boardC .card')];
-  if (sh.init && sh.handNo === h.handNo && board > sh.board) cards.slice(Math.max(0, sh.board), board).forEach((c, i) => flip(c, i * (ro ? ro.stagger : 110), ro ? ro.flipMs : 420));
+  if (sh.init && sh.handNo === h.handNo && board > sh.board) cards.slice(Math.max(0, sh.board), board).forEach((c, i) => flip(c, i * (ro ? ro.stagger : PACE.flipStagger), ro ? ro.flipMs : PACE.flip));
   sh.board = board;
   if (sh.handNo !== h.handNo) {
-    document.querySelectorAll('.seat .hole .card').forEach((c, i) => c.animate([{ transform: 'translateY(-22px) rotate(-5deg)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 420, delay: i * 50, easing: EASE, fill: 'backwards' }));
-    sh.handNo = h.handNo; sh.bet = [];
+    // 配る：ボタンの次の席から 1 枚ずつ（PACE.deal / dealStagger）
+    const seats = [...document.querySelectorAll('#seats .seat')].sort((a, b) => ((+a.dataset.seat - h.btn - 1 + v.n) % v.n) - ((+b.dataset.seat - h.btn - 1 + v.n) % v.n));
+    const holes = seats.map(e => [...e.querySelectorAll('.hole .card')]), order = [];
+    for (let k = 0; k < 2; k++) for (const cs of holes) if (cs[k]) order.push(cs[k]);
+    order.forEach((c, i) => c.animate([{ transform: 'translateY(-22px) rotate(-5deg) scale(.9)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: PACE.deal, delay: i * PACE.dealStagger, easing: EASE, fill: 'backwards' }));
+    sh.handNo = h.handNo; sh.bet = []; sh.la = [];
   }
   if (settled && sh.settled !== h.handNo) {
     sh.settled = h.handNo;
@@ -375,15 +450,21 @@ function afterRender() {
       document.querySelectorAll('.sp.win').forEach(e => e.animate([{ transform: 'none' }, { transform: 'scale(1.06)', offset: .35 }, { transform: 'none' }], { duration: 560, easing: EASE }));
       document.querySelectorAll('.card.hit').forEach((c, i) => c.animate([{ transform: 'none' }, { transform: 'translateY(-5px)', offset: .4 }, { transform: 'none' }], { duration: 560, delay: i * 45, easing: EASE }));
       const pot = $('#pot b');
-      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"]`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 350); });
+      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"]`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 120); });
     }
   }
-  h.streetBet.forEach((b, s) => {
+  // 増えたベットのチップと、新しく見せたアクションの札を出す（PACE.pop）
+  bets.forEach((b, s) => {
     if (!(sh.init && b > (sh.bet[s] || 0))) return;
     const el = $('#seat' + s)?.querySelector('.bchip');
-    if (el) el.animate([{ transform: 'translateY(-8px) scale(.9)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 320, easing: EASE });
+    if (el) el.animate([{ transform: 'translateY(-8px) scale(.9)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: PACE.pop, easing: EASE });
   });
-  sh.bet = h.streetBet.slice();
+  sh.bet = bets.slice();
+  const prevLa = new Set(sh.la || []);
+  document.querySelectorAll('#seats .note .pl[data-i]').forEach(e => {
+    if (sh.init && !prevLa.has(e.dataset.i)) e.animate([{ transform: 'scale(.6)', opacity: 0 }, { transform: 'scale(1.08)', opacity: 1, offset: .7 }, { transform: 'none', opacity: 1 }], { duration: PACE.pop, easing: EASE });
+  });
+  keepNotes();
   sh.init = true;
 }
 
@@ -416,32 +497,36 @@ function startRunout(v) {
     at(x + 650, () => setEq(eqAt(n)));
     x += R.street;
   }
-  if (from >= 5) { at(x, () => endRunout(true)); return; }
+  if (from >= 5) { at(x, () => endRunout(true)); t.holdUntil = Math.max(t.holdUntil, Date.now() + x + PACE.beat); return; }
   // リバー：まだ勝ちの目が 2 人以上にある（引き分けしかない場合を除く）なら溜める
   const pre = eqAt(4), alive = pre.filter(e => e > 0);
   const tense = alive.length > 1 && alive.some(e => Math.abs(e - alive[0]) > 1e-9);
   if (tense) {
-    at(x, () => { ro.back = true; ro.tense = true; render(); dealBack(); });
-    at(x + 1100, () => squeeze(() => { ro.back = false; ro.board = 5; ro.flipMs = 380; ro.stagger = 0; render(); }));
+    // 1 枚の札（裏と表を背中合わせにした立体）を、置く → 端を持ち上げる → そのまま止まらずに返す。最後に普通の札へ（見た目は同じ）
+    at(x, () => { ro.back = true; ro.tense = true; render(); riverDeal(); });
+    at(x + RIVER.peelAt, () => riverPeel());
+    at(x + RIVER.turnAt, () => riverTurn(() => { ro.back = false; ro.board = 5; T.sh.board = 5; render(); }));
     at(x + 1850, () => { ro.tense = false; setEq(eqAt(5)); });
     at(x + R.river, () => endRunout(true));
+    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + R.river + PACE.beat);
   } else {
     // 決着がついている：普通にめくって早めに結果へ（次のハンドまでの時間は、そのぶん結果を長く見せる）
     at(x, () => { ro.board = 5; ro.flipMs = 460; render(); });
     at(x + 550, () => setEq(eqAt(5)));
     at(x + 1300, () => endRunout(true));
+    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + 1300 + PACE.beat);
   }
 }
 function endRunout(show) {
   const t = T, ro = t && t.ro; if (!ro || ro.done) return;
   ro.done = true; ro.timers.forEach(clearTimeout);
   $('#table').classList.remove('tense');
-  if (show) { render(); checkResult(); }
+  if (show) { render(); checkResult(); pump(); }
 }
 // 前のビューで出ていたベットをポットへ飛ばす（ビューを描き替える前に呼ぶ）
 function gather() {
   const pot = $('#pot b');
-  document.querySelectorAll('#seats .bchip').forEach((el, i) => fly(el, pot, el.textContent, el.closest('.seat.me') ? 'y' : 'c', i * 60));
+  document.querySelectorAll('#seats .bchip').forEach((el, i) => fly(el, pot, el.textContent, el.closest('.seat.me') ? 'y' : 'c', i * 40, null, PACE.gather + 120));
 }
 function banner(text) {
   if (REDUCE || document.hidden) return;
@@ -472,20 +557,30 @@ function setEq(next) {
   ro.timers.push(setTimeout(() => step(t0 + D), D + 80));   // 描画が止まっていても（裏のタブなど）最後の値にはする
   if (!REDUCE) document.querySelectorAll('#seats .eq[data-s]').forEach(el => el.animate([{ transform: 'translateX(-50%) scale(1.3)' }, { transform: 'translateX(-50%)' }], { duration: 420, easing: EASE }));
 }
-// リバーを伏せて置く → 端を少しずつ持ち上げる
-function dealBack() {
-  const el = document.querySelector('#boardC .card.back'); if (!el || REDUCE) return;
-  el.animate([{ transform: 'translateY(-60%) rotate(-8deg) scale(.9)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 340, easing: EASE });
-  el.animate([{ transform: 'perspective(500px) rotateY(0)' }, { transform: 'perspective(500px) rotateY(-22deg)', offset: .35 }, { transform: 'perspective(500px) rotateY(-10deg)', offset: .55 },
-    { transform: 'perspective(500px) rotateY(-34deg)', offset: .9 }, { transform: 'perspective(500px) rotateY(-30deg)' }], { duration: 700, delay: 380, easing: 'ease-in-out', fill: 'forwards' });
+// リバーの溜め（勝負が残っているとき）。札は 1 つの立体（外側 = 置く・持ち上げる、内側 = 回す）で、途中で差し替えない。
+//   deal 0〜360：上から置く → peel 400〜1100：端を -24° までゆっくり持ち上げ、少し浮かせる（ease-in-out で速さ 0 で止まる）
+//   → turn 1100〜1750：速さ 0 から加速して -180° まで返し、浮きを戻しながら減速して止まる（表が見えるのは前と同じ 1750）
+const RIVER = { deal: 360, peelAt: 400, peel: 700, turnAt: 1100, turn: 650, lift: 'translateY(-6%) scale(1.06)', peelDeg: -24 };
+const riverHTML = c => `<div class="flip3d" aria-hidden="true"><div class="f-in"><div class="card back f-b"></div><div class="f-f">${cardHTML(c)}</div></div></div>`;
+const riverEls = () => { const o = document.querySelector('#boardC .flip3d'); return o ? [o, o.firstElementChild] : [null, null]; };
+function riverDeal() {
+  const [o] = riverEls(); if (!o || REDUCE) return;
+  o.animate([{ transform: 'translateY(-55%) rotate(-6deg) scale(.92)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: RIVER.deal, easing: EASE, fill: 'both' });
 }
-// 伏せた札を立てきってから表へ（表は afterRender が反対側から返す）
-function squeeze(done) {
-  const el = document.querySelector('#boardC .card.back');
-  if (!el || REDUCE) return done();
-  const an = el.animate([{ transform: 'perspective(500px) rotateY(-30deg)' }, { transform: 'perspective(500px) rotateY(-90deg)' }], { duration: 260, easing: 'cubic-bezier(.5,0,.9,.4)', fill: 'forwards' });
+function riverPeel() {
+  const [o, i] = riverEls(); if (!o || REDUCE) return;
+  const k = { duration: RIVER.peel, easing: 'cubic-bezier(.45,.05,.55,.95)', fill: 'forwards' };
+  o.animate([{ transform: 'none' }, { transform: RIVER.lift }], k);
+  i.animate([{ transform: 'rotateY(0deg)' }, { transform: `rotateY(${RIVER.peelDeg}deg)` }], k);
+}
+function riverTurn(done) {
+  const [o, i] = riverEls();
   let fired = false; const go = () => { if (!fired) { fired = true; done(); } };
-  an.onfinish = go; setTimeout(go, 400);
+  if (!o || REDUCE) return go();
+  const k = { duration: RIVER.turn, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' };
+  o.animate([{ transform: RIVER.lift }, { transform: RIVER.lift, offset: .45 }, { transform: 'none' }], k);
+  const an = i.animate([{ transform: `rotateY(${RIVER.peelDeg}deg)` }, { transform: 'rotateY(-180deg)' }], k);
+  an.onfinish = go; setTimeout(go, RIVER.turn + 120);
 }
 
 /* ---------- 400 ms ごとの時計 ---------- */
@@ -509,7 +604,7 @@ function tickClock() {
 /* ===================== ドック ===================== */
 const autoPreKey = () => T.v.hand.handNo + ':' + T.v.hand.street;
 function autoPre() {
-  const t = T, v = t.v, h = v.hand; if (!h || h.toAct !== v.seat || h.phase !== 'betting' || !t.pre) return;
+  const t = T, v = t.v, h = v.hand; if (!h || h.toAct !== v.seat || h.phase !== 'betting' || !t.pre || stage()) return;
   if (t.pre !== autoPreKey()) { t.pre = null; return; }
   t.pre = null;
   const l = legalActions(v, v.seat); if (!l) return;
@@ -517,12 +612,18 @@ function autoPre() {
 }
 function renderDock() {
   const t = T, v = t.v, h = v.hand, me = v.seat, p = v.players[me], dock = $('#dock'), el = $('#dockMain');
-  const l = v.status === 'running' ? legalActions(v, me) : null;
+  // 遷移を見せている間・次のビューを待っている間は操作ボタンを出さない（古い状態で押させない）
+  const sg = stage(), waiting = sg || t.q.length > 0;
+  const l = v.status === 'running' && !waiting ? legalActions(v, me) : null;
   let html = '', idle = true;
   const ro = runout(), rm = v.rematch;
   if (ro) {
     const street = ro.back || ro.board === 5 ? 'RIVER' : ro.board === 4 ? 'TURN' : ro.board === 3 ? 'FLOP' : '';
     html = `<span class="eyebrow">${ro.from < 5 || h.allIn.some(Boolean) ? 'ALL-IN' : 'SHOWDOWN'}</span><span class="dk-title">${street}</span><span class="dots"><i></i><i></i><i></i></span>`;
+  } else if (sg && (sg.veil || h.phase !== 'settled')) {
+    // 遷移の途中：街が変わるなら街の名前、ほかは待ちの点だけ
+    const street = sg.kind === 'street' ? ['', 'FLOP', 'TURN', 'RIVER'][h.street] : '';
+    html = `<span class="dk-title">${street}</span><span class="dots"><i></i><i></i><i></i></span>${h.phase === 'betting' && v.status === 'running' && p.status === 'active' ? '<button class="pre away-btn" data-act="sitout" type="button">離席</button>' : ''}`;
   } else if (v.status === 'finished' && rm && !rm.next && rm.stay.includes(me) && rematchLive(v)) {
     // 席に残った：再戦を始められる人は Rematch、ほかの人は待つ
     const lead = rematchLeader(rm, v.endedAt, clock.now()), n = rm.stay.length;
@@ -560,10 +661,14 @@ function renderDock() {
       <button class="pre away-btn" data-act="sitout" type="button">離席</button>`;
   }
   dock.classList.toggle('idle', idle);
-  const locked = !idle && (Date.now() < t.lockUntil || t.busy);
+  const locked = !idle && (Date.now() < t.lockUntil || t.busy || t.q.length > 0);
   dock.classList.toggle('lock', locked);
   if (locked && Date.now() < t.lockUntil) { clearTimeout(t.lockT); t.lockT = setTimeout(() => { if (T === t) renderDock(); }, t.lockUntil - Date.now() + 20); }
-  return setHTML(el, html);
+  const changed = setHTML(el, html);
+  // 操作ボタンが出るときは下から浮かせる（PACE.controlsIn。押せるのは lock の後）
+  if (changed && !idle && t.dockIdle && !REDUCE) el.querySelectorAll('.dk-top,.dk-row').forEach((e, i) => e.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: PACE.controlsIn, delay: i * 40, easing: EASE, fill: 'backwards' }));
+  t.dockIdle = idle;
+  return changed;
 }
 
 $('#dock').addEventListener('click', e => {
@@ -575,25 +680,31 @@ $('#dock').addEventListener('click', e => {
   if (act === 'menu') return toMenu();
   if (act === 'pre') { t.pre = t.pre === autoPreKey() ? null : autoPreKey(); renderDock(); return; }
   if (act === 'sitout' || act === 'sitin') return seatOp(act);
-  if (t.busy || Date.now() < t.lockUntil || !v.hand || v.hand.toAct !== v.seat) return;
+  if (act === 'rs-close') return closeSheet();   // 閉じるのはいつでも（手番が移った・送信中でも）
+  if (t.busy || t.q.length || stage() || Date.now() < t.lockUntil || !v.hand || v.hand.toAct !== v.seat || v.hand.phase !== 'betting') return;
   if (act === 'fold' || act === 'check' || act === 'call') return submit({ type: act });
-  if (act === 'raise') return openSheet();
-  if (act === 'rs-close') return closeSheet();
-  if (act === 'rs-ok') { const to = t.rs && t.rs.to, l = t.rs && t.rs.l; closeSheet(); return submit(to === l.maxTo ? { type: 'allin' } : { type: 'raise', to }); }
+  // 開いている間にもう一度押したら閉じる（2 枚目は作らない）。開く動きの途中の 2 度押し（連打）は無視して開いたままにする
+  if (act === 'raise') return sheetOpen() ? (t.rs && Date.now() - t.rs.openedAt < PACE.sheetIn ? undefined : closeSheet()) : openSheet();
+  if (act === 'rs-ok') {
+    const rs = t.rs; closeSheet();
+    if (!rs || rs.handNo !== v.hand.handNo || rs.street !== v.hand.street) return;   // 開いた後に状況が変わった
+    return submit(rs.to === rs.l.maxTo ? { type: 'allin' } : { type: 'raise', to: rs.to });
+  }
 });
 async function seatOp(op) {
   const t = T; if (!t || t.busy) return;
   t.busy = true;
-  try { const r = await net().game({ op, room: t.id }); if (t !== T) return; t.busy = false; clock.offset = r.now - Date.now(); apply(r.view); }
+  try { const r = await net().game({ op, room: t.id }); if (t !== T) return; t.busy = false; clock.offset = r.now - Date.now(); receive(r.view); }
   catch (e) { if (t !== T) return; t.busy = false; poll(); }
 }
 async function submit(move) {
   const t = T; if (!t || t.busy) return;
+  closeSheet();   // シートを開いたまま Call / Check / Fold を押しても残さない
   t.busy = true; renderDock();
   try {
     const r = await net().game({ op: 'act', room: t.id, ver: t.ver, move });
     if (t !== T) return;
-    t.busy = false; clock.offset = r.now - Date.now(); apply(r.view);
+    t.busy = false; clock.offset = r.now - Date.now(); receive(r.view);
   } catch (e) {
     if (t !== T) return;
     t.busy = false;
@@ -618,13 +729,14 @@ function quickValues(l, v) {
 }
 function openSheet() {
   const t = T, v = t.v, l = legalActions(v, v.seat); if (!l || l.minTo == null) return;
+  closeSheet(true);
   const lo = l.minTo, hi = l.maxTo, unit = Math.max(1, Math.round(v.hand.bb / 2)), q = quickValues(l, v);
   const vals = [lo]; for (let x = (Math.floor(lo / unit) + 1) * unit; x < hi; x += unit) vals.push(x);
   for (const [, x] of q) if (!vals.includes(x)) vals.push(x);
   if (!vals.includes(hi)) vals.push(hi);
   vals.sort((a, b) => a - b);
-  t.rs = { to: lo, vals, q, l };
-  const host = document.createElement('div'); host.className = 'rsheet'; host.id = 'rsheet';
+  t.rs = { to: lo, vals, q, l, handNo: v.hand.handNo, street: v.hand.street, openedAt: Date.now() };
+  const host = document.createElement('div'); host.className = 'rsheet';
   const bet = l.aggression === 'bet', bb = v.hand.bb;
   const mine = (v.hand.hole[v.seat] || []).map(c => cardHTML(c)).join('');
   host.innerHTML = `<div class="rs-top"><div class="rs-cards">${mine}</div><div class="grow"><span class="eyebrow">${bet ? 'BET' : 'RAISE TO'}</span><span class="sub">POT ${fmtBb(l.pot, bb)} BB</span></div><b id="rsv">${fmtBb(lo, bb)}<i>BB</i></b></div>
@@ -632,19 +744,32 @@ function openSheet() {
     <div class="quick">${q.map(([k, x]) => `<button type="button" data-q="${x}" aria-pressed="false">${k}<b>${fmtBb(x, bb)}<i>BB</i></b></button>`).join('')}</div>
     <div class="rs-btns"><button class="btn ghost" data-act="rs-close" type="button">Back</button><button class="btn accent" data-act="rs-ok" type="button"><span id="rsk">${bet ? 'Bet' : 'Raise'}</span><small id="rsv2">${fmt(lo)}</small></button></div>`;
   $('#dock').appendChild(host);
-  const r = $('#rsr');
+  const rs = t.rs, q1 = s => host.querySelector(s), r = q1('#rsr');
   const sync = () => {
-    $('#rsv').innerHTML = `${fmtBb(t.rs.to, bb)}<i>BB</i>`; $('#rsv2').textContent = fmtBb(t.rs.to, bb) + ' BB · ' + fmt(t.rs.to);
-    $('#rsk').textContent = t.rs.to === hi ? 'All-in' : bet ? 'Bet' : 'Raise';
+    if (t.rs !== rs) return;
+    q1('#rsv').innerHTML = `${fmtBb(rs.to, bb)}<i>BB</i>`; q1('#rsv2').textContent = fmtBb(rs.to, bb) + ' BB · ' + fmt(rs.to);
+    q1('#rsk').textContent = rs.to === hi ? 'All-in' : bet ? 'Bet' : 'Raise';
     r.value = t.rs.vals.indexOf(t.rs.to); r.style.setProperty('--fill', (t.rs.vals.length > 1 ? r.value / (t.rs.vals.length - 1) * 100 : 100) + '%');
     host.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.q === t.rs.to)));
   };
-  r.oninput = () => { t.rs.to = t.rs.vals[+r.value]; sync(); };
-  host.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { t.rs.to = +b.dataset.q; sync(); });
+  r.oninput = () => { if (t.rs === rs) { rs.to = rs.vals[+r.value]; sync(); } };
+  host.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { if (t.rs === rs) { rs.to = +b.dataset.q; sync(); } });
   host.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeSheet(); } });
   sync(); r.focus({ preventScroll: true });
 }
-function closeSheet() { if (T) T.rs = null; const h = $('#rsheet'); if (h) h.remove(); }
+/** 開いているベットのシートがあるか（閉じかけのものは数えない） */
+const sheetOpen = () => !!document.querySelector('.rsheet:not(.closing)');
+/** シートを閉じる。開いているものは全部（何枚あっても）。now = アニメ無しで今すぐ消す */
+function closeSheet(now) {
+  if (T) T.rs = null;
+  document.querySelectorAll('.rsheet').forEach(el => {
+    if (now || REDUCE) return el.remove();
+    if (el.classList.contains('closing')) return;
+    el.classList.add('closing');
+    const an = el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(6px)' }], { duration: PACE.sheetOut, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+    an.onfinish = () => el.remove(); setTimeout(() => el.remove(), PACE.sheetOut + 150);
+  });
+}
 
 /* ===================== 配置：全部が収まる最大のカードの大きさ ===================== */
 const rectOf = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null; };
