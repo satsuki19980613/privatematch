@@ -124,19 +124,21 @@ export const REMATCH_MS = 15 * 60000;         // 終局後の再戦の受付
 export const REMATCH_HOST_WAIT_MS = 60000;    // 作成者が「席に残る」を押さないまま、この時間たったら残った人が再戦を始められる
 
 // ショーダウン（オールインのランアウトを含む）の見せ方の時間（ms）。卓の画面がこの順に見せ、エンジンは次のハンドをその分だけ遅らせる。
-//   gather ベットをポットへ集める（ALL-IN の帯）→ reveal 手札を表に返して勝率を読ませる → street フロップ・ターンを 1 枚ずつ開いて勝率を更新して止める
+//   gather ベットをポットへ集める（ALL-IN の帯）→ reveal 手札を表に返して勝率を読ませる → flop / street フロップ・ターンを開いて勝率を更新して止める
+//   （gather と flop は、速すぎるという声で 1.8 倍にした。もとは 500 / 1700）
 //   → river リバー（勝負が残っていれば伏せて置いてからゆっくりめくる）→ 勝者・ポットの移動（BETWEEN_HANDS_MS）。
 //   latency はポーリング（最大 1 秒）で遅れて見始めた人の分。他アプリのストリート間隔は 1〜3 秒（中央値 2 秒前後）で、1 秒以下だと何が起きたか分からない
-export const RUNOUT = { gather: 500, reveal: 1400, street: 1700, river: 2600, latency: 800 };
+export const RUNOUT = { gather: 900, reveal: 1400, flop: 3060, street: 1700, river: 2600, latency: 800 };
 /** ショーダウンの演出の長さ。from = 手札を表にした時点のボードの枚数（0/3/4/5。オールインでなければ 5）、null はショーダウン無し */
 export function runoutMs(from) {
   if (from == null) return 0;
   const R = RUNOUT;
-  return R.gather + R.reveal + (from < 3 ? R.street : 0) + (from < 4 ? R.street : 0) + (from < 5 ? R.river : 0) + R.latency;
+  return R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + (from < 5 ? R.river : 0) + R.latency;
 }
 // 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（RUNOUT の結果の間）おいてから卓の中央に出し、
-//   消してボードに戻ってから、ポットを勝者へ動かす。in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで。
+//   消してボードに戻ってから、ポットを勝者へ動かす。in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで
+//   （out と gap は、消えてからが速すぎるという声で 1.8 倍にした。もとは 320 / 250）。
 //   出す席があるハンドは、エンジンが次のハンドを FX_MS だけ遅らせる
-export const FX = { in: 280, show: 2600, out: 320, gap: 250 };
+export const FX = { in: 280, show: 2600, out: 576, gap: 450 };
 export const FX_MS = FX.in + FX.show + FX.out + FX.gap;
 export const PAUSED_EXPIRES_MS = 10 * 60000;  // 一時停止の期限

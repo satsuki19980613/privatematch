@@ -3,7 +3,7 @@
 import { legalActions, dueAt, fxSeat } from '../engine.js';
 import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf, RUNOUT, runoutMs, FX, FX_MS } from '../structure.js';
 import { equities, pctOf, bestFive } from '../equity.js';
-import { PACE, plan, nextToApply } from '../pace.js';
+import { PACE, plan, nextToApply, flipOf } from '../pace.js';
 import { rematchLeader } from '../../server/game/rules.js';
 import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal, clock, REDUCE, EASE, fmtPt, fmtBb } from './util.js';
 import { syncRoom } from '../history/sync.js';
@@ -448,7 +448,8 @@ function afterRender() {
   if (REDUCE) { sh.init = true; sh.handNo = h.handNo; sh.board = board; sh.bet = bets.slice(); sh.settled = settled ? h.handNo : sh.settled; keepNotes(); return; }
   const flip = (el, delay, ms = PACE.flip + 120) => el && el.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: ms, delay, easing: EASE, fill: 'backwards' });
   const cards = [...document.querySelectorAll('#boardC .card')];
-  if (sh.init && sh.handNo === h.handNo && board > sh.board) cards.slice(Math.max(0, sh.board), board).forEach((c, i) => flip(c, i * (ro ? ro.stagger : PACE.flipStagger), ro ? ro.flipMs : PACE.flip));
+  const fo = flipOf(sh.board);   // 街が進んだとき：フロップは 1.8 倍ゆっくり
+  if (sh.init && sh.handNo === h.handNo && board > sh.board) cards.slice(Math.max(0, sh.board), board).forEach((c, i) => flip(c, i * (ro ? ro.stagger : fo.stagger), ro ? ro.flipMs : fo.ms));
   sh.board = board;
   if (sh.handNo !== h.handNo) {
     // 配る：ボタンの次の席から 1 枚ずつ（PACE.deal / dealStagger）
@@ -463,10 +464,11 @@ function afterRender() {
     if (sh.init) {
       // 相手の手札を表に返し（演出で返していなければ）、勝った席と役の札を弾ませ、ポットから勝った席へチップを飛ばす
       if (sh.revealed !== h.handNo) document.querySelectorAll('.seat.opp .hole .card:not(.back)').forEach((c, i) => flip(c, 120 + i * 90));
-      document.querySelectorAll('.sp.win').forEach(e => e.animate([{ transform: 'none' }, { transform: 'scale(1.06)', offset: .35 }, { transform: 'none' }], { duration: 560, easing: EASE }));
-      document.querySelectorAll('.card.hit').forEach((c, i) => c.animate([{ transform: 'none' }, { transform: 'translateY(-5px)', offset: .4 }, { transform: 'none' }], { duration: 560, delay: i * 45, easing: EASE }));
+      // （勝った席の弾み・役の札・チップの動きは 1.8 倍ゆっくり。PACE.chip）
+      document.querySelectorAll('.sp.win').forEach(e => e.animate([{ transform: 'none' }, { transform: 'scale(1.06)', offset: .35 }, { transform: 'none' }], { duration: 1000, easing: EASE }));
+      document.querySelectorAll('.card.hit').forEach((c, i) => c.animate([{ transform: 'none' }, { transform: 'translateY(-5px)', offset: .4 }, { transform: 'none' }], { duration: 1000, delay: i * 80, easing: EASE }));
       const pot = $('#pot b');
-      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"]`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 120); });
+      h.won.forEach((w, s) => { if (w > 0) fly(pot, document.querySelector(`[data-stk="${s}"]`), `+${fmtBb(w, h.bb)} BB`, s === v.seat ? 'y' : 'c', 120, null, PACE.chip); });
     }
   }
   // 増えたベットのチップと、新しく見せたアクションの札を出す（PACE.pop）
@@ -520,9 +522,11 @@ function startRunout(v) {
   x += R.reveal;
   for (const n of [3, 4]) {
     if (from >= n) continue;
-    at(x, () => { ro.board = n; ro.stagger = 150; ro.flipMs = 460; render(); });
-    at(x + 650, () => setEq(eqAt(n)));
-    x += R.street;
+    // フロップは 1.8 倍ゆっくり返し（3 枚が開ききってから勝率）、ターンはそのまま
+    const flop = n === 3, ms = flop ? 828 : 460, st = flop ? 270 : 150, eqAtMs = flop ? ms + 2 * st + 200 : 650;
+    at(x, () => { ro.board = n; ro.stagger = st; ro.flipMs = ms; render(); });
+    at(x + eqAtMs, () => setEq(eqAt(n)));
+    x += flop ? R.flop : R.street;
   }
   if (from >= 5) { finale(x); t.holdUntil = Math.max(t.holdUntil, Date.now() + x + extra + PACE.beat); return; }
   // リバー：まだ勝ちの目が 2 人以上にある（引き分けしかない場合を除く）なら溜める

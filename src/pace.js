@@ -6,17 +6,23 @@
 //   beat 550   連続する出来事の最小の間。2 つ目が 200〜500ms 以内だと見落とす（attentional blink, Raymond 1992）のを越え、
 //              人が自然に感じるテンポ（500〜650ms）の 1 拍
 //   pop 220    チップ・アクションの札が出る動き（1 つの動きは 200〜400ms。Material のモバイル 225〜300ms、NN/g 100〜500ms）
-//   show 300 / gather 340 / gap 160   ストリートの終わり：最後のベットを見せる → ポットへ集める（大きな変化は 300〜375ms）→ 一呼吸（別の出来事として見せる）
-//   flip 260 / flipStagger 110        札を返す 1 枚 200〜300ms、刻みは知覚の 1 サイクル（≈100ms）より長く、1 枚ずつ認識できる
-//   deal 200 / dealStagger 80         配る 1 枚 150〜200ms、刻み 60〜100ms、全体 1.5 秒以内
+//   show 300 / gather 612 / gap 160   ストリートの終わり：最後のベットを見せる → ポットへ集める → 一呼吸（別の出来事として見せる）
+//   flip 260 / flipStagger 110        ターン・リバーの札を返す 1 枚 200〜300ms、刻みは知覚の 1 サイクル（≈100ms）より長く、1 枚ずつ認識できる
+//   flopFlip 468 / flopStagger 198    フロップ（3 枚まとめて）は 1.8 倍ゆっくり返す
+//   deal 360 / dealStagger 144        配る 1 枚と刻み。6 人で約 1.9 秒
+//   chip 1170 / win 1290              ポットから勝者へチップが飛ぶ長さ（飛び始めは 120ms 後）と、フォールドで終わったときに次のビューを待つ長さ
+//   ※ 配る・チップが動く（gather / chip）・フロップは、実際に遊んで速すぎるという声で 1.8 倍にした（2026-10。もとは gather 340・deal 200/80・
+//     チップ 650・フロップ 260/110。1 つの動きは 200〜400ms という目安より長いが、知り合いと眺めながら打つ卓では落ち着いて見える方を取る）
 //   controlsIn 250 / lock 400         操作ボタンが出る動きと、出てから押せるまで（誤タップ防止。Chrome は許可ダイアログのボタンを 500ms 無効化）。
 //                                     出来事から押せるまでの合計は 1 秒以内（Nielsen の 1 秒）
 //   sheetIn 240 / sheetOut 200        パネルを開く・閉じる（出る方を長く）
 //   maxLag 3000                       これ以上遅れたら途中を飛ばして最新を出す（サーバーの持ち時間を削りすぎない）
 export const PACE = {
-  beat: 550, pop: 220, show: 300, gather: 340, gap: 160, flip: 260, flipStagger: 110, deal: 200, dealStagger: 80,
-  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, win: 650, maxLag: 3000,
+  beat: 550, pop: 220, show: 300, gather: 612, gap: 160, flip: 260, flipStagger: 110, flopFlip: 468, flopStagger: 198, deal: 360, dealStagger: 144,
+  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, chip: 1170, win: 1290, maxLag: 3000,
 };
+/** 街の札を返す速さ（from = 返す前のボードの枚数）。フロップを含むときは 1.8 倍ゆっくり、ターン・リバーはそのまま */
+export const flipOf = (from, P = PACE) => (from < 3 ? { ms: P.flopFlip, stagger: P.flopStagger } : { ms: P.flip, stagger: P.flipStagger });
 
 const quiet = a => a.kind === 'fold' || a.kind === 'check';
 
@@ -86,9 +92,9 @@ export function plan(prev, v, P = PACE) {
   out.board = tr.boardFrom;
   if (!mine.length) { out.bets0 = tr.closing; out.shown0 = a.actions.length; out.street0 = a.street; }
   if (tr.kind === 'street') {
-    const n = Math.max(1, tr.boardTo - tr.boardFrom);
+    const n = Math.max(1, tr.boardTo - tr.boardFrom), f = flipOf(tr.boardFrom, P);
     out.revealAt = out.gatherAt + P.gather + P.gap;
-    out.end = out.revealAt + P.flip + (n - 1) * P.flipStagger;
+    out.end = out.revealAt + f.ms + (n - 1) * f.stagger;
     out.turnAt = out.end;
     out.hold = Math.max(out.end, out.revealAt + P.beat);
     return out;

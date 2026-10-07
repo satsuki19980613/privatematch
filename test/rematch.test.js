@@ -182,14 +182,14 @@ test('runFrom：プリフロップのオールインは 0、フロップは 3、
   assert.equal(st.hand.phase, 'settled'); assert.equal(st.hand.runFrom, 0);
 });
 
-test('runoutMs：ストリートごとに足し、プリフロップのオールインで 7〜10 秒', () => {
+test('runoutMs：ストリートごとに足し、プリフロップのオールインで 9〜12 秒', () => {
   const R = RUNOUT;
   assert.equal(runoutMs(null), 0);
   assert.equal(runoutMs(5), R.gather + R.reveal + R.latency);
   assert.equal(runoutMs(4), runoutMs(5) + R.river);
   assert.equal(runoutMs(3), runoutMs(4) + R.street);
-  assert.equal(runoutMs(0), runoutMs(3) + R.street);
-  assert.ok(runoutMs(0) >= 7000 && runoutMs(0) <= 10000);
+  assert.equal(runoutMs(0), runoutMs(3) + R.flop);
+  assert.ok(runoutMs(0) >= 9000 && runoutMs(0) <= 12000);
   assert.ok(R.street >= 1000, '1 秒以下だと何が起きたか分からない');
 });
 

@@ -12,12 +12,15 @@ const V = (st, seat = 0) => viewFor(st, seat);
 
 test('研究に基づく間：1 拍は attentional blink（〜500ms）を越え、動きは 200〜400ms、出来事から押せるまで 1 秒以内', () => {
   assert.ok(PACE.beat >= 500 && PACE.beat <= 650);
-  for (const k of ['pop', 'show', 'gather', 'flip', 'controlsIn', 'sheetIn', 'sheetOut']) assert.ok(PACE[k] >= 180 && PACE[k] <= 400, k);
+  for (const k of ['pop', 'show', 'flip', 'controlsIn', 'sheetIn', 'sheetOut']) assert.ok(PACE[k] >= 180 && PACE[k] <= 400, k);
+  // 配る・チップが動く・フロップは、遊んで速すぎるという声で 1.8 倍（もとは gather 340・deal 200/80・チップ 650・フロップ 260/110）
+  for (const [k, was] of [['gather', 340], ['deal', 200], ['dealStagger', 80], ['chip', 650], ['flopFlip', 260], ['flopStagger', 110]]) assert.equal(PACE[k], Math.round(was * 1.8), k);
+  assert.ok(PACE.win >= PACE.chip, 'フォールドで終わったら、チップが届くまで次を待つ');
   assert.ok(PACE.sheetIn > PACE.sheetOut, '出る方を長く');
   assert.ok(PACE.lock >= 350 && PACE.lock <= 500);
   assert.ok(PACE.beat + PACE.lock <= 1000, '相手のアクションから自分が押せるまで 1 秒以内');
   assert.ok(PACE.flipStagger >= 100, '1 枚ずつ認識できる刻み');
-  assert.ok(PACE.deal + 11 * PACE.dealStagger <= 1500, '6 人に配っても 1.5 秒以内');
+  assert.ok(PACE.deal + 11 * PACE.dealStagger <= 2000, '6 人に配っても 2 秒以内');
 });
 
 test('action：相手が 1 人動いた → そのチップを出し、1 拍おいて手番を移す', () => {
@@ -62,15 +65,15 @@ test('street：コールで街が閉じる → 最後のチップを見せて、
   const base = PACE.beat + PACE.pop;
   assert.equal(p.gatherAt, base + PACE.show);
   assert.equal(p.revealAt, p.gatherAt + PACE.gather + PACE.gap);
-  assert.equal(p.end, p.revealAt + PACE.flip + 2 * PACE.flipStagger);
+  assert.equal(p.end, p.revealAt + PACE.flopFlip + 2 * PACE.flopStagger);   // フロップは 1.8 倍ゆっくり
   assert.equal(p.turnAt, p.end);
   assert.ok(p.hold >= p.revealAt + PACE.beat);
-  // 1 アクションで閉じたときは 1.5 秒以内に次へ
+  // 1 アクションで閉じたときは 2.5 秒以内に次へ
   const st2 = newTable({ config: cfg(2), names: names(2), now: 0, rnd: rng(3), button: 0 });
   act(st2, st2.hand.toAct, { type: 'call' }, 10);
   const c = V(st2); act(st2, st2.hand.toAct, { type: 'check' }, 20);
   const q = plan(c, V(st2));
-  assert.equal(q.kind, 'street'); assert.ok(q.turnAt <= 1500, `${q.turnAt}`);
+  assert.equal(q.kind, 'street'); assert.ok(q.turnAt <= 2500, `${q.turnAt}`);   // フロップを 1.8 倍ゆっくりにしても 2.5 秒以内
 });
 
 test('win：フォールドで終わる → 結果は集め終わるまで伏せる', () => {
