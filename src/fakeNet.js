@@ -8,8 +8,14 @@
 //   &chat=many  PRIVATE MATCH の卓で Bot がよく喋る（3〜6 秒に 1 回。上限ちょうどの長い文も混ぜる。見た目の確認用）
 //   &allin    Bot がよくオールインする（ランアウトの演出の確認用）
 //   &short    初期スタックを 2〜4 BB にする（すぐ終局する。再戦の確認用）
+// 演出の確認（デモのメニューのボタン。create の demo）：部屋ごとの設定 R.show
+//   river    4 人。自分 100BB・Bot 15BB。先に動く Bot がオールイン、ほかの Bot は降りる。配りは「プリフロップで両方オールインになったら、
+//            ターンで 2 人に勝ちの目が残る」ものを選ぶ（半分はリバーで逆転）＝リバーの溜めの演出が毎回見られる
+//   flow     3 人・普通の速さ（ベットの操作・街が変わるときの間）
+//   rematch  3 人・2〜4BB ですぐ終わり、Bot は全員席に残る（席に残る → Rematch）
 import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader } from '../server/game/rules.js';
-import { legalActions, dueAt, handRecord } from './engine.js';
+import { legalActions, dueAt, handRecord, newTable, act, tick } from './engine.js';
+import { equities } from './equity.js';
 import { DEFAULT_CONFIG } from './structure.js';
 import { CHAT_ROOM_MAX } from './chat.js';
 
@@ -33,10 +39,10 @@ const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;
 const fail = code => { const e = new Error(code); e.code = code; e.status = code === 'too_fast' ? 429 : 409; return e; };
 const between = ([a, b]) => a + Math.random() * (b - a);
 const pickOf = a => a[Math.floor(Math.random() * a.length)];
-const newRoom = room => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null });
-// &short：開始直後のスタックを 2〜4 BB に削る（チップの合計の不変条件は保つ：削った分はハンドに関係しない）
-function shorten(room) {
-  if (!SHORT || !room.started) return room;
+const newRoom = (room, show = null) => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null, show, wait: show ? 250 : WAIT });
+// &short（と演出の確認の rematch）：開始直後のスタックを 2〜4 BB に削る
+function shorten(room, on = SHORT) {
+  if (!on || !room.started) return room;
   const st = room.state, h = st.hand;
   st.players.forEach((p, s) => { if (p.stack > 0 && !h.allIn[s]) p.stack = Math.min(p.stack, h.bb * (2 + Math.floor(Math.random() * 3))); });
   h.startStacks = st.players.map((p, s) => p.stack + h.commits[s]);
@@ -126,9 +132,11 @@ function botTalk(R, now) {
   }
 }
 // Bot：だいたいチェック/コール、ときどきレイズ、強く張られたら降りる
-function botMove(view, seat) {
+function botMove(view, seat, show) {
   const L = legalActions(view, seat), x = Math.random(), stack = view.players[seat].stack;
   if (!L) return null;
+  if (show === 'river') return riverMove(view, seat, L);
+  if (show === 'rematch') return L.maxTo != null && x > 0.4 ? { type: 'allin' } : L.canCheck ? { type: 'check' } : { type: 'call' };   // 早く終わるように
   if (L.canFold && L.callPut > stack * 0.35 && x < 0.55) return { type: 'fold' };
   if (L.canFold && x < 0.12) return { type: 'fold' };
   if (L.minTo != null && x > 0.82) return { type: 'raise', to: Math.min(L.maxTo, L.minTo + Math.floor(Math.random() * 2) * view.hand.bb) };
@@ -146,8 +154,9 @@ function advanceGame(R) {
   let room = R.room;
   if (!room.started && room.status === 'waiting' && room.members.includes(ME) && now >= R.nextJoin) {
     const uid = botUid(); R.bots.add(uid);
-    save(R, { room: shorten(joinRoom(room, uid, pickName(room.names), now, Math.random)) });
-    R.nextJoin = now + WAIT;
+    save(R, { room: shorten(joinRoom(room, uid, pickName(room.names), now, Math.random), SHORT || R.show === 'rematch') });
+    if (R.show === 'river' && R.room.started) rigFirst(R);
+    R.nextJoin = now + R.wait;
     return advanceGame(R);
   }
   room = R.room;
@@ -156,17 +165,64 @@ function advanceGame(R) {
   for (let guard = 0; guard < 20; guard++) {
     const st = R.room.state, h = st.hand;
     if (st.status === 'running' && h && h.phase === 'betting' && R.bots.has(R.room.members[h.toAct]) && !IDLE && st.players[h.toAct].status === 'active') {
-      if (!R.botAt) R.botAt = now + THINK[0] + Math.random() * (THINK[1] - THINK[0]);
+      const think = R.show === 'river' || R.show === 'rematch' ? [400, 1000] : THINK;   // 演出の確認は待たせない
+      if (!R.botAt) R.botAt = now + think[0] + Math.random() * (think[1] - think[0]);
       if (now < R.botAt) return;
       R.botAt = 0;
-      const seat = h.toAct, view = viewsOf(R.room)[seat], mv = botMove(view, seat);
+      const seat = h.toAct, view = viewsOf(R.room)[seat], mv = botMove(view, seat, R.show);
       try { save(R, applyRequest(R.room, R.room.members[seat], { op: 'act', ver: R.room.ver, move: mv }, now)); }
       catch (e) { save(R, applyRequest(R.room, R.room.members[seat], { op: 'act', ver: R.room.ver, move: { type: legalActions(view, seat).canCheck ? 'check' : 'fold' } }, now)); }
       continue;
     }
     const at = dueAt(st);
     if (at == null || now < at + (h && h.phase === 'betting' ? 1500 : 0)) return;
+    if (R.show === 'river' && h && h.phase === 'settled') rigNext(R.room.state, now);
     try { save(R, tickRoom(R.room, R.room.members.find(u => R.bots.has(u)) ?? ME, now)); } catch (e) { return; }
+  }
+}
+
+/* ---------- 演出の確認：リバーまで勝負が残るオールイン（R.show = 'river'） ---------- */
+// Bot：まだ誰もオールインしていなければオールイン、誰かがしていれば降りる（自分と 1 人の Bot の勝負にする）
+function riverMove(view, seat, L) {
+  const h = view.hand, shoved = h.allIn.some((a, s) => a && s !== seat && !h.folded[s]);
+  if (shoved) return L.canFold ? { type: 'fold' } : { type: 'check' };
+  if (L.maxTo != null) return { type: 'allin' };
+  return L.canCheck ? { type: 'check' } : { type: 'call' };
+}
+// 配った直後の st を、Bot は riverMove・自分はコールで打ち切ったとき、ターンで 2 人以上に勝ちの目が残るか（flip なら、ターンで先行していた方がリバーで負ける）
+function tenseRunout(st, now, meSeat, flip) {
+  const c = structuredClone(st);
+  for (let g = 0; g < 40 && c.status === 'running' && c.hand && c.hand.phase === 'betting'; g++) {
+    const s = c.hand.toAct, L = legalActions(c, s);
+    act(c, s, s === meSeat ? (L.canCheck ? { type: 'check' } : { type: 'call' }) : riverMove(c, s, L), now);
+  }
+  const h = c.hand;
+  if (!h || !h.shown || h.runFrom !== 0 || !h.shown[meSeat]) return false;
+  const pre = equities(h.shown, h.board.slice(0, 4)), alive = pre.filter(e => e > 0);
+  if (alive.length < 2 || alive.every(e => Math.abs(e - alive[0]) < 1e-9)) return false;
+  if (!flip) return true;
+  const lead = pre.indexOf(Math.max(...pre));
+  return !h.pots[0].winners.includes(lead);
+}
+// 自分 100BB・Bot 15BB にして、最初のハンドを勝負が残る配りにする
+function rigFirst(R) {
+  const r0 = R.room, meSeat = r0.members.indexOf(ME), flip = Math.random() < 0.5;
+  const stacks = r0.members.map(u => (u === ME ? 100 : 15) * r0.state.hand.bb);
+  for (let i = 0; i < 400; i++) {
+    const st = newTable({ config: r0.config, names: r0.names, now: r0.state.startedAt, stacks });
+    if (i === 399 || tenseRunout(st, r0.state.startedAt, meSeat, flip && i < 300)) { R.room = { ...r0, state: st }; return; }
+  }
+}
+// 次のハンドの配りを、勝負が残るものにする（乱数の鍵を選び直す。デモだけ）
+function rigNext(st, now) {
+  const R = [...rooms.values()].find(x => x.room.state === st), meSeat = R.room.members.indexOf(ME), flip = Math.random() < 0.5;
+  if (st.players[meSeat].status === 'out') return;
+  for (let i = 0; i < 400; i++) {
+    const seed = Array.from(crypto.getRandomValues(new Uint32Array(8))), c = structuredClone(st);
+    c.seed = seed; c.ctr = 0;
+    try { tick(c, Math.max(now, st.nextAt)); } catch (e) { return; }
+    if (c.status !== 'running' || !c.hand) return;
+    if (tenseRunout(c, now, meSeat, flip && i < 300)) { st.seed = seed; st.ctr = 0; return; }
   }
 }
 // 終局後の Bot：7 割が席に残り、残りは去る。再戦を始める役が Bot なら、自分（ME）が残ってから少しして始める
@@ -176,7 +232,7 @@ function botsAfterGame(R, now) {
   room.members.forEach((u, s) => {
     if (R.stayAt[s] == null || now < R.stayAt[s]) return;
     R.stayAt[s] = null;
-    try { save(R, Math.random() < 0.7 ? stayRoom(R.room, u, now) : leaveRoom(R.room, u, now)); } catch (e) { /* 受付終了 */ }
+    try { save(R, Math.random() < (R.show ? 1 : 0.7) ? stayRoom(R.room, u, now) : leaveRoom(R.room, u, now)); } catch (e) { /* 受付終了 */ }
   });
   const rm = viewsOf(R.room)[0].rematch, lead = rematchLeader(rm, R.room.state.endedAt, now), meSeat = R.room.members.indexOf(ME);
   if (lead == null || !R.bots.has(R.room.members[lead]) || !rm.stay.includes(meSeat) || !rm.stay.includes(lead)) return;
@@ -187,8 +243,9 @@ function startRematch(R, uid, now) {
   const names = new Map(R.room.members.map((u, s) => [u, u === ME ? me.nickname : R.room.names[s]]));
   const out = rematchRoom(R.room, uid, { id: crypto.randomUUID(), code: genCode(Math.random), names }, now, Math.random);
   save(R, { room: out.room });
-  const N = { ...newRoom(shorten(out.next)), bots: new Set(out.next.members.filter(u => R.bots.has(u))) };
+  const N = { ...newRoom(shorten(out.next, SHORT || R.show === 'rematch'), R.show), bots: new Set(out.next.members.filter(u => R.bots.has(u))) };
   rooms.set(N.room.id, N);
+  if (N.show === 'river') rigFirst(N);
   return N;
 }
 const mine = () => [...rooms.values()].find(R => ['waiting', 'running', 'paused'].includes(R.room.status) && R.room.members.includes(ME) &&
@@ -248,10 +305,15 @@ export async function game(body) {
   try {
     switch (body.op) {
       case 'create': {
-        const cur = mine(); if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
+        const SHOWS = { river: { players: 4, startBb: 100 }, flow: { players: 3, startBb: 100 }, rematch: { players: 3, startBb: 50 } };
+        const show = SHOWS[body.demo] ? body.demo : null;
+        let cur = mine();
+        if (cur && show) { try { save(cur, leaveRoom(cur.room, ME, now)); } catch (e) { /* もう無い */ } cur = mine(); }   // 演出の確認はいまの卓を抜けてから
+        if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
         const id = crypto.randomUUID();
-        const room = createRoom({ id, code: genCode(Math.random), kind: body.kind, uid: ME, name: me.nickname, config: body.config, now });
-        const R = { ...newRoom(room), nextJoin: now + WAIT * 2 };
+        const config = show ? { ...DEFAULT_CONFIG, ...SHOWS[show] } : body.config;
+        const room = createRoom({ id, code: genCode(Math.random), kind: body.kind, uid: ME, name: me.nickname, config, now });
+        const R = { ...newRoom(room, show), nextJoin: now + (show ? 400 : WAIT * 2) };
         rooms.set(id, R);
         return lag(replyOf(R));
       }
@@ -260,7 +322,7 @@ export async function game(body) {
         if (!R) throw new MoveError('not_found');
         if (!R.room.members.includes(ME)) {
           const cur = mine(); if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
-          save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, Math.random)) });
+          save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, Math.random), SHORT || R.show === 'rematch') });
           R.nextJoin = now + WAIT;
         }
         return lag(replyOf(R));
