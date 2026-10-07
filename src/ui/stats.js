@@ -1,14 +1,18 @@
-// STATS（pocket-ICM のスタッツ画面と同じ骨組み）：試合数・平均順位・1位率・入賞率・累計 pt・直近の成績、順位分布、累計 pt のグラフと期間、
-// HAND HISTORY（試合ごとの一覧 → ハンドの詳細）。データはすべてこの端末の IndexedDB（history/store.js）。
-import { configSummary } from '../structure.js';
-import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb } from './util.js';
+// STATS（pocket-ICM のスタッツ画面と同じ骨組み）：ゲームモードを選び、そのモードだけで試合数・平均順位・1位率・入賞率・累計 pt・直近の成績、
+// HANDS・VPIP・PFR・生存ターン、順位分布、累計 pt のグラフと期間。HAND HISTORY（試合ごとの一覧 → ハンドの詳細）。
+// データはすべてこの端末の IndexedDB（history/store.js）。プレイヤーのメモ（history/notes.js）も EXPORT / IMPORT に含める。
+import { configSummary, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES, MODE_IDS } from '../structure.js';
+import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb, localGet, localSet } from './util.js';
 import { paint, setPane } from './menu.js';
 import * as store from '../history/store.js';
 import { syncRoom } from '../history/sync.js';
-import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks } from '../history/stats.js';
+import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, latestMode, gameHandStats, mergeStats } from '../history/stats.js';
+import { allNotes, importNotes } from '../history/notes.js';
 import { netOfRecord, positionsOf, streetPots, STREET_NAMES, actionText, forcedOf } from '../history/hand.js';
 
-let games = null, loading = false, period = 'all', openGame = null, handsCache = new Map(), hover = null;
+const MODE_KEY = 'pm-stats-mode';
+// mine: roomId → その試合の自分のハンド集計（全ハンドは持ち続けない）
+let games = null, mine = new Map(), loading = false, period = 'all', mode = null, openGame = null, handsCache = new Map(), hover = null;
 const PAGE = 30;
 let shown = PAGE;
 
@@ -19,15 +23,20 @@ async function load() {
     // まだ「途中」の試合（退出した・飛んだあと閉じた）は、サーバーに残っている間に結果を取りに行く
     const open = app.user ? games.filter(g => g.status === 'running' && (g.startedAt ?? 0) > Date.now() - 3 * 86400_000) : [];
     if (open.length && (await Promise.all(open.map(g => syncRoom(g.roomId)))).some(Boolean)) games = await store.allGames();
+    const hands = await store.handsByRoom();
+    mine = new Map(games.map(g => [g.roomId, gameHandStats(hands.get(g.roomId), g.seat)]));
   }
-  catch (e) { games = []; toast('この端末では記録を読み書きできません'); }
+  catch (e) { games = games || []; toast('この端末では記録を読み書きできません'); }
+  // 選んだモード（選んだことが無ければ最後に終わった試合のモード。知らない値は使わない）
+  const m = localGet(MODE_KEY);
+  mode = MODE_IDS.includes(m) ? m : latestMode(games, MODE_IDS);
   loading = false;
   renderNow();
 }
 const renderNow = () => { const el = $('#menuIn'); if (el && (pane0 === 'stats' || pane0 === 'history')) render(el, pane0, true); };
 let pane0 = 'stats';
 /** 記録が増えたら読み直す（卓から戻ったときなど） */
-export function invalidate() { games = null; handsCache.clear(); }
+export function invalidate() { games = null; mine = new Map(); handsCache.clear(); }
 
 export function render(el, pane, fromLoad) {
   pane0 = pane;
@@ -38,18 +47,29 @@ export function render(el, pane, fromLoad) {
 
 /* ===================== STATS ===================== */
 const PLACE_LABEL = ['1位', '2位', '3位', '4位', '5位', '6位'];
-const stat = (label, value, unit = '', sub = '', tone = '') => `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unit ? `<span class="hs-unit">${unit}</span>` : ''}</b>${sub ? `<span class="hs-sub">${sub}</span>` : ''}</div>`;
+const stat = (label, value, unit = '', sub = '', tone = '') => `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unit && value !== '–' ? `<span class="hs-unit">${unit}</span>` : ''}</b>${sub ? `<span class="hs-sub">${sub}</span>` : ''}</div>`;
 const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 
+/** ゲームモードの選択（種類 → クラブ以外は段階） */
+function modeHTML() {
+  const kind = GAME_MODES[mode].kind, variants = MODES_BY_KIND[kind];
+  return `<div class="seg hs-mode" data-key="kind">${GAME_KINDS.map(k => `<button type="button" data-v="${k}" aria-pressed="${kind === k}">${GAME_KIND_LABELS[k]}</button>`).join('')}</div>
+    ${variants.length > 1 ? `<div class="seg hs-mode hs-var" data-key="mode">${variants.map(m => `<button type="button" data-v="${m}" aria-pressed="${mode === m}">${kind === 'rank' ? 'STAGE ' + GAME_MODES[m].variant : GAME_MODES[m].variant}</button>`).join('')}</div>` : ''}`;
+}
+/** 選んだモードで、期間で絞った試合 */
+const pickedGames = () => filterByPeriod(byMode(finishedGames(games), mode), period);
+
 function statsHTML() {
-  const all = finishedGames(games), picked = filterByPeriod(all, period), sum = summarize(picked), pts = cumulativePt(picked), recent = recentPlaces(all, 10);
+  const total = finishedGames(games).length, all = byMode(finishedGames(games), mode), picked = filterByPeriod(all, period);
+  const sum = summarize(picked), pts = cumulativePt(picked), recent = recentPlaces(all, 10), ps = mergeStats(picked.map(g => mine.get(g.roomId)));
   const tone = v => (v > 0 ? 'gain' : v < 0 ? 'loss' : '');
   const n = Math.min(6, Math.max(2, sum.maxPlayers || 6)), rows = sum.placeDist.slice(0, n), max = Math.max(1, ...rows);
   const dist = rows.map((c, i) => `<div class="spd-row"><span class="spd-label">${PLACE_LABEL[i]}</span><span class="spd-bar"><span class="spd-fill${i === 0 ? ' first' : ''}" style="width:${(c / max) * 100}%"></span></span><span class="spd-count">${c}</span></div>`).join('');
   return `<button class="back" data-back type="button">← BACK</button>
     <div class="panel hs-panel">
-      <div class="hs-head"><span class="hs-title">STATS</span><span class="hs-total">試合数 <b>${all.length.toLocaleString()}</b></span></div>
+      <div class="hs-head"><span class="hs-title">STATS</span><span class="hs-total">全モード <b>${total.toLocaleString()}</b></span></div>
       <button class="btn ghost wide hs-history-btn" id="histBtn" type="button">HAND HISTORY</button>
+      <div class="hs-modes">${modeHTML()}</div>
       <div class="hs-first"><span>First Play</span><b>${all.length ? fmtDate(all[0].endedAt) : '–'}</b></div>
       <div class="hs-grid">
         ${stat('試合数', sum.games.toLocaleString())}
@@ -58,6 +78,12 @@ function statsHTML() {
         ${stat('入賞率', pctLabel(sum.cashRate), '%', '(pt &gt; 0)')}
         ${stat('累計pt', fmtPt(sum.totalPt), 'pt', '', tone(sum.totalPt))}
         ${stat('直近の成績', recent.length ? esc(recent.join(' ')) : '–', '', recent.length ? '古い→新しい' : '')}
+      </div>
+      <div class="hs-grid4">
+        ${stat('HANDS', ps.hands.toLocaleString())}
+        ${stat('VPIP', pctLabel(ps.vpip), '%')}
+        ${stat('PFR', pctLabel(ps.pfr), '%')}
+        ${stat('生存ターン', ps.survival == null ? '–' : ps.survival.toFixed(1))}
       </div>
     </div>
     <div class="panel hs-panel"><span class="hs-title">順位分布</span><div class="spd">${dist}</div></div>
@@ -94,7 +120,12 @@ function bindStats(el) {
   el.querySelector('[data-back]').onclick = () => setPane('main');
   el.querySelector('#histBtn').onclick = () => { openGame = null; shown = PAGE; setPane('history'); };
   el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { period = b.dataset.p; render(el, 'stats'); });
-  const svg = el.querySelector('#hcSvg'), pts = cumulativePt(filterByPeriod(finishedGames(games), period)), g = geo(pts);
+  el.querySelectorAll('.hs-mode').forEach(sg => sg.onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    mode = sg.dataset.key === 'kind' ? (GAME_MODES[mode].kind === b.dataset.v ? mode : MODES_BY_KIND[b.dataset.v][0]) : b.dataset.v;
+    localSet(MODE_KEY, mode); render(el, 'stats');
+  });
+  const svg = el.querySelector('#hcSvg'), pts = cumulativePt(pickedGames()), g = geo(pts);
   const move = e => {
     if (!g.n) return;
     const r = svg.getBoundingClientRect(), xr = ((e.clientX - r.left) / r.width) * CW;
@@ -106,14 +137,18 @@ function bindStats(el) {
   svg.onpointerleave = () => { el.querySelector('#hcCur').innerHTML = ''; el.querySelector('#hcRead').innerHTML = ''; };
   el.querySelector('#expBtn').onclick = async () => {
     try {
-      const data = await store.exportAll();
+      const data = { ...(await store.exportAll()), notes: allNotes() };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
       a.download = `privatematch-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     } catch (e) { toast('書き出せませんでした'); }
   };
   el.querySelector('#impIn').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
-    try { const n = await store.importAll(JSON.parse(await f.text())); toast(`${n} 試合を読み込みました`); invalidate(); render(el, 'stats'); }
+    try {
+      const data = JSON.parse(await f.text()), n = await store.importAll(data);
+      if (data.notes) importNotes(data.notes);
+      toast(`${n} 試合を読み込みました`); invalidate(); render(el, 'stats');
+    }
     catch (err) { toast('読み込めませんでした'); }
   };
 }

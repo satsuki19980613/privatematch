@@ -8,6 +8,7 @@ import { syncRoom, gameSummary } from '../history/sync.js';
 import { netOfRecord, positionsOf } from '../history/hand.js';
 import { handStats, pctLabel } from '../history/stats.js';
 import { openHand } from './stats.js';
+import * as player from './player.js';
 
 const inGame = () => document.body.dataset.screen === 'game' && table.active();
 const p2 = n => String(n).padStart(2, '0');
@@ -150,11 +151,13 @@ function stopHands() { if (H) clearInterval(H.timer); H = null; }
 /** 両方のモーダル（と、そこから開いたハンドの詳細）を閉じる */
 export function closeAll() {
   for (const d of ['#handDlg', '#handsDlg', '#chatDlg']) { const e = $(d); if (e && e.open && (d !== '#handDlg' || H)) e.close(); }
+  player.close();
   stopHands();
 }
 export function init() {
   $('#chatLogBtn').addEventListener('click', openChatLog);
   $('#handLogBtn').addEventListener('click', openHandLog);
+  player.init();   // 席を押すとプレイヤーのスタッツとメモ
   handsDlg().addEventListener('close', () => { if (handsDlg().open) return; if ($('#handDlg').open) $('#handDlg').close(); stopHands(); });
   chatDlg().addEventListener('close', () => { shown = []; });
   chat.subscribe(onChat);   // メッセージ・未読・chatEnabled が変わるたび

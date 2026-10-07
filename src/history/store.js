@@ -50,6 +50,16 @@ export async function handsOf(roomId) {
   const list = await req(db.transaction('hands').objectStore('hands').index('room').getAll(roomId));
   return list.sort((a, b) => a.handNo - b.handNo);
 }
+/** 全ハンドを試合ごとに（roomId → handNo 順の配列） */
+export async function handsByRoom() {
+  const db = await open(), out = new Map();
+  for (const h of await req(db.transaction('hands').objectStore('hands').getAll())) {
+    if (!out.has(h.roomId)) out.set(h.roomId, []);
+    out.get(h.roomId).push(h);
+  }
+  for (const l of out.values()) l.sort((a, b) => a.handNo - b.handNo);
+  return out;
+}
 /** すべて消す（デモの作り直し用） */
 export async function clearAll() {
   const db = await open(), t = db.transaction(['games', 'hands'], 'readwrite');
