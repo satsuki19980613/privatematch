@@ -119,7 +119,7 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 ## 8. 画面
 - メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、STATS、SETTINGS。ランキングは無い。
 - 設定（`src/ui/settings.js`、`#setDlg`）：ヘッダの歯車（メニューでも卓でも）とメニューの SETTINGS から開く。入口にベットサイズと演出 GIF の 2 つのボタン（← BACK で戻る）。演出 GIF を選べない（`VITE_KLIPY_KEY` が無く、デモでもない）ときは入口を出さずにベットサイズを開く。
-- 演出 GIF（`src/ui/gif.js`）：選んだ slug だけを端末に保存（localStorage `pm-fx`。デモは `pm-fx-demo`）。今の GIF と「なし」、検索欄（プレースホルダー「Search KLIPY」。入力の 0.45 秒後・Enter で検索、空ならトレンド）、結果の格子（API の順のまま。下まで送ると次のページ）。選ぶと KLIPY の Share Trigger を送る。KLIPY の呼び出しは `src/klipy.js`（`content_filter=high`、`customer_id` は端末のランダムな値 `pm-klipy-cid`、メディアと URL は保存しない）。`?fake` / `?demo` は手元の見本（`src/fxDemo.js`。自作の動く SVG）を同じ形で返し、Bot も PRIVATE MATCH では 4 人に 3 人が見本の GIF を持つ。
+- 演出 GIF（`src/ui/gif.js`）：選んだ slug だけを端末に保存（localStorage `pm-fx`。デモは `pm-fx-demo`）。今の GIF と「なし」、検索欄（プレースホルダー「Search KLIPY」。入力の 0.45 秒後・Enter で検索、空ならトレンド）、結果の格子（API の順のまま。上の部分は止めたまま格子だけがスクロールし、下まで送ると次のページ）。選ぶと KLIPY の Share Trigger を送る。KLIPY の呼び出しは `src/klipy.js`（`content_filter=high`、`customer_id` は端末のランダムな値 `pm-klipy-cid`、メディアと URL は保存しない）。`?fake` / `?demo` は手元の見本（`src/fxDemo.js`。自作の動く SVG）を同じ形で返し、Bot も PRIVATE MATCH では 4 人に 3 人が見本の GIF を持つ。
 - ベットサイズ：端末に保存（localStorage `pm-betsizes`）。スライダーの刻み（0.1/0.2/0.5/1/2/5 BB）と、場面ごとの候補（各 15 個まで）：Preflop Open（BB）、Preflop vs Raise（x = 直前のレイズ額の倍 / BB）、Postflop Bet（ポットの %）、Postflop vs Bet/Raise（x = 直前のベットの倍 / % = コール後のポットの割合を足す）。All-in は消せない。開いているベットのシートは変更で作り直す。
 - 待機室：部屋番号・招待 URL（`/?room=123456`。Copy / 共有）・参加者・満席で自動開始。
 - 卓：2〜6 席の楕円（自分は下）、操作は Fold / Check / Call / Bet・Raise（プリセット＋スライダー。プリセットは Min と設定の候補のうち Min と All-in の間に入るもので、横にスクロール。All-in は右端に固定）、Check/Fold の予約、離席 / I'm back、Leave。

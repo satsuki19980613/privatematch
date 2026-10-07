@@ -1027,7 +1027,12 @@ dialog.glass-dlg.pd-kb{margin-bottom:auto}
 .fx-cur .btn{flex:0 0 auto;align-self:flex-end;min-height:40px;padding:6px 16px;font-size:13px}
 .fx-cur .btn[aria-pressed="true"]{border-color:var(--you);color:var(--you-text)}
 .fx-q{margin-top:14px;font-weight:500}
-.fx-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+/* 演出 GIF のページ：上は止めたまま、結果の一覧（.fx-list）だけをスクロールする */
+#setBody.fx-page{display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}
+#setBody.fx-page>*{flex:none}
+#setBody.fx-page>.back{align-self:flex-start}
+#setBody.fx-page>.fx-list{flex:1 1 auto;min-height:120px;overflow-y:auto;overscroll-behavior:contain;margin-top:10px;padding-bottom:16px}
+.fx-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .fx-it{position:relative;aspect-ratio:4/3;padding:0;border:1px solid var(--hair);background:var(--well);overflow:hidden;cursor:pointer}
 .fx-it .fx-m{width:100%;height:100%;object-fit:cover;display:block}
 .fx-it[aria-pressed="true"]{outline:3px solid var(--you);outline-offset:-3px}

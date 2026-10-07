@@ -25,8 +25,7 @@ export function paint(body, top) {
   body.innerHTML = top + head('SETTINGS', '演出 GIF') + `
     <div class="fx-cur"><div class="fx-cur-m" id="fxCur"></div><button class="btn ghost" id="fxNone" type="button">なし</button></div>
     <input class="tin fx-q" id="fxQ" type="search" enterkeyhint="search" autocomplete="off" maxlength="50" placeholder="Search KLIPY" aria-label="Search KLIPY" value="${esc(S.q)}">
-    <div class="fx-grid" id="fxGrid"></div>
-    <div class="fx-foot" id="fxFoot"></div>`;
+    <div class="fx-list" id="fxList"><div class="fx-grid" id="fxGrid"></div><div class="fx-foot" id="fxFoot"></div></div>`;
   const q = $('#fxQ');
   q.oninput = () => { clearTimeout(qT); qT = setTimeout(() => search(q.value), 450); };
   q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(qT); search(q.value); q.blur(); } };
@@ -35,7 +34,9 @@ export function paint(body, top) {
     const b = e.target.closest('[data-slug]'); if (!b) return;
     setFx(b.dataset.slug); klipy.shared(b.dataset.slug, S.q); paintCur(); paintGrid();
   };
-  body.onscroll = () => { if (S.next && !S.busy && body.scrollTop + body.clientHeight > body.scrollHeight - 240) load(S.page + 1); };
+  // 上（戻る・見出し・今の GIF・検索欄）は止めたまま、結果の一覧だけをスクロールする（下まで送ると次のページ）
+  const list = $('#fxList');
+  list.onscroll = () => { if (S.next && !S.busy && list.scrollTop + list.clientHeight > list.scrollHeight - 240) load(S.page + 1); };
   paintCur();
   if (S.items.length) paintGrid(); else search(S.q, true);
 }

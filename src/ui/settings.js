@@ -29,6 +29,7 @@ const backHTML = () => (fxAvailable() ? '<button class="back" id="setBack" type=
 function paint() {
   const body = $('#setBody');
   body.onscroll = null;
+  body.classList.toggle('fx-page', page === 'fx');   // 演出 GIF のページは一覧だけがスクロールする
   if (page === 'hub') {
     body.innerHTML = head('SETTINGS', '設定') + `<div class="set-hub">
       <button class="mbtn" data-go="bet" type="button"><span>ベットサイズ<small>Bet / Raise の候補・スライダーの刻み</small></span><span class="rt">→</span></button>
