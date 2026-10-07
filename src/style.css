@@ -942,3 +942,75 @@ body.kbmin .table{height:var(--t0h);max-height:none;align-self:start;transform-o
 @media (hover:hover){.sz-chip:not(.fixed):hover{background:var(--cpu-soft);border-color:var(--cpu)}.sz-chip:hover i{opacity:1}}
 .sz-chip.fixed{border-color:var(--hair-2);background:var(--hair);color:var(--muted);cursor:default;padding:7px 10px}
 @media (pointer:coarse){.sz-chip{min-height:36px}.sz-in input{padding:10px 4px 10px 10px}}
+
+/* ===== STATS : game mode picker + hand stats (src/ui/stats.js) ===== */
+.hs-modes{display:grid;gap:4px}
+.hs-modes .seg{margin:0}
+.hs-modes .seg button{padding:8px 4px;font-size:12px;font-family:var(--f-ui)}
+.hs-modes .hs-var button{padding:6px 4px;font-size:11px;font-family:var(--f-num)}
+.hs-grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media (max-width:420px){.hs-grid4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ===== player : colour marks (history/notes.js) on the seat plates, and the modal (#playerDlg — src/ui/player.js) ===== */
+:root{--mk1:#E5484D;--mk2:#EDB100;--mk3:#2FA36B;--mk4:#1E9BE0;--mk5:#8E4EC6;--mk6:#E9599A}
+.mk1{--mk:var(--mk1)}.mk2{--mk:var(--mk2)}.mk3{--mk:var(--mk3)}.mk4{--mk:var(--mk4)}.mk5{--mk:var(--mk5)}.mk6{--mk:var(--mk6)}
+/* the plate of a marked player : the gem and a stripe down the left edge take the colour (no change to the layout) */
+.sp.mk .gem{background:var(--mk);box-shadow:0 0 0 1px rgba(255,255,255,.6)}
+.sp.mk::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--mk);pointer-events:none}
+/* a seat opens the player modal */
+.seat{cursor:pointer;-webkit-touch-callout:none}
+.seat:focus{outline:none}
+.seat:focus-visible .sp{outline:2px solid var(--you);outline-offset:2px}
+
+.pd-h{display:flex;align-items:center;gap:10px;min-width:0}
+.pd-gem{flex:none;width:11px;height:11px;transform:rotate(45deg);background:linear-gradient(135deg,#fff,var(--cpu) 65%)}
+.pd-gem.me{background:linear-gradient(135deg,#fff,var(--you) 65%)}
+.pd-gem:is(.mk1,.mk2,.mk3,.mk4,.mk5,.mk6){background:var(--mk)}
+.pd-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pd-body{display:grid;gap:14px;align-content:start;padding-top:14px;padding-bottom:18px}
+.pd-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pd-grid.pd-wait{display:grid;place-items:center;grid-template-columns:1fr;min-height:62px}
+.pd-wait .dots{margin:0}
+.pd-stat{display:grid;gap:2px;align-content:start;min-width:0;padding:8px 10px;border:1px solid var(--gd-line);background:var(--gd-row)}
+.pd-stat .statlbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pd-stat b{font-family:var(--f-num);font-weight:600;font-size:22px;line-height:1.15;letter-spacing:-.03em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pd-stat b small{font-size:11px;font-weight:600;letter-spacing:0;color:var(--muted);margin-left:2px}
+.pd-sub{font-family:var(--f-num);font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--muted);white-space:nowrap}
+.pd-now{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;min-height:20px;font-family:var(--f-num);font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--muted)}
+.pd-now .eyebrow{font-size:10px}
+.pd-now b{margin-left:5px;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--ink);font-variant-numeric:tabular-nums}
+.pd-now b small{font-size:10px;color:var(--muted);margin-left:1px}
+.pd-now .dots{margin-left:0;align-self:center}
+.pd-note{display:grid;gap:10px;padding-top:14px;border-top:1px solid var(--gd-line)}
+.pd-marks{display:flex;gap:8px}
+/* the swatches shrink to stay on one line (narrow phones, the right column sideways) */
+.pd-mk{position:relative;flex:0 1 30px;min-width:20px;aspect-ratio:1;padding:0;border:0;background:var(--mk);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);transition:transform .12s,box-shadow .15s}
+.pd-mk.mk0{background:transparent;box-shadow:inset 0 0 0 1px var(--hair-2)}
+.pd-mk.mk0::before{content:"";position:absolute;left:50%;top:50%;width:130%;height:1.5px;background:var(--muted);transform:translate(-50%,-50%) rotate(-45deg);clip-path:inset(0 12%)}
+.pd-mk[aria-pressed="true"]{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ink)}
+.pd-mk:active{transform:scale(.92)}
+.pd-mk:focus-visible{outline-offset:4px}
+.pd-memo{display:block;width:100%;min-height:76px;max-height:40dvh;margin:0;resize:vertical;border:1px solid var(--hair-2);background:var(--glass-hi);color:var(--ink);
+  font-family:var(--f-ui);font-size:16px;font-weight:500;line-height:1.5;padding:8px 10px;-webkit-user-select:text;user-select:text}
+.pd-memo:focus{outline:none;border-color:var(--you)}
+.pd-memo::placeholder{color:var(--muted);font-family:var(--f-num);letter-spacing:.06em}
+@media (pointer:coarse){.pd-mk{flex-basis:36px}}
+@media (max-width:380px){.pd-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* short screens (phones sideways) : the stats on the left, the mark and memo on the right */
+@media (max-height:500px) and (min-width:560px){
+  #playerDlg{max-width:min(680px,94vw)}
+  .pd-marks{gap:6px}
+  .pd-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px;padding-top:10px;padding-bottom:12px}
+  .pd-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pd-stat{padding:6px 8px}
+  .pd-stat b{font-size:18px}
+  .pd-note{grid-column:2;grid-row:1/span 2;padding-top:0;border-top:0;padding-left:16px;border-left:1px solid var(--gd-line);align-content:start}
+  .pd-memo{min-height:64px}
+}
+/* writing the memo with a software keyboard up : the modal sits at the top of what is visible (player.js sets margin-top) */
+dialog.glass-dlg.pd-kb{margin-bottom:auto}
+/* it became your turn while the modal is open (the clock keeps running) : tap to go back to the table */
+.pd-turn{flex:none;margin-left:auto;display:flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--you);background:var(--you-soft);color:var(--you-text);cursor:pointer;
+  font-family:var(--f-num);font-weight:700;font-size:10px;letter-spacing:.14em;line-height:14px;animation:fadeUp .24s cubic-bezier(.2,.8,.2,1) both}
+.pd-turn[hidden]{display:none}
+.pd-turn i{width:6px;height:6px;background:var(--you);animation:bob 1s infinite ease-in-out}

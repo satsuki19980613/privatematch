@@ -77,6 +77,53 @@ export function handStats(hands, seatOf) {
   return { hands: n, vpip: { n: vpip, d: n }, pfr: { n: pfr, d: n }, won: { n: won, d: n }, netBb };
 }
 
+/** ゲームモードで絞る（pt も生存ターンもモードをまたいで混ぜない） */
+export const byMode = (games, mode) => games.filter(g => g.config && g.config.mode === mode);
+/** 集計に使うモードの既定：最後に終わった試合のモード（無ければ・知らないモードなら club） */
+export const latestMode = (games, modes = null) => {
+  const f = finishedGames(games), m = f.length ? f[f.length - 1].config?.mode : null;
+  return m && (!modes || modes.includes(m)) ? m : 'club';
+};
+
+/** 名前の照合（ニックネームは大文字小文字を無視して一意） */
+export const nameKey = s => String(s ?? '').normalize('NFC').trim().toLowerCase();
+
+/** 生存ターン = ハンド数 ÷ VPIP(%) × 100 ÷ 試合数。VPIP が 0 か試合が無ければ null */
+export function survivalTurns(hands, vpip, games) {
+  if (!games || !vpip.d || !vpip.n) return null;
+  return hands / ((vpip.n / vpip.d) * 100) * 100 / games;
+}
+
+/** その試合でその人が座った席（who = 名前、null は自分 = g.seat）。相手を名前で引くときは自分の席を除く（自分の昔の名前を誰かが使っても混ざらない） */
+export function seatIn(g, who = null) {
+  if (who == null) return Number.isInteger(g.seat) ? g.seat : -1;
+  const key = nameKey(who);
+  return (g.names || []).findIndex((x, s) => s !== g.seat && nameKey(x) === key);
+}
+/** 1 試合ぶんの集計（その席が配られたハンドだけ）。配られたハンドが無ければ null */
+export function gameHandStats(hands, s) {
+  const hs = (hands || []).filter(h => h.startStacks && h.startStacks[s] > 0);
+  return hs.length ? handStats(hs, () => s) : null;
+}
+/** 試合ごとの集計を足す（null は数えない）=> handStats の値 + { games, survival } */
+export function mergeStats(parts) {
+  let hands = 0, games = 0, netBb = 0;
+  const vpip = { n: 0, d: 0 }, pfr = { n: 0, d: 0 }, won = { n: 0, d: 0 };
+  for (const p of parts) {
+    if (!p || !p.hands) continue;
+    games++; hands += p.hands; netBb += p.netBb;
+    for (const [a, b] of [[vpip, p.vpip], [pfr, p.pfr], [won, p.won]]) { a.n += b.n; a.d += b.d; }
+  }
+  return { hands, vpip, pfr, won, netBb, games, survival: survivalTurns(hands, vpip, games) };
+}
+/**
+ * 1 人のハンドの集計（同じモードの試合だけを渡す）。who = 名前（null は自分）。handsOf(roomId) => その試合の記録。
+ * 試合数はその人が 1 ハンド以上配られた試合
+ */
+export function playerStats(games, handsOf, who = null) {
+  return mergeStats(games.map(g => { const s = seatIn(g, who); return s < 0 ? null : gameHandStats(handsOf(g.roomId), s); }));
+}
+
 /** 縦軸の目盛り（きりのよい値） */
 export function niceTicks(min, max, count = 5) {
   const span = max - min || 1, raw = span / Math.max(1, count - 1), mag = Math.pow(10, Math.floor(Math.log10(raw)));

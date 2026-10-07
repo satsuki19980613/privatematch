@@ -11,6 +11,7 @@ import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
 import { quickSizes, stepChips } from '../betsize.js';
 import { getSizes } from './settings.js';
+import { markOf, onNotes } from '../history/notes.js';
 
 const GRACE_MS = 1500;
 const sum = a => a.reduce((s, x) => s + x, 0);
@@ -294,6 +295,8 @@ function ensureSeats(v) {
     const s = (v.seat + k) % v.n, el = document.createElement('div');
     const [x, y, ax, ay, side] = k === 0 ? [50, 100, .5, 1, 'b'] : LAYOUT[v.n][k - 1];
     el.className = `seat side-${side}${k === 0 ? ' me' : ' opp'}`; el.id = 'seat' + s; el.dataset.seat = s;
+    // 押すとプレイヤーのモーダル（ui/player.js）
+    el.tabIndex = 0; el.setAttribute('aria-haspopup', 'dialog');
     el.style.cssText = `left:${x}%;top:${y}%;transform:translate(${-ax * 100}%,${-ay * 100}%)`;
     box.appendChild(el);
   }
@@ -367,7 +370,8 @@ function seatHTML(s) {
   // 手番の合図は遷移を見せ終わってから
   const acting = h && v.status === 'running' && h.phase === 'betting' && h.toAct === s && !sg;
   const winner = settled && isWinner(h, s), hits = winCards(h);
-  const cls = ['sp', me ? 'me-s' : 'opp-s', acting ? 'act' : '', folded && !settled ? 'fold' : '', out ? 'out' : '', winner ? 'win' : ''].filter(Boolean).join(' ');
+  const mk = me ? 0 : markOf(v.names[s]);   // メモの色の印（history/notes.js）
+  const cls = ['sp', me ? 'me-s' : 'opp-s', acting ? 'act' : '', folded && !settled ? 'fold' : '', out ? 'out' : '', winner ? 'win' : '', mk ? 'mk mk' + mk : ''].filter(Boolean).join(' ');
   // 手札（演出で表に返すまでは相手の札は裏）
   let cards = '';
   if (h && inHand && !out) {
@@ -808,6 +812,7 @@ export function fitTable(force, glide) {
   const b = document.body; if (b.dataset.screen !== 'game' || !T || !T.v) return;
   if (gliding() && !glide) { fitWait = true; return; }   // キーボードでの縮小・復帰の途中：終わってから
   if (b.classList.contains('kbmin') && !glide) return;     // キーボードで卓を薄くしている間は大きさを変えない
+  if (document.activeElement && document.activeElement.id === 'pdMemo') return;   // プレイヤーのメモを書く間（モーダルの裏の卓は動かさない。閉じたキーボードの resize で合わせ直す）
   const app_ = $('.app'), st = $('#stage'), vw = app_.clientWidth, vh = app_.clientHeight, key = vw + 'x' + vh + ':' + T.v.n;
   if (!force && key === fitKey) return; fitKey = key;
   if (!b.classList.contains('kb')) b.classList.toggle('land', vw > vh * 1.25 && vh < 600);   // キーボードの間は向きの判定を変えない
@@ -828,5 +833,8 @@ if (window.ResizeObserver) new ResizeObserver(refit).observe(document.querySelec
 if (window.visualViewport) visualViewport.addEventListener('resize', refit);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
 
+
+// メモの印が変わったら席を描き直す
+onNotes(() => { if (T && T.v) render(); });
 
 if (import.meta.env && import.meta.env.DEV) window.__table = { get T() { return T; }, render };

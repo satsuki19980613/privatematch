@@ -9,6 +9,7 @@
 - **部屋の設定**: ポーカーチェイスの SIT & GO（pocket-ICM の設定をそのまま）。人数 2〜6・初期チップ 10000/15000/20000/30000 枚・構造 3 種（3 分ごとに上昇）・ゲームモード（順位 → pt）。
 - **ベットサイズ**: ヘッダの歯車／メニューの SETTINGS で、Bet / Raise のシートの候補（BB・x・%）とスライダーの刻みを変えられる（端末に保存。`src/betsize.js`）。
 - **記録**: 成績とハンド履歴は端末（IndexedDB）に保存する。サーバーの記録は端末へ渡すまでの一時置き場（終局から 3 日で消える）。
+- **スタッツ**: STATS はゲームモードごと（モードをまたいで混ぜない）。VPIP・PFR・生存ターン（ハンド数 ÷ VPIP(%) × 100 ÷ 試合数）。卓で席を押すとその人のスタッツとメモ・色の印（端末に保存。`src/ui/player.js`・`src/history/notes.js`）。
 - **参考**: UI・認証・サーバー構成は satsuki19980613/Multiplier、ゲーム設定とスタッツ画面は satsuki19980613/pocket-ICM。
 - **実装契約**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。セットアップとデプロイ: [docs/SETUP.md](docs/SETUP.md)。
 

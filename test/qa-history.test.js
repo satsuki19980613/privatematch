@@ -589,3 +589,45 @@ test('IMPORT: 大量（20000 試合 / 100000 ハンド）でも完了する', as
   const t0 = Date.now(); assert.equal(await store.importAll({ app: 'privatematch', games, hands }), 20000);
   assert.ok(Date.now() - t0 < 30000); assert.equal((await store.allGames()).length, 20000);
 });
+
+/* ================================================================== プレイヤーのスタッツ（ゲームモードごと。卓のプレイヤーのモーダル・STATS） */
+test('プレイヤー: 端末に写した試合から、モードごとに自分と相手（名前で引く・席は試合ごとに違う）の VPIP / PFR / 生存ターンを数える', async () => {
+  const { byMode, playerStats, survivalTurns } = await import('../src/history/stats.js');
+  fresh();
+  const r = rng(77), ids = [];
+  // club 3 試合・rank-4 2 試合。席は開始時にシャッフルされる
+  for (const [mode, n] of [['club', 3], ['club', 4], ['rank-4', 3], ['club', 2], ['rank-4', 4]]) {
+    const id = S.create({ n, cfg: { mode } }); ids.push(id);
+    S.playToEnd(id, mixPolicy(r));
+    assert.equal(await sync.syncRoom(id), true);
+  }
+  const games = await store.allGames(), hands = await store.handsByRoom();
+  assert.equal(hands.size, ids.length);
+  for (const id of ids) assert.deepEqual(hands.get(id).map(h => h.handNo), S.R(id).hands.map(h => h.rec.handNo));
+  for (const mode of ['club', 'rank-4']) {
+    const gs = byMode(finishedGames(games), mode);
+    assert.ok(gs.length >= 2 && gs.every(g => g.config.mode === mode));
+    for (const who of [null, 'Bot1', 'bot1', 'Bot3']) {
+      const st = playerStats(gs, id => hands.get(id), who);
+      // 期待値：サーバーの記録を、その人の席で直接数える
+      let n = 0, played = 0; const seatOf = new Map();
+      for (const g of gs) {
+        const seat = who == null ? S.seat(g.roomId) : S.R(g.roomId).room.names.findIndex(x => x.toLowerCase() === who.toLowerCase());
+        if (seat < 0) continue;
+        const recs = S.R(g.roomId).hands.map(h => h.rec).filter(h => h.startStacks[seat] > 0);
+        if (recs.length) played++;
+        for (const h of recs) { seatOf.set(h, seat); n++; }
+      }
+      const exp = handStats([...seatOf.keys()], h => seatOf.get(h));
+      assert.equal(st.hands, n, `${mode} ${who} hands`);
+      assert.equal(st.games, played, `${mode} ${who} games`);
+      assert.deepEqual(st.vpip, exp.vpip); assert.deepEqual(st.pfr, exp.pfr);
+      assert.equal(st.survival, survivalTurns(n, exp.vpip, played));
+      if (st.survival != null) assert.ok(Math.abs(st.survival - n / (exp.vpip.n / exp.vpip.d * 100) * 100 / played) < 1e-9);
+    }
+  }
+  // モードを混ぜない：club と rank-4 の和 = 全体。遊んでいないモードは 0
+  const all = finishedGames(games), self = m => playerStats(byMode(all, m), id => hands.get(id)).hands;
+  assert.equal(self('club') + self('rank-4'), playerStats(all, id => hands.get(id)).hands);
+  assert.equal(playerStats(byMode(all, 'legend-avg'), id => hands.get(id)).games, 0);
+});
