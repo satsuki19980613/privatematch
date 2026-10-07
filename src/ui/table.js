@@ -24,7 +24,8 @@ export function enter(id) {
     ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, dockIdle: true };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
   chat.start(id);
-  for (const s of ['#seats', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(s); e.innerHTML = ''; e._h = null; }
+  // 前の卓の描画の記録も消す（同じ人数・同じ席の卓に入り直したとき＝再戦で、席を作り直さずに止まっていた）
+  for (const s of ['#seats', '#pot', '#boardC', '#tInfo', '#betM']) { const e = $(s); e.innerHTML = ''; e._h = null; e._k = null; }
   setHTML($('#dockMain'), '<span class="dk-title">…</span><span class="dots"><i></i><i></i><i></i></span>');
   $('#dock').classList.add('idle');
   document.body.dataset.screen = 'game';
@@ -54,12 +55,14 @@ export const currentView = () => (T ? T.v : null);
 /* ===================== ヘッダ（Leave） ===================== */
 function syncHeader() {
   const lb = $('#leaveBtn');
-  const v = T && T.v, me = v && v.players[v.seat];
-  const gone = !v || v.status === 'finished' || v.status === 'cancelled' || (me && (me.status === 'out' || me.status === 'left'));
-  if (lb) lb.hidden = !T || gone || T.leaving;
+  // 卓に居る間は常に出す（観戦中・終局後は確かめずにメニューへ）
+  if (lb) lb.hidden = !T || !T.v || T.leaving;
 }
+/** 自分はもう打っていない（飛んだ・退出した・終局した）＝観戦 */
+const watching = v => v.status === 'finished' || v.status === 'cancelled' || ['out', 'left'].includes(v.players[v.seat].status);
 export function askLeave() {
   const t = T; if (!t || !t.v || t.leaving) return;
+  if (watching(t.v)) return toMenu();
   $('#leaveBody').innerHTML = head('LEAVE', '退出しますか？') +
     `<p>退出すると戻れません。チップは卓に残り、手番は自動でチェック/フォールドされます。最後まで残った人の順位で pt が決まります。</p>
     <div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn danger" id="leaveOk" type="button">Leave</button></div>`;
@@ -631,9 +634,10 @@ function renderDock() {
       ? `<button class="btn accent" data-act="rematch" type="button" style="flex:0 1 34%;min-width:92px;margin-left:auto"${n < 2 || t.rmBusy ? ' disabled' : ''}>Rematch<small>${n}人</small></button>`
       : '<span class="dots"><i></i><i></i><i></i></span>'}<button class="pre plain" data-act="menu" type="button">Menu</button>`;
   } else if (v.status === 'finished' || v.status === 'cancelled') {
-    html = `<span class="eyebrow">${v.status === 'cancelled' ? 'CANCELLED' : 'GAME OVER'}</span><span class="dk-title ${p.place === 1 ? 'y' : ''}">${p.place ? ordinal(p.place) : ''}</span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
+    html = `<span class="eyebrow">${v.status === 'cancelled' ? 'CANCELLED' : 'GAME OVER'}</span><span class="dk-title ${p.place === 1 ? 'y' : ''}">${p.place ? ordinal(p.place) : ''}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button><button class="pre plain" data-act="menu" type="button">Menu</button>`;
   } else if (p.status === 'out') {
-    html = `<span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><span class="dots"><i></i><i></i><i></i></span><button class="btn primary" data-act="result" type="button" style="flex:0 0 40%">Result</button>`;
+    // 観戦中：結果と、メニューへ戻るボタン
+    html = `<span class="eyebrow">WATCHING</span><span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button><button class="pre plain" data-act="menu" type="button">Menu</button>`;
   } else if (p.status === 'sitout' || v.status === 'paused') {
     html = `<span class="eyebrow">${v.status === 'paused' ? 'PAUSED' : 'SITTING OUT'}</span><span class="dk-title">${v.status === 'paused' ? '<b class="secs" id="pauseLeft"></b>' : ''}</span>${p.status === 'sitout' ? '<button class="btn accent" data-act="sitin" type="button" style="flex:0 0 36%">I\'m back</button>' : ''}`;
   } else if (h && h.phase === 'settled') {

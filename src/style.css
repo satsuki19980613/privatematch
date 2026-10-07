@@ -318,6 +318,7 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .pre[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .pre[aria-pressed="true"]::before{background:var(--bg);border-color:var(--bg)}
 .pre.plain{margin-left:8px}
+.dock .dk-res{flex:0 1 auto;margin-left:auto;min-width:0;padding-left:18px;padding-right:18px}
 .pre.plain::before{display:none}
 .dk-stats b i,#rsv i,.pot b i{font-style:normal;font-size:.62em;font-weight:600;letter-spacing:.04em;margin-left:2px;color:var(--muted)}
 .dk-title.rm-n b{font-family:var(--f-num);font-size:18px;color:var(--you-text)}
