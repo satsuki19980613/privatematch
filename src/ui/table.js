@@ -45,7 +45,7 @@ export function leave() {
   clearTimeout(T.timer); clearInterval(T.tickTimer); clearTimeout(T.syncT); clearTimeout(T.lockT); clearTimeout(T.pumpT);
   if (T.ro) { T.ro.done = true; T.ro.timers.forEach(clearTimeout); }
   if (T.sg) { T.sg.done = true; T.sg.timers.forEach(clearTimeout); }
-  document.querySelectorAll('.fly,.ai-banner').forEach(e => e.remove());
+  document.querySelectorAll('.fly,.ai-banner,.dock-ghost').forEach(e => e.remove());
   fxshow.clear();
   $('#table').classList.remove('tense');
   for (const d of ['#overDlg', '#leaveDlg']) if ($(d).open) $(d).close();
@@ -703,12 +703,32 @@ function renderDock() {
     html = `${h && h.folded[me] ? '<span class="eyebrow">FOLDED</span>' : h && h.allIn[me] ? '<span class="eyebrow">ALL-IN</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
       <button class="pre away-btn" data-act="sitout" type="button">離席</button>`;
   }
+  // 中身が変わるときは、前の表示を上に重ねて溶かし、新しい表示を浮かび上がらせる（Check/Fold の予約の切り替えはそのまま）
+  const key = mode + html.replace(/ aria-pressed="[^"]*"/g, '');
+  const fade = t.dockKey != null && key !== t.dockKey && !REDUCE && !document.hidden;
+  if (fade) dockGhost(dock);
+  t.dockKey = key;
   dock.classList.toggle('idle', mode === 'idle');
   // 自分の番の操作は、出てから PACE.lock の間・送信中・次のビュー待ちは押せない（見た目は変えない。ちらつかせない）
   const locked = mode === 'turn' && (Date.now() < t.lockUntil || t.busy || t.q.length > 0);
   dock.classList.toggle('lock', locked);
   if (locked && Date.now() < t.lockUntil) { clearTimeout(t.lockT); t.lockT = setTimeout(() => { if (T === t) renderDock(); }, t.lockUntil - Date.now() + 20); }
-  return setHTML(el, html);
+  const changed = setHTML(el, html);
+  if (fade && changed) [...el.children].forEach(e => e.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DOCK_FADE.in, easing: 'ease-out', fill: 'backwards' }));
+  return changed;
+}
+// ドックの切り替え：前の表示の写しを同じ場所に重ねて消していく（新しい表示はその下で浮かび上がる）
+const DOCK_FADE = { out: 200, in: 280 };
+function dockGhost(dock) {
+  document.querySelectorAll('.dock-ghost').forEach(e => e.remove());
+  const r = dock.getBoundingClientRect(); if (!r.width) return;
+  const g = dock.cloneNode(true);
+  g.removeAttribute('id'); g.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+  g.classList.add('dock-ghost'); g.setAttribute('aria-hidden', 'true');
+  Object.assign(g.style, { position: 'fixed', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', margin: '0', zIndex: 30, pointerEvents: 'none' });
+  document.body.appendChild(g);
+  const an = g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: DOCK_FADE.out, easing: 'ease-in', fill: 'forwards' });
+  an.onfinish = () => g.remove(); setTimeout(() => g.remove(), DOCK_FADE.out + 100);
 }
 
 $('#dock').addEventListener('click', e => {

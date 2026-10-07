@@ -188,7 +188,7 @@ test('runoutMs：ストリートごとに足し、プリフロップのオール
   assert.equal(runoutMs(5), R.gather + R.show + R.latency);
   assert.equal(runoutMs(4), R.gather + R.reveal + R.river + R.latency);
   assert.equal(runoutMs(3), runoutMs(4) + R.street);
-  assert.equal(runoutMs(0), runoutMs(3) + R.flop);
+  assert.equal(runoutMs(0), runoutMs(3) + R.flop + R.preflop);
   assert.ok(runoutMs(0) >= 9000 && runoutMs(0) <= 12000);
   assert.ok(R.street >= 1000, '1 秒以下だと何が起きたか分からない');
 });

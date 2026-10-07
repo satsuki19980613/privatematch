@@ -118,7 +118,7 @@ export function configSummary(c) {
 export const ACTION_MS = 15000;               // 1 アクションの持ち時間
 export const TIME_BANK_MS = 30000;            // 1 試合のタイムバンク（補充なし）
 export const AUTO_TO_SITOUT = 2;              // 自動処理がこの回数連続したら sitout
-export const BETWEEN_HANDS_MS = 3000;         // ハンド間（結果表示）
+export const BETWEEN_HANDS_MS = 2500;         // ハンド間（結果表示。長すぎるという声で 3 秒から縮めた）
 export const WAITING_EXPIRES_MS = 15 * 60000; // 募集の期限
 export const REMATCH_MS = 15 * 60000;         // 終局後の再戦の受付
 export const REMATCH_HOST_WAIT_MS = 60000;    // 作成者が「席に残る」を押さないまま、この時間たったら残った人が再戦を始められる
@@ -130,13 +130,14 @@ export const REMATCH_HOST_WAIT_MS = 60000;    // 作成者が「席に残る」�
 //   普通のショーダウン（from = 5）は gather → show（手札を表にして見せる）→ 結果。
 //   勝負が決まってから結果へは間をおかずに進む（一間おくのは勝者の演出 GIF を出すときだけ。FX.wait）
 //   latency はポーリング（最大 1 秒）で遅れて見始めた人の分。他アプリのストリート間隔は 1〜3 秒（中央値 2 秒前後）で、1 秒以下だと何が起きたか分からない
-export const RUNOUT = { gather: 900, reveal: 1400, flop: 3060, street: 1700, river: 2000, show: 800, latency: 800 };
+export const RUNOUT = { gather: 900, reveal: 1400, flop: 3060, street: 1700, river: 2000, show: 800, latency: 800, preflop: 600 };
 /** ショーダウンの演出の長さ。from = 手札を表にした時点のボードの枚数（0/3/4/5。オールインでなければ 5）、null はショーダウン無し */
 export function runoutMs(from) {
   if (from == null) return 0;
   const R = RUNOUT;
   if (from >= 5) return R.gather + R.show + R.latency;
-  return R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + R.river + R.latency;
+  // プリフロップのオールイン（from = 0）は、卓がアクションの後に一間（PACE.preflop と同じ preflop）おいてから始める
+  return (from === 0 ? R.preflop : 0) + R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + R.river + R.latency;
 }
 // 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（wait）おいてから卓の中央に出し、
 //   消してボードに戻ってから、ポットを勝者へ動かす。wait 一間 / in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで。

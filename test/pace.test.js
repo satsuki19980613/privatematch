@@ -63,17 +63,17 @@ test('street：コールで街が閉じる → 最後のチップを見せて、
   assert.deepEqual(closingBets(a.hand, b.hand), [st.hand.bb, st.hand.bb]);
   assert.equal(p.board, 0);
   const base = PACE.beat + PACE.pop;
-  assert.equal(p.gatherAt, base + PACE.show);
+  assert.equal(p.gatherAt, base + PACE.preflop + PACE.show);   // プリフロップが終わったら一間
   assert.equal(p.revealAt, p.gatherAt + PACE.gather + PACE.gap);
   assert.equal(p.end, p.revealAt + PACE.flopFlip + 2 * PACE.flopStagger);   // フロップは 1.8 倍ゆっくり
   assert.equal(p.turnAt, p.end);
   assert.ok(p.hold >= p.revealAt + PACE.beat);
-  // 1 アクションで閉じたときは 2.5 秒以内に次へ
+  // 1 アクションで閉じたときは 3 秒以内に次へ
   const st2 = newTable({ config: cfg(2), names: names(2), now: 0, rnd: rng(3), button: 0 });
   act(st2, st2.hand.toAct, { type: 'call' }, 10);
   const c = V(st2); act(st2, st2.hand.toAct, { type: 'check' }, 20);
   const q = plan(c, V(st2));
-  assert.equal(q.kind, 'street'); assert.ok(q.turnAt <= 2500, `${q.turnAt}`);   // フロップを 1.8 倍ゆっくりにしても 2.5 秒以内
+  assert.equal(q.kind, 'street'); assert.ok(q.turnAt <= 3000, `${q.turnAt}`);   // フロップを 1.8 倍ゆっくり＋プリフロップの後の一間でも 3 秒以内
 });
 
 test('win：フォールドで終わる → 結果は集め終わるまで伏せる', () => {
@@ -95,7 +95,7 @@ test('showdown：オールインとコール → 最後のチップを見せて�
   act(st, st.hand.toAct, { type: 'call' }, 20);
   const c = V(st), p = plan(b, c);
   assert.equal(p.kind, 'showdown'); assert.equal(p.veil, true);
-  assert.equal(p.runoutAt, PACE.pop + PACE.show);
+  assert.equal(p.runoutAt, PACE.pop + PACE.preflop + PACE.show);
   assert.equal(p.gatherAt, null);
   assert.equal(p.steps.length, 1); assert.equal(p.steps[0].bets[c.hand.actions.at(-1).seat], c.hand.actions.at(-1).betTo);
   assert.equal(plan(a, c).steps.length, 2, '2 手まとめて来ても 1 拍ずつ');

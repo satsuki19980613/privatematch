@@ -10,6 +10,7 @@
 //   flip 260 / flipStagger 110        ターン・リバーの札を返す 1 枚 200〜300ms、刻みは知覚の 1 サイクル（≈100ms）より長く、1 枚ずつ認識できる
 //   flopFlip 468 / flopStagger 198    フロップ（3 枚まとめて）は 1.8 倍ゆっくり返す
 //   deal 360 / dealStagger 144        配る 1 枚と刻み。6 人で約 1.9 秒
+//   preflop 600                       プリフロップのアクションが終わってから（フロップ・ショーダウン・フォールドで決着）の一間（間が無いという声）
 //   chip 1170 / win 1290              ポットから勝者へチップが飛ぶ長さ（飛び始めは 120ms 後）と、フォールドで終わったときに次のビューを待つ長さ
 //   ※ 配る・チップが動く（gather / chip）・フロップは、実際に遊んで速すぎるという声で 1.8 倍にした（2026-10。もとは gather 340・deal 200/80・
 //     チップ 650・フロップ 260/110。1 つの動きは 200〜400ms という目安より長いが、知り合いと眺めながら打つ卓では落ち着いて見える方を取る）
@@ -19,7 +20,7 @@
 //   maxLag 3000                       これ以上遅れたら途中を飛ばして最新を出す（サーバーの持ち時間を削りすぎない）
 export const PACE = {
   beat: 550, pop: 220, show: 300, gather: 612, gap: 160, flip: 260, flipStagger: 110, flopFlip: 468, flopStagger: 198, deal: 360, dealStagger: 144,
-  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, chip: 1170, win: 1290, maxLag: 3000,
+  controlsIn: 250, lock: 400, sheetIn: 240, sheetOut: 200, chip: 1170, win: 1290, preflop: 600, maxLag: 3000,
 };
 /** 街の札を返す速さ（from = 返す前のボードの枚数）。フロップを含むときは 1.8 倍ゆっくり、ターン・リバーはそのまま */
 export const flipOf = (from, P = PACE) => (from < 3 ? { ms: P.flopFlip, stagger: P.flopStagger } : { ms: P.flip, stagger: P.flipStagger });
@@ -88,7 +89,9 @@ export function plan(prev, v, P = PACE) {
     out.hold = out.turnAt;
     return out;
   }
-  out.gatherAt = base + P.show;
+  // プリフロップが終わったとき（街が進む・ショーダウン・フォールドで決着）は、最後のアクションを見せてから一間おく
+  const pre = a.street === 0 ? P.preflop : 0;
+  out.gatherAt = base + pre + P.show;
   out.board = tr.boardFrom;
   if (!mine.length) { out.bets0 = tr.closing; out.shown0 = a.actions.length; out.street0 = a.street; }
   if (tr.kind === 'street') {
@@ -108,7 +111,7 @@ export function plan(prev, v, P = PACE) {
   }
   // showdown：最後のベットを見せてから、演出（ベットを集めるところから）へ
   out.gatherAt = null;
-  out.runoutAt = base + P.show;
+  out.runoutAt = base + pre + P.show;
   out.end = out.turnAt = out.runoutAt;
   out.hold = out.runoutAt;
   return out;

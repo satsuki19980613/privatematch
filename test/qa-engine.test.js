@@ -557,12 +557,12 @@ test('一時停止：生存者が全員 sitout ならハンド間で停止、sit
   assert.equal(st.hand.startedAt, p0 + 5000);
 });
 
-test('ハンド間は 3 秒、レベルは 3 分たった後の次のハンドから上がり、タイマーはそこから数え直す', () => {
+test('ハンド間は BETWEEN_HANDS_MS、レベルは 3 分たった後の次のハンドから上がり、タイマーはそこから数え直す', () => {
   const st = table(2);
   assert.equal(st.hand.level, 1);
   act(st, 0, { type: 'fold' }, 179000);
   assert.equal(st.hand.endedAt, 179000); assert.equal(st.nextAt, 179000 + BETWEEN_HANDS_MS);
-  throwsCode(() => tick(st, 181999), 'not_yet');
+  throwsCode(() => tick(st, 179000 + BETWEEN_HANDS_MS - 1), 'not_yet');
   tick(st, 182000);   // 182000 ≥ 180000 → レベル 2
   assert.equal(st.hand.level, 2); assert.equal(st.hand.bb, 280); assert.equal(st.hand.ante, 70); assert.equal(st.hand.sb, 140);
   assert.equal(st.levelStartAt, 182000); assert.equal(viewFor(st, 0).levelStartAt, 182000);
@@ -594,8 +594,8 @@ test('以前の部屋（levelMin あり・levelStartAt なし）は開始から�
   const st = table(2);
   st.config = { ...st.config, levelMin: 5 }; delete st.levelStartAt;
   act(st, 0, { type: 'fold' }, 299000);
-  tick(st, 299000 + BETWEEN_HANDS_MS);   // 302000 ≥ 300000 → 2
-  assert.equal(st.hand.level, 2); assert.equal(st.levelStartAt, 302000);
+  tick(st, 299000 + BETWEEN_HANDS_MS);   // ≥ 300000 → 2
+  assert.equal(st.hand.level, 2); assert.equal(st.levelStartAt, 299000 + BETWEEN_HANDS_MS);
 });
 
 /* ======================= 6. 退出 ======================= */
