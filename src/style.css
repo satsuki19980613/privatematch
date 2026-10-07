@@ -306,7 +306,16 @@ body[data-screen="game"] .menu,body[data-screen="game"] .foot{display:none}
 .dk-stats{margin-left:auto;flex:none;display:flex;align-items:baseline;gap:5px;font-size:10px;font-family:var(--f-num);letter-spacing:.1em;color:var(--muted)}
 .dk-stats b{font-weight:600;font-size:14px;letter-spacing:-.02em;color:var(--ink);margin-right:6px}
 .dk-row{display:flex;gap:6px;min-height:0}
-.dock.lock .dk-row{pointer-events:none;opacity:.55}
+.dock.lock .dk-row{pointer-events:none}
+/* 待っている間（wait）も自分の番と同じ 2 段：上の段の高さをそろえ、Check/Fold の予約は下の段の左（Fold / Check と同じ位置） */
+.dk-top{min-height:24px}
+.dock .dk-top .dk-away{margin-left:auto;padding:2px 9px;min-height:0;font-size:11px;line-height:16px}
+.dk-pre{flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--hair-2);background:transparent;color:var(--ink-2);
+  font-family:var(--f-num);font-weight:700;font-size:13px;letter-spacing:.02em;cursor:pointer;white-space:nowrap}
+.dk-pre::before{content:"";width:13px;height:13px;border:1.5px solid currentColor;flex:none}
+.dk-pre[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.dk-pre[aria-pressed="true"]::before{background:var(--bg);border-color:var(--bg)}
+.dk-sp{flex:2 1 0}
 .dock .secs{margin-left:auto}
 .dock .dk-stats+.secs{margin-left:8px}
 .dots{display:flex;gap:4px;margin-left:auto}
@@ -657,7 +666,7 @@ body.land .seat.me .hole{margin:0}
   .pre{min-height:40px}
   .seg button{min-height:40px}
   .back{padding:13px 0}
-  .dock .btn{min-height:40px}
+  .dock .btn,.dock .dk-pre{min-height:40px}
   input[type=range]{height:40px}
 }
 @media (max-width:340px){ .brand{display:none} .table{--pw:92px} .opp-s .stk small{display:none} }

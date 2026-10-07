@@ -26,7 +26,7 @@ export function enter(id) {
   leave();
   T = { id, ver: -1, v: null, busy: false, timer: 0, lockUntil: 0, pre: null, rs: null, resultShown: false, tickAt: 0, tickBusy: false,
     clockCache: null, sh: { handNo: -1, board: -1, settled: -1, revealed: -1, bet: [], init: false }, synced: 0, syncT: 0, leaving: false,
-    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, dockIdle: true };
+    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
   chat.start(id);
   // 前の卓の描画の記録も消す（同じ人数・同じ席の卓に入り直したとき＝再戦で、席を作り直さずに止まっていた）
@@ -650,11 +650,20 @@ function renderDock() {
   // 遷移を見せている間・次のビューを待っている間は操作ボタンを出さない（古い状態で押させない）
   const sg = stage(), waiting = sg || t.q.length > 0;
   const l = v.status === 'running' && !waiting ? legalActions(v, me) : null;
-  let html = '', idle = true;
+  let html = '', mode = 'idle';   // 'turn'（自分の番の操作）| 'wait'（ハンドに参加して待っている。turn と同じ 2 段の形）| 'idle'（1 段）
   const ro = runout(), rm = v.rematch;
+  // ハンドに参加していて、まだ動ける（降りていない・オールインでない）。待っている間は相手が動いても・遷移の途中でも形を変えない
+  const inHand = h && h.phase === 'betting' && v.status === 'running' && p.status === 'active' && h.startStacks[me] > 0 && !h.folded[me] && !h.allIn[me];
   if (ro) {
     const street = ro.back || ro.board === 5 ? 'RIVER' : ro.board === 4 ? 'TURN' : ro.board === 3 ? 'FLOP' : '';
     html = `<span class="eyebrow">${ro.from < 5 || h.allIn.some(Boolean) ? 'ALL-IN' : 'SHOWDOWN'}</span><span class="dk-title">${street}</span><span class="dots"><i></i><i></i><i></i></span>`;
+  } else if (inHand && !l) {
+    // 待っている間：上の段に次に動く人、下の段の左（自分の番の Fold / Check と同じ位置）に Check/Fold の予約
+    mode = 'wait';
+    const a = h.toAct, armed = t.pre === autoPreKey();
+    html = `<div class="dk-top"><span class="dk-title ${a === me ? 'y' : ''}">${a == null ? '' : a === me ? 'YOU' : esc(v.names[a])}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
+      <button class="pre away-btn dk-away" data-act="sitout" type="button">離席</button></div>
+      <div class="dk-row"><button class="dk-pre" data-act="pre" type="button" aria-pressed="${armed}">Check/Fold</button><span class="dk-sp"></span></div>`;
   } else if (sg && (sg.veil || h.phase !== 'settled')) {
     // 遷移の途中：街が変わるなら街の名前、ほかは待ちの点だけ
     const street = sg.kind === 'street' ? ['', 'FLOP', 'TURN', 'RIVER'][h.street] : '';
@@ -678,7 +687,7 @@ function renderDock() {
     const who = w === null ? (ws.length ? 'SPLIT POT' : 'HAND OVER') : w === me ? 'YOU WIN' : esc(v.names[w]) + ' WINS';
     html = `<span class="dk-title ${w === me ? 'y' : w === null ? '' : 'c'}">${who}</span><span class="dk-stats">${w !== null ? `<b>+${fmtBb(Math.max(0, h.won[w] - h.commits[w]), h.bb)}<i>BB</i></b>${h.names && h.names[w] ? esc(h.names[w]) : ''}` : ''}</span>`;
   } else if (l) {
-    idle = false;
+    mode = 'turn';
     const pot = l.pot, facing = l.canFold, bb = h.bb, B = x => `${fmtBb(x, bb)}<i>BB</i>`;
     const callAllin = facing && l.callPut >= p.stack;
     const canRaise = l.minTo != null;
@@ -689,22 +698,17 @@ function renderDock() {
         ? `<button class="btn ghost" data-act="fold" type="button">Fold</button><button class="btn primary" data-act="call" type="button">${callAllin ? 'All-in' : 'Call'}<small>${fmtBb(l.callPut, bb)} BB</small></button>${rz}`
         : `<button class="btn primary" data-act="check" type="button">Check</button>${rz}`}</div>`;
   } else {
+    // 降りた・オールイン・参加していないハンド：1 段（このハンドの間は形が変わらない）
     const a = h ? h.toAct : null, who = a != null ? esc(v.names[a]) : '';
-    const inHand = h && h.startStacks[me] > 0 && !h.folded[me] && !h.allIn[me];
-    const armed = h && t.pre === autoPreKey();
-    html = `${h && h.folded[me] ? '<span class="eyebrow">FOLDED</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
-      ${inHand && a != null && a !== me ? `<button class="pre" data-act="pre" type="button" aria-pressed="${armed}">Check/Fold</button>` : ''}
+    html = `${h && h.folded[me] ? '<span class="eyebrow">FOLDED</span>' : h && h.allIn[me] ? '<span class="eyebrow">ALL-IN</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
       <button class="pre away-btn" data-act="sitout" type="button">離席</button>`;
   }
-  dock.classList.toggle('idle', idle);
-  const locked = !idle && (Date.now() < t.lockUntil || t.busy || t.q.length > 0);
+  dock.classList.toggle('idle', mode === 'idle');
+  // 自分の番の操作は、出てから PACE.lock の間・送信中・次のビュー待ちは押せない（見た目は変えない。ちらつかせない）
+  const locked = mode === 'turn' && (Date.now() < t.lockUntil || t.busy || t.q.length > 0);
   dock.classList.toggle('lock', locked);
   if (locked && Date.now() < t.lockUntil) { clearTimeout(t.lockT); t.lockT = setTimeout(() => { if (T === t) renderDock(); }, t.lockUntil - Date.now() + 20); }
-  const changed = setHTML(el, html);
-  // 操作ボタンが出るときは下から浮かせる（PACE.controlsIn。押せるのは lock の後）
-  if (changed && !idle && t.dockIdle && !REDUCE) el.querySelectorAll('.dk-top,.dk-row').forEach((e, i) => e.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: PACE.controlsIn, delay: i * 40, easing: EASE, fill: 'backwards' }));
-  t.dockIdle = idle;
-  return changed;
+  return setHTML(el, html);
 }
 
 $('#dock').addEventListener('click', e => {
