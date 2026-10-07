@@ -9,6 +9,8 @@ import { $, app, esc, fmt, head, openDlg, toast, setHTML, cardHTML, fly, ordinal
 import { syncRoom } from '../history/sync.js';
 import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
+import { quickSizes, stepChips } from '../betsize.js';
+import { getSizes } from './settings.js';
 
 const GRACE_MS = 1500;
 const sum = a => a.reduce((s, x) => s + x, 0);
@@ -719,22 +721,12 @@ async function submit(move) {
 }
 
 /* ---------- ベット/レイズのシート ---------- */
-function quickValues(l, v) {
-  const lo = l.minTo, hi = l.maxTo, h = v.hand, out = [];
-  if (h.street === 0) {
-    const base = Math.max(l.streetLastBetTo, h.bb);
-    for (const k of [2, 2.5, 3]) out.push([k + 'x', Math.round(base * k)]);
-  } else for (const [f, label] of [[1 / 3, '1/3'], [1 / 2, '1/2'], [2 / 3, '2/3'], [1, 'Pot']]) out.push([label, l.streetLastBetTo + Math.round(f * (l.pot + l.toCall))]);
-  const list = out.filter(([, x]) => x > lo && x < hi);
-  list.unshift(['Min', lo]);
-  const uniq = []; for (const q of list) if (!uniq.some(u => u[1] === q[1])) uniq.push(q);
-  if (hi > lo) uniq.push(['All-in', hi]);
-  return uniq;
-}
+// BB の候補は額そのものなので見出しを付けない（2.5BB / 2.5BB と 2 回出さない）
+const qLabel = k => k.endsWith('bb') ? '' : k;
 function openSheet() {
   const t = T, v = t.v, l = legalActions(v, v.seat); if (!l || l.minTo == null) return;
   closeSheet(true);
-  const lo = l.minTo, hi = l.maxTo, unit = Math.max(1, Math.round(v.hand.bb / 2)), q = quickValues(l, v);
+  const lo = l.minTo, hi = l.maxTo, unit = stepChips(getSizes(), v.hand.bb), q = quickSizes(l, v.hand, getSizes());
   const vals = [lo]; for (let x = (Math.floor(lo / unit) + 1) * unit; x < hi; x += unit) vals.push(x);
   for (const [, x] of q) if (!vals.includes(x)) vals.push(x);
   if (!vals.includes(hi)) vals.push(hi);
@@ -743,24 +735,37 @@ function openSheet() {
   const host = document.createElement('div'); host.className = 'rsheet';
   const bet = l.aggression === 'bet', bb = v.hand.bb;
   const mine = (v.hand.hole[v.seat] || []).map(c => cardHTML(c)).join('');
+  const qb = (k, x, cls = '') => `<button type="button"${cls} data-q="${x}" aria-pressed="false">${k}<b>${fmtBb(x, bb)}<i>BB</i></b></button>`;
+  // 候補は横にスクロール（数はベットサイズの設定しだい）。All-in は右端に固定
   host.innerHTML = `<div class="rs-top"><div class="rs-cards">${mine}</div><div class="grow"><span class="eyebrow">${bet ? 'BET' : 'RAISE TO'}</span><span class="sub">POT ${fmtBb(l.pot, bb)} BB</span></div><b id="rsv">${fmtBb(lo, bb)}<i>BB</i></b></div>
     <input type="range" id="rsr" min="0" max="${vals.length - 1}" step="1" value="0" ${vals.length < 2 ? 'disabled' : ''} aria-label="${bet ? 'Bet' : 'Raise'} amount">
-    <div class="quick">${q.map(([k, x]) => `<button type="button" data-q="${x}" aria-pressed="false">${k}<b>${fmtBb(x, bb)}<i>BB</i></b></button>`).join('')}</div>
+    <div class="quick"><div class="q-scroll">${q.map(([k, x]) => qb(qLabel(k), x)).join('')}</div>${hi > lo ? qb('All-in', hi, ' class="q-all"') : ''}</div>
     <div class="rs-btns"><button class="btn ghost" data-act="rs-close" type="button">Back</button><button class="btn accent" data-act="rs-ok" type="button"><span id="rsk">${bet ? 'Bet' : 'Raise'}</span><small id="rsv2">${fmt(lo)}</small></button></div>`;
   $('#dock').appendChild(host);
-  const rs = t.rs, q1 = s => host.querySelector(s), r = q1('#rsr');
-  const sync = () => {
+  const rs = t.rs, q1 = s => host.querySelector(s), r = q1('#rsr'), sc = q1('.q-scroll');
+  // 端にまだ候補があるときは、その側を薄くする
+  const edges = () => { const m = sc.scrollWidth - sc.clientWidth; sc.classList.toggle('more-l', sc.scrollLeft > 2); sc.classList.toggle('more-r', sc.scrollLeft < m - 2); };
+  const sync = (reveal) => {
     if (t.rs !== rs) return;
     q1('#rsv').innerHTML = `${fmtBb(rs.to, bb)}<i>BB</i>`; q1('#rsv2').textContent = fmtBb(rs.to, bb) + ' BB · ' + fmt(rs.to);
     q1('#rsk').textContent = rs.to === hi ? 'All-in' : bet ? 'Bet' : 'Raise';
     r.value = t.rs.vals.indexOf(t.rs.to); r.style.setProperty('--fill', (t.rs.vals.length > 1 ? r.value / (t.rs.vals.length - 1) * 100 : 100) + '%');
     host.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.q === t.rs.to)));
+    // スライダーで候補の額に来たら、その候補が見えるところまで送る
+    const on = reveal && sc.querySelector('[aria-pressed="true"]');
+    // .q-scroll は position:relative（offsetLeft はその中の位置）
+    if (on) { const x = on.offsetLeft, w = on.offsetWidth; if (x < sc.scrollLeft || x + w > sc.scrollLeft + sc.clientWidth) sc.scrollTo({ left: x - (sc.clientWidth - w) / 2, behavior: REDUCE ? 'auto' : 'smooth' }); }
   };
-  r.oninput = () => { if (t.rs === rs) { rs.to = rs.vals[+r.value]; sync(); } };
+  r.oninput = () => { if (t.rs === rs) { rs.to = rs.vals[+r.value]; sync(true); } };
   host.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { if (t.rs === rs) { rs.to = +b.dataset.q; sync(); } });
+  sc.addEventListener('scroll', edges, { passive: true });
+  // マウスのホイール（縦）でも横に送る
+  sc.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && sc.scrollWidth > sc.clientWidth) { e.preventDefault(); sc.scrollLeft += e.deltaY; } }, { passive: false });
   host.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); closeSheet(); } });
-  sync(); r.focus({ preventScroll: true });
+  sync(); edges(); r.focus({ preventScroll: true });
 }
+/** ベットサイズの設定が変わった：開いているシートを作り直す */
+export function sizesChanged() { if (T && T.v && T.rs && sheetOpen()) openSheet(); }
 /** 開いているベットのシートがあるか（閉じかけのものは数えない） */
 const sheetOpen = () => !!document.querySelector('.rsheet:not(.closing)');
 /** シートを閉じる。開いているものは全部（何枚あっても）。now = アニメ無しで今すぐ消す */
