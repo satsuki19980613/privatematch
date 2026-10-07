@@ -51,8 +51,8 @@ test('chatUnits：国旗・キーキャップ・タグ付きの旗・孤立サ�
 });
 
 describe('上限ちょうどと 1 超え（normalizeChat は通す / null、clipChat は切る）', () => {
-  // [名前, ちょうど 40 の文字列, 1 超え（41 か 42）の文字列, clip の期待（41 側）]
-  const cases = [
+  // [名前, ちょうど 40 の文字列, 1 超え（41 か 42）の文字列, clip の期待（41 側）]。上限は 80 なので、それぞれの前に「ちょうど 40」をもう 1 つ付けて使う
+  const cases = ([
     ['半角', 'a'.repeat(40), 'a'.repeat(41), 'a'.repeat(40)],
     ['全角', 'あ'.repeat(20), 'あ'.repeat(21), 'あ'.repeat(20)],
     ['混在（半角 + 全角）', 'a'.repeat(2) + 'あ'.repeat(19), 'a'.repeat(3) + 'あ'.repeat(19), 'a'.repeat(3) + 'あ'.repeat(18)],
@@ -64,11 +64,11 @@ describe('上限ちょうどと 1 超え（normalizeChat は通す / null、clip
     ['結合文字（e + acute は NFC で 1）', ('e' + ACUTE).repeat(20), ('e' + ACUTE).repeat(21), null],
     ['異体字セレクタ（❤ + VS16 = 2）', ('❤' + VS16).repeat(20), ('❤' + VS16).repeat(20) + 'a', ('❤' + VS16).repeat(20)],
     ['キーキャップ（3）', KEYCAP.repeat(13) + 'a', KEYCAP.repeat(13) + 'ab', KEYCAP.repeat(13) + 'a'],
-  ];
+  ]).map(([n, at, over, clip]) => [n, at + at, at + over, clip == null ? null : at + clip]);
   for (const [name, at, over, clipOver] of cases) {
     test(name, () => {
       assert.equal(normalizeChat(at), at.normalize('NFC'), 'ちょうど');
-      assert.equal(normalizeChat(over), over.normalize('NFC').length && chatUnits(over.normalize('NFC')) <= 40 ? over.normalize('NFC') : null, '1 超え');
+      assert.equal(normalizeChat(over), over.normalize('NFC').length && chatUnits(over.normalize('NFC')) <= CHAT_MAX_UNITS ? over.normalize('NFC') : null, '1 超え');
       assert.equal(clipChat(at), at, 'clip：ちょうどは切らない');
       if (clipOver != null) assert.equal(clipChat(over), clipOver, 'clip：1 超え');
       // 切った結果はそのまま送れる（NFC で縮む分は送れる側に余裕がある）
@@ -76,30 +76,30 @@ describe('上限ちょうどと 1 超え（normalizeChat は通す / null、clip
     });
   }
   test('41 / 42 になる文字列は null（切らない）', () => {
-    assert.equal(normalizeChat('a'.repeat(39) + 'あ'), null);
-    assert.equal(normalizeChat('a'.repeat(39) + '😀'), null);
-    assert.equal(normalizeChat('a'.repeat(37) + FLAG), null);
-    assert.equal(normalizeChat('a'.repeat(33) + FAMILY), null);
-    assert.equal(normalizeChat('a'.repeat(32) + FAMILY), 'a'.repeat(32) + FAMILY);
-    assert.equal(normalizeChat('a'.repeat(36) + FLAG), 'a'.repeat(36) + FLAG);
+    assert.equal(normalizeChat('a'.repeat(79) + 'あ'), null);
+    assert.equal(normalizeChat('a'.repeat(79) + '😀'), null);
+    assert.equal(normalizeChat('a'.repeat(77) + FLAG), null);
+    assert.equal(normalizeChat('a'.repeat(73) + FAMILY), null);
+    assert.equal(normalizeChat('a'.repeat(72) + FAMILY), 'a'.repeat(72) + FAMILY);
+    assert.equal(normalizeChat('a'.repeat(76) + FLAG), 'a'.repeat(76) + FLAG);
   });
   test('NFD の濁点：normalizeChat は NFC にしてから数える（20 個は通り 21 個は null）。clipChat も NFC で数える', () => {
-    assert.equal(normalizeChat(NFD_GA.repeat(20)), 'が'.repeat(20));
-    assert.equal(normalizeChat(NFD_GA.repeat(21)), null);
-    const c = clipChat(NFD_GA.repeat(30));
-    assert.equal(c, NFD_GA.repeat(20));                          // NFC の幅（2 ずつ）で 20 個（書記素の途中では切らない）
-    assert.equal(normalizeChat(c), 'が'.repeat(20));             // そのまま送れる
+    assert.equal(normalizeChat(NFD_GA.repeat(40)), 'が'.repeat(40));
+    assert.equal(normalizeChat(NFD_GA.repeat(41)), null);
+    const c = clipChat(NFD_GA.repeat(60));
+    assert.equal(c, NFD_GA.repeat(40));                          // NFC の幅（2 ずつ）で 40 個（書記素の途中では切らない）
+    assert.equal(normalizeChat(c), 'が'.repeat(40));             // そのまま送れる
   });
   test('消えるものは数えない：上限ちょうどの文のあとに見えない文字・空白をいくら付けても通る', () => {
-    const t = 'あ'.repeat(20);
+    const t = 'あ'.repeat(40);
     assert.equal(normalizeChat(t + ch(0x200b).repeat(500) + ' \n\t'.repeat(10)), t);
     assert.equal(normalizeChat(' ' + t + ' '), t);
-    assert.equal(normalizeChat('a'.repeat(40) + ZWJ), 'a'.repeat(40));
+    assert.equal(normalizeChat('a'.repeat(80) + ZWJ), 'a'.repeat(80));
   });
   test('clipChat：書記素を壊さない（国旗・ZWJ 列・タグ付きの旗・キーキャップ・結合文字・肌の色）', () => {
     for (const unit of [FLAG, FAMILY, ENGLAND, KEYCAP, THUMB, 'e' + ACUTE + ch(0x323), NFD_GA, '👩' + ZWJ + '❤' + VS16 + ZWJ + '👨']) {
       for (let pad = 0; pad <= 8; pad++) {
-        const s = 'a'.repeat(pad) + unit.repeat(12);
+        const s = 'a'.repeat(pad) + unit.repeat(24);
         const c = clipChat(s);
         assert.ok(nfcUnits(c) <= CHAT_MAX_UNITS, hex(unit).join(' '));
         assert.ok(s.startsWith(c));
@@ -109,14 +109,14 @@ describe('上限ちょうどと 1 超え（normalizeChat は通す / null、clip
       }
     }
     // 国旗の列：3 つ目の地域指示記号だけが余っても旗を割らない
-    assert.equal(clipChat(FLAG.repeat(10) + '🇺'), FLAG.repeat(10));
+    assert.equal(clipChat(FLAG.repeat(20) + '🇺'), FLAG.repeat(20));
   });
   test('clipChat：孤立サロゲートや制御文字を含んでも落ちない・上限を超えない（normalize で消える）', () => {
-    for (const s of ['a'.repeat(39) + '\ud800' + 'b', '\udc00'.repeat(60), ch(0).repeat(50), '\ud83d' + 'a'.repeat(45)]) {
+    for (const s of ['a'.repeat(79) + '\ud800' + 'b', '\udc00'.repeat(120), ch(0).repeat(100), '\ud83d' + 'a'.repeat(85)]) {
       const c = clipChat(s);
       assert.ok(chatUnits(c) <= CHAT_MAX_UNITS); assert.ok(s.startsWith(c));
     }
-    assert.equal(normalizeChat('a'.repeat(39) + '\ud800' + 'b'), 'a'.repeat(39) + 'b');
+    assert.equal(normalizeChat('a'.repeat(79) + '\ud800' + 'b'), 'a'.repeat(79) + 'b');
   });
 });
 
@@ -199,7 +199,7 @@ test('XSS 的な文字列は正規化で変えない（エスケープは表示�
   }
   assert.equal(normalizeChat('<scr' + ch(0x200b) + 'ipt>'), '<script>');            // 見えない文字を挟んだ偽装は 1 つにつながる（表示側がエスケープする前提）
   assert.equal(normalizeChat('<  b  >'), '< b >');
-  assert.equal(normalizeChat('<script>alert("' + 'x'.repeat(40) + '")</script>'), null);   // 上限は効く
+  assert.equal(normalizeChat('<script>alert("' + 'x'.repeat(80) + '")</script>'), null);   // 上限は効く
 });
 
 // ---------------- rules.js の postChat ----------------
@@ -282,10 +282,10 @@ test('postChat：返す text は normalizeChat と同じ・上限ちょうどは
     if (n === null) assert.throws(() => postChat(r, U(1), s, null, 10), code('malformed'));
     else assert.equal(postChat(r, U(1), s, null, 10).text, n);
   }
-  assert.equal(postChat(r, U(1), 'a'.repeat(40), null, 10).text.length, 40);
-  assert.throws(() => postChat(r, U(1), 'a'.repeat(41), null, 10), code('malformed'));
-  assert.equal(postChat(r, U(1), '😀'.repeat(20), null, 10).text, '😀'.repeat(20));
-  assert.throws(() => postChat(r, U(1), '😀'.repeat(21), null, 10), code('malformed'));
+  assert.equal(postChat(r, U(1), 'a'.repeat(80), null, 10).text.length, 80);
+  assert.throws(() => postChat(r, U(1), 'a'.repeat(81), null, 10), code('malformed'));
+  assert.equal(postChat(r, U(1), '😀'.repeat(40), null, 10).text, '😀'.repeat(40));
+  assert.throws(() => postChat(r, U(1), '😀'.repeat(41), null, 10), code('malformed'));
 });
 
 // ---------------- handler.js の op chat ----------------
@@ -337,7 +337,7 @@ describe('HTTP：op chat（handler）', () => {
     for (const n of [MAX_BODY - 1, MAX_BODY]) { const raw = bodyOfBytes(n); assert.equal(new TextEncoder().encode(raw).length, n); assert.equal((await req(null, { raw })).status, 200, String(n)); }
     for (const n of [MAX_BODY + 1, MAX_BODY * 4]) assert.equal((await req(null, { raw: bodyOfBytes(n) })).status, 422, String(n));
     assert.equal(calls.length, 2);
-    // 全角は 3 バイト：1400 文字は 4200 バイトで超える。1300 文字は通る（上限 20 字を超える長さの判定は postChat）
+    // 全角は 3 バイト：1400 文字は 4200 バイトで超える。1300 文字は通る（上限 40 字を超える長さの判定は postChat）
     assert.equal((await req({ op: 'chat', room: R, text: 'あ'.repeat(1400) })).status, 422);
     assert.equal((await req({ op: 'chat', room: R, text: 'あ'.repeat(1300) })).status, 200);
     // 絵文字は 4 バイト、エスケープされた JSON（\uXXXX）は 6 バイトとして数える
@@ -484,9 +484,9 @@ describe('fakeNet：op chat → room_chat → room_poll.chat の整合（時計�
   test('入力検証：text が文字列でない・空・上限超えは malformed、room 不明・非メンバーは not_found', async () => {
     const id = await startPrivate();
     mock.timers.tick(2100);
-    for (const t of [123, null, undefined, {}, ['hi'], '', '   ', ch(0x200b), 'a'.repeat(41), 'あ'.repeat(21)]) await failsWith(fk.game({ op: 'chat', room: id, text: t }), 'malformed');
+    for (const t of [123, null, undefined, {}, ['hi'], '', '   ', ch(0x200b), 'a'.repeat(81), 'あ'.repeat(41)]) await failsWith(fk.game({ op: 'chat', room: id, text: t }), 'malformed');
     assert.equal(roomOf(id).chatLast[seatOfMe(id)] ?? null, null, '失敗した発言は間隔を進めない');
-    assert.equal((await fk.game({ op: 'chat', room: id, text: 'a'.repeat(40) })).msg.text.length, 40);
+    assert.equal((await fk.game({ op: 'chat', room: id, text: 'a'.repeat(80) })).msg.text.length, 80);
     await failsWith(fk.game({ op: 'chat', room: randomUUID(), text: 'hi' }), 'not_found');
     await failsWith(fk.rpc('room_chat', { p_room: randomUUID(), p_after: 0 }), 'not_found');
     await failsWith(fk.rpc('room_poll', { p_room: randomUUID(), p_ver: 0 }), 'not_found');
@@ -539,7 +539,7 @@ describe('fakeNet：op chat → room_chat → room_poll.chat の整合（時計�
     await fk.game({ op: 'leave', room: id });
   });
 
-  test('Bot は PRIVATE の卓だけで喋り、連投しない（同じ席の発言は 1 秒以上あく・全角 40 幅以内）', async () => {
+  test('Bot は PRIVATE の卓だけで喋り、連投しない（同じ席の発言は 1 秒以上あく・上限の幅以内）', async () => {
     const id = await startPrivate();
     mock.timers.tick(2100);
     for (let i = 0; i < 40; i++) { mock.timers.tick(5000); await fk.rpc('room_poll', { p_room: id, p_ver: 0 }); }   // 200 秒ぶん
@@ -611,8 +611,8 @@ describe('DB：チャットの QA（専用 DB）', { skip: !DBURL && 'TEST_DATAB
 
   test('文字：NUL・孤立サロゲート・ZWJ 列・国旗・NFD は正規化してから保存される（DB のエラーにならない）。読み戻しは同じ', async () => {
     const { us, db, room } = await table(2);
-    const texts = [['a' + ch(0) + 'b', 'ab'], ['x\ud800y', 'xy'], [FAMILY, FAMILY], [FLAG + KEYCAP, FLAG + KEYCAP], [NFD_GA.repeat(20), 'が'.repeat(20)], ['<script>alert(1)</script>', '<script>alert(1)</script>'],
-      ["'; drop table rooms; --", "'; drop table rooms; --"], ['\\u0000 \\', '\\u0000 \\'], ['a'.repeat(40), 'a'.repeat(40)], ['😀'.repeat(20), '😀'.repeat(20)], [ENGLAND, ENGLAND]];
+    const texts = [['a' + ch(0) + 'b', 'ab'], ['x\ud800y', 'xy'], [FAMILY, FAMILY], [FLAG + KEYCAP, FLAG + KEYCAP], [NFD_GA.repeat(40), 'が'.repeat(40)], ['<script>alert(1)</script>', '<script>alert(1)</script>'],
+      ["'; drop table rooms; --", "'; drop table rooms; --"], ['\\u0000 \\', '\\u0000 \\'], ['a'.repeat(80), 'a'.repeat(80)], ['😀'.repeat(40), '😀'.repeat(40)], [ENGLAND, ENGLAND]];
     const got = [];
     for (const [t, want] of texts) {
       const m = await db.chat(us[0], room, t);
@@ -623,7 +623,7 @@ describe('DB：チャットの QA（専用 DB）', { skip: !DBURL && 'TEST_DATAB
     assert.deepEqual(log.map(m => m.text), got);
     const { rows } = await pool.query('select text from public.room_chat where room = $1 order by seq', [room]);
     assert.deepEqual(rows.map(x => x.text), got);
-    for (const bad of ['', ' ', 'a'.repeat(41), ch(0), '\ud800', 'あ'.repeat(21), NFD_GA.repeat(21)]) await rejectsCode(db.chat(us[0], room, bad), 'malformed');
+    for (const bad of ['', ' ', 'a'.repeat(81), ch(0), '\ud800', 'あ'.repeat(41), NFD_GA.repeat(41)]) await rejectsCode(db.chat(us[0], room, bad), 'malformed');
     for (const bad of [null, undefined, 42, {}, ['a']]) await rejectsCode(db.chat(us[0], room, bad), 'malformed');
     assert.equal((await pool.query('select chat_seq from public.rooms where id = $1', [room])).rows[0].chat_seq, texts.length, '失敗した発言は seq を進めない');
   });

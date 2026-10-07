@@ -4,7 +4,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, CHAT_ROOM_MAX, chatUnits, clipChat, normalizeChat } from '../src/chat.js';
+import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, CHAT_ROOM_MAX, BUBBLE_MAX_UNITS, chatUnits, clipChat, normalizeChat, splitChat } from '../src/chat.js';
 import { createRoom, joinRoom, leaveRoom, postChat, MoveError } from '../server/game/rules.js';
 import { createHandler, STATUS } from '../server/game/handler.js';
 import { makeDb } from '../server/game/db.js';
@@ -16,7 +16,7 @@ const ch = cp => String.fromCodePoint(cp);
 const ZWJ = ch(0x200d), VS16 = ch(0xfe0f), ACUTE = ch(0x301);
 
 test('chat：定数', () => {
-  assert.equal(CHAT_MAX_UNITS, 40); assert.equal(CHAT_MIN_INTERVAL_MS, 1000); assert.equal(CHAT_ROOM_MAX, 2000);
+  assert.equal(CHAT_MAX_UNITS, 80); assert.equal(CHAT_MIN_INTERVAL_MS, 1000); assert.equal(CHAT_ROOM_MAX, 2000);
 });
 
 test('chatUnits：全角（W/F・絵文字）は 2、それ以外は 1（コードポイント単位）', () => {
@@ -42,23 +42,23 @@ test('chatUnits：全角（W/F・絵文字）は 2、それ以外は 1（コー�
 });
 
 test('clipChat：上限ちょうどまで。書記素の途中では切らない', () => {
-  assert.equal(clipChat('a'.repeat(40)), 'a'.repeat(40));
-  assert.equal(clipChat('a'.repeat(41)), 'a'.repeat(40));
-  assert.equal(clipChat('あ'.repeat(20)), 'あ'.repeat(20));
-  assert.equal(clipChat('あ'.repeat(21)), 'あ'.repeat(20));
-  assert.equal(clipChat('a'.repeat(39) + 'あ'), 'a'.repeat(39));            // 全角は 2 なので入らない
-  assert.equal(clipChat('a'.repeat(38) + 'あい'), 'a'.repeat(38) + 'あ');
-  assert.equal(clipChat('a'.repeat(39) + '😀'), 'a'.repeat(39));             // サロゲートペアを割らない
-  assert.equal(clipChat('a'.repeat(37) + '👍🏽'), 'a'.repeat(37));            // 絵文字＋肌の色（4）を割らない
-  assert.equal(clipChat('a'.repeat(40) + 'e' + ACUTE), 'a'.repeat(40));     // 結合文字を割らない
-  assert.equal(clipChat('a'.repeat(39) + 'e' + ACUTE), 'a'.repeat(39) + 'e' + ACUTE); // 幅は NFC で数える（é = 1）
+  assert.equal(clipChat('a'.repeat(80)), 'a'.repeat(80));
+  assert.equal(clipChat('a'.repeat(81)), 'a'.repeat(80));
+  assert.equal(clipChat('あ'.repeat(40)), 'あ'.repeat(40));
+  assert.equal(clipChat('あ'.repeat(41)), 'あ'.repeat(40));
+  assert.equal(clipChat('a'.repeat(79) + 'あ'), 'a'.repeat(79));            // 全角は 2 なので入らない
+  assert.equal(clipChat('a'.repeat(78) + 'あい'), 'a'.repeat(78) + 'あ');
+  assert.equal(clipChat('a'.repeat(79) + '😀'), 'a'.repeat(79));             // サロゲートペアを割らない
+  assert.equal(clipChat('a'.repeat(77) + '👍🏽'), 'a'.repeat(77));            // 絵文字＋肌の色（4）を割らない
+  assert.equal(clipChat('a'.repeat(80) + 'e' + ACUTE), 'a'.repeat(80));     // 結合文字を割らない
+  assert.equal(clipChat('a'.repeat(79) + 'e' + ACUTE), 'a'.repeat(79) + 'e' + ACUTE); // 幅は NFC で数える（é = 1）
   const fam = '👨' + ZWJ + '👩' + ZWJ + '👧';                               // 8
-  assert.equal(clipChat('a'.repeat(33) + fam), 'a'.repeat(33));
-  assert.equal(clipChat('a'.repeat(32) + fam + 'b'), 'a'.repeat(32) + fam);
+  assert.equal(clipChat('a'.repeat(73) + fam), 'a'.repeat(73));
+  assert.equal(clipChat('a'.repeat(72) + fam + 'b'), 'a'.repeat(72) + fam);
   assert.equal(clipChat(''), '');
-  for (const s of ['x'.repeat(100), 'あ'.repeat(30) + 'abc', '😀'.repeat(25)]) assert.ok(chatUnits(clipChat(s)) <= CHAT_MAX_UNITS);
+  for (const s of ['x'.repeat(200), 'あ'.repeat(60) + 'abc', '😀'.repeat(50)]) assert.ok(chatUnits(clipChat(s)) <= CHAT_MAX_UNITS);
   // 切った結果はそのまま送れる
-  assert.equal(normalizeChat(clipChat('あ'.repeat(30))), 'あ'.repeat(20));
+  assert.equal(normalizeChat(clipChat('あ'.repeat(60))), 'あ'.repeat(40));
 });
 
 test('normalizeChat：空白類・見えない文字・NFC・上限', () => {
@@ -84,13 +84,13 @@ test('normalizeChat：空白類・見えない文字・NFC・上限', () => {
   assert.equal(normalizeChat('e' + ch(0x200b) + ACUTE), 'é');
   assert.equal(normalizeChat('か' + ch(0x3099)), 'が');
   // 上限：ちょうどは通す・超えたら null（切らない）
-  assert.equal(normalizeChat('a'.repeat(40)), 'a'.repeat(40));
-  assert.equal(normalizeChat('a'.repeat(41)), null);
-  assert.equal(normalizeChat('あ'.repeat(20)), 'あ'.repeat(20));
-  assert.equal(normalizeChat('あ'.repeat(20) + 'a'), null);
-  assert.equal(normalizeChat('  ' + 'あ'.repeat(20) + '\n'), 'あ'.repeat(20));                  // 前後の空白は数えない
+  assert.equal(normalizeChat('a'.repeat(80)), 'a'.repeat(80));
+  assert.equal(normalizeChat('a'.repeat(81)), null);
+  assert.equal(normalizeChat('あ'.repeat(40)), 'あ'.repeat(40));
+  assert.equal(normalizeChat('あ'.repeat(40) + 'a'), null);
+  assert.equal(normalizeChat('  ' + 'あ'.repeat(40) + '\n'), 'あ'.repeat(40));                  // 前後の空白は数えない
   assert.equal(normalizeChat('a' + ' '.repeat(50) + 'b'), 'a b');                               // 連続スペースは 1 つにしてから数える
-  assert.equal(normalizeChat('a'.repeat(39) + ch(0x200b).repeat(10)), 'a'.repeat(39));
+  assert.equal(normalizeChat('a'.repeat(79) + ch(0x200b).repeat(10)), 'a'.repeat(79));
   assert.equal(normalizeChat('e' + ACUTE).length, 1);
 });
 
@@ -110,7 +110,7 @@ test('postChat：席・文の正規化・連投の間隔', () => {
   assert.throws(() => postChat(r, U(2), 'gg', 4001, 5000), code('too_fast'));
   assert.throws(() => postChat(r, U(2), 'gg', 5000, 5000), code('too_fast'));
   assert.throws(() => postChat(r, U(9), 'gg', null, 5000), code('not_found'));
-  for (const t of ['', '   ', ch(0x200b), 'a'.repeat(41), 'あ'.repeat(21), 42, null, undefined, { text: 'x' }])
+  for (const t of ['', '   ', ch(0x200b), 'a'.repeat(81), 'あ'.repeat(41), 42, null, undefined, { text: 'x' }])
     assert.throws(() => postChat(r, U(1), t, null, 5000), code('malformed'), JSON.stringify(t));
   // 部屋は変えない（ver も上げない）
   const before = structuredClone(r);
@@ -253,7 +253,7 @@ describe('DB：チャット（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_UR
     assert.deepEqual(await rpc(us[0], 'room_chat', [a.room, 0]), []);
     await rejectsCode(db.chat(us[3], a.room, 'hi'), 'not_found');
     await rejectsCode(db.chat(us[0], randomUUID(), 'hi'), 'not_found');
-    await rejectsCode(db.chat(us[0], a.room, 'あ'.repeat(21)), 'malformed');
+    await rejectsCode(db.chat(us[0], a.room, 'あ'.repeat(41)), 'malformed');
 
     const m1 = await db.chat(us[0], a.room, '  よろしく\n');
     const seat0 = p0.view.seat;
@@ -308,13 +308,45 @@ describe('DB：チャット（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_UR
 });
 
 test('clipChat の結果はそのまま送れる（合成除外の文字は NFC で幅が増える）', () => {
-  const s = 'य़'.repeat(40);                 // NFC で 2 文字に分かれる
+  const s = 'य़'.repeat(80);                 // NFC で 2 文字に分かれる
   assert.notEqual(normalizeChat(clipChat(s)), null);
-  assert.equal(chatUnits(clipChat(s).normalize('NFC')), 40);
+  assert.equal(chatUnits(clipChat(s).normalize('NFC')), 80);
 });
 
 test('normalizeChat：見た目が空（結合文字・異体字セレクタ・タグ文字だけ）は null', () => {
   for (const s of ['️️', '́́', '\u{E0061}\u{E0062}', '\u{1D173}', ' ️ '])
     assert.equal(normalizeChat(s), null, JSON.stringify(s));
   assert.equal(normalizeChat('❤️'), '❤️');
+});
+
+test('splitChat：吹き出し 1 つ（BUBBLE_MAX_UNITS = 40）に入らない発言は、最少の数に均等に分ける（最後だけ短い切れ端にしない）', () => {
+  assert.equal(BUBBLE_MAX_UNITS, 40);
+  assert.deepEqual(splitChat('gg'), ['gg']);
+  assert.deepEqual(splitChat('あ'.repeat(20)), ['あ'.repeat(20)]);                     // ちょうど 40 は 1 つ
+  assert.deepEqual(splitChat('あ'.repeat(21)), ['あ'.repeat(10), 'あ'.repeat(11)]);    // 20 + 1 にしない
+  assert.deepEqual(splitChat('a'.repeat(80)), ['a'.repeat(40), 'a'.repeat(40)]);
+  // 均等な位置に近い句読点・空白の後ろで切る（空白は落とす）
+  assert.deepEqual(splitChat('さっきのリバーは本当にきつかった。次のハンドで取り返すからね、見てて'), ['さっきのリバーは本当にきつかった。', '次のハンドで取り返すからね、見てて']);
+  assert.deepEqual(splitChat('I really thought my flush was good there, but your full house got me again'), ['I really thought my flush was good', 'there, but your full house got me again']);
+  // 書記素を割らない
+  assert.deepEqual(splitChat('😀'.repeat(25)), ['😀'.repeat(12), '😀'.repeat(13)]);
+  const fam = '👨‍👩‍👧';
+  for (const p of splitChat('a' + fam.repeat(9))) assert.ok(!p.startsWith('‍') && !p.endsWith('‍'));
+});
+
+test('性質：splitChat は上限内・順序どおり・数は最少・長さはほぼ均等（ランダムな 2000 文）', () => {
+  let x = 7; const rnd = n => ((x = (x * 1103515245 + 12345) % 2147483648) % n);
+  const pool = ['a', 'b', ' ', 'あ', '漢', '、', '。', '!', '😀', 'ｱ', 'é'];
+  for (let i = 0; i < 2000; i++) {
+    let s = ''; while (chatUnits(s) < 41 + rnd(40)) s += pool[rnd(pool.length)];
+    s = normalizeChat(clipChat(s)); if (!s) continue;
+    const parts = splitChat(s), total = chatUnits(s);
+    for (const p of parts) assert.ok(p && chatUnits(p) <= BUBBLE_MAX_UNITS && p === p.trim(), JSON.stringify([s, p]));
+    assert.equal(parts.join('').replace(/ /g, ''), s.replace(/ /g, ''), '順序と中身');
+    if (total > BUBBLE_MAX_UNITS) {
+      assert.equal(parts.length, Math.ceil(total / BUBBLE_MAX_UNITS), JSON.stringify(s));
+      // 最後の分も均等な長さから大きく外れない（切れ目を句読点に寄せるずれ 6 ＋ 書記素 1 つ分 ＋ 落とした空白）
+      assert.ok(chatUnits(parts[parts.length - 1]) >= total / parts.length - 10, JSON.stringify([s, parts]));
+    }
+  }
 });

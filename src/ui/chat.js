@@ -3,7 +3,7 @@
 // ヘッダの履歴ボタン（#chatLogBtn）とモーダルは ingame.js（chatEnabled / messages / subscribe / unread / markRead を使う）。
 import { $, app, esc, toast, REDUCE, EASE } from './util.js';
 import { settleSoon, snapshot, expectKeyboard } from './viewport.js';
-import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, chatUnits, clipChat, normalizeChat } from '../chat.js';
+import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, chatUnits, clipChat, normalizeChat, splitChat } from '../chat.js';
 
 const S = {
   room: null, v: null, on: false, token: 0,
@@ -248,8 +248,10 @@ export function toneOf(seat) {
   return seat === v.seat ? 'you' : 'p' + (((seat - v.seat) % v.n + v.n) % v.n);
 }
 
-function bubble(m) {
+// 吹き出し 1 つに入らない発言（BUBBLE_MAX_UNITS）は分けて、前の分を読む時間をおいてから次の分に入れ替える（rest = 残り）
+function bubble(m, rest) {
   const L = layer(); if (!L || L.hidden || !S.v) return null;
+  if (!rest) { const parts = splitChat(m.text); rest = parts.slice(1); if (rest.length) m = { ...m, text: parts[0] }; }
   for (const x of live) if (!x.gone && x.seat === m.seat) retire(x, true);
   const el = document.createElement('div');
   el.className = 'cb t-' + toneOf(m.seat);
@@ -261,7 +263,7 @@ function bubble(m) {
   if (REDUCE) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: 'linear' });
   else el.animate([{ opacity: 0, transform: 'translateY(8px) scale(.94)', filter: 'blur(6px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }],
     { duration: 480, easing: 'cubic-bezier(.16,.84,.3,1)' });
-  b.timer = setTimeout(() => retire(b), dwell(m.text));
+  b.timer = setTimeout(() => (rest.length ? bubble({ ...m, text: rest[0] }, rest.slice(1)) : retire(b)), dwell(m.text));
   ping(m.seat);
   return b;
 }

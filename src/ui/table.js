@@ -26,7 +26,7 @@ export function enter(id) {
   leave();
   T = { id, ver: -1, v: null, busy: false, timer: 0, lockUntil: 0, pre: null, rs: null, resultShown: false, tickAt: 0, tickBusy: false,
     clockCache: null, sh: { handNo: -1, board: -1, settled: -1, revealed: -1, bet: [], init: false }, synced: 0, syncT: 0, leaving: false,
-    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, settledAt: 0, resT: 0 };
+    ro: null, winC: null, rmBusy: false, endSynced: false, q: [], holdUntil: 0, pumpT: 0, sg: null, settledAt: 0, resT: 0, cleared: false };
   $('#dock').innerHTML = '<div id="dockMain" style="display:contents"></div>';
   chat.start(id);
   // 前の卓の描画の記録も消す（同じ人数・同じ席の卓に入り直したとき＝再戦で、席を作り直さずに止まっていた）
@@ -69,10 +69,17 @@ function syncHeader() {
 const watching = v => v.status === 'finished' || v.status === 'cancelled' || ['out', 'left'].includes(v.players[v.seat].status);
 export function askLeave() {
   const t = T; if (!t || !t.v || t.leaving) return;
-  if (watching(t.v)) return toMenu();
+  const btns = '<div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn danger" id="leaveOk" type="button">Leave</button></div>';
+  if (watching(t.v)) {
+    // 観戦中・終局後も確かめてからメニューへ（席に残って再戦を待っているなら、その待ちから外れる）
+    const v = t.v, rm = v.rematch, staying = rematchLive(v) && rm.stay.includes(v.seat);
+    $('#leaveBody').innerHTML = head('LEAVE', '退出しますか？') + (staying ? '<p>再戦の待機から外れます。</p>' : '') + btns;
+    openDlg('#leaveDlg');
+    $('#leaveOk').onclick = () => { if (T !== t) return; $('#leaveDlg').close(); toMenu(); };
+    return;
+  }
   $('#leaveBody').innerHTML = head('LEAVE', '退出しますか？') +
-    `<p>退出すると戻れません。チップは卓に残り、手番は自動でチェック/フォールドされます。最後まで残った人の順位で pt が決まります。</p>
-    <div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn danger" id="leaveOk" type="button">Leave</button></div>`;
+    `<p>退出すると戻れません。チップは卓に残り、手番は自動でチェック/フォールドされます。最後まで残った人の順位で pt が決まります。</p>${btns}`;
   openDlg('#leaveDlg');
   $('#leaveOk').onclick = async () => {
     if (T !== t || t.leaving) return;
@@ -211,10 +218,22 @@ function checkResult() {
   const want = (ended && !t.overShown) || (!ended && me.status === 'out' && !t.resultShown);
   const wait = want ? t.settledAt + PACE.result - Date.now() : 0;
   if (wait > 0) { clearTimeout(t.resT); t.resT = setTimeout(() => { if (T === t) checkResult(); }, wait + 20); return; }
-  if (ended && !t.overShown) { t.overShown = true; showResult(); return; }
-  if (ended && $('#overDlg').open) { showResult(); return; }   // 開いている間は席に残った人を更新する
-  if (!ended && me.status === 'out' && !t.resultShown) showResult();
+  if (ended && !t.overShown) { t.overShown = true; showResult(); }
+  else if (ended && $('#overDlg').open) showResult();   // 開いている間は席に残った人を更新する
+  else if (!ended && me.status === 'out' && !t.resultShown) showResult();
+  if (ended && t.overShown) clearBoard();   // 結果を出したら卓を片付ける（最後のハンドを残さない）
 }
+/** 終局後の卓：ボード・手札・ベット・ポットを消し（ふわっと）、席には順位だけを出す。最後のハンドは結果のダイアログとハンド履歴で見られる */
+function clearBoard() {
+  const t = T; if (t.cleared) return;
+  t.cleared = true;
+  const els = [...document.querySelectorAll('#boardC .card, #boardC .flip3d, #seats .hole .card, #seats .bchip, #seats .eq')];
+  if (REDUCE || document.hidden || !els.length) { render(); return; }
+  els.forEach(e => e.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 360, easing: 'ease-in', fill: 'forwards' }));
+  setTimeout(() => { if (T === t) render(); }, 380);
+}
+/** 描くハンド（終局して片付けた後は無し） */
+const shownHand = () => (T.cleared ? null : T.v.hand);
 /** 再戦の受付中で、自分がまだ去っていない */
 function rematchLive(v) {
   const rm = v.rematch;
@@ -327,7 +346,7 @@ function ensureSeats(v) {
 const PL = { fold: 'FOLD', check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE', allin: 'ALL-IN' };
 function render() {
   const t = T; if (!t || !t.v) return;
-  const v = t.v, h = v.hand, ro = runout(), sg = stage();
+  const v = t.v, h = shownHand(), ro = runout(), sg = stage();
   syncHeader(); ensureSeats(v);
   let ch = renderInfo();
   for (let s = 0; s < v.n; s++) ch = setHTML($('#seat' + s), seatHTML(s)) || ch;
@@ -355,6 +374,7 @@ function renderInfo() {
 }
 function nextLevelText() {
   const v = T.v, c = v.config, h = v.hand, lv = h ? h.level : 1;
+  if (v.status === 'finished' || v.status === 'cancelled') return { t: '–', soon: false };   // 終局したら止める
   if (lv >= BLIND_TABLES[c.speed].length) return { t: 'MAX', soon: false };
   // 3 分たったらハンドの終わりまで 0:00 で止まり、次のハンドで上がって数え直す
   const ms = (v.levelStartAt ?? v.startedAt + (lv - 1) * levelMsOf(c)) + levelMsOf(c) - clock.now();
@@ -382,7 +402,7 @@ function lastAction(h, s, sg) {
 /** 見せている途中で、まだ見せていないアクションにその席の kind があるか（フォールド・オールインを先に見せない） */
 const hiddenKind = (h, s, sg, kind) => !!(sg && sg.shown != null && h.actions.slice(sg.shown).some(a => a.seat === s && a.kind === kind));
 function seatHTML(s) {
-  const v = T.v, h = v.hand, me = s === v.seat, p = v.players[s], bb = h ? h.bb : 200, ro = runout(), sg = stage(), vl = veiled();
+  const v = T.v, h = shownHand(), me = s === v.seat, p = v.players[s], bb = v.hand ? v.hand.bb : 200, ro = runout(), sg = stage(), vl = veiled();
   // settled = 結果を見せてよい（ショーダウンの演出・フォールドで終わる前の一拍の間は、まだ賭けの直後のように見せる）
   const done = h && h.phase === 'settled', settled = done && !vl, inHand = h && h.startStacks[s] > 0;
   const out = p.status === 'out' && !(done && h.eliminated.some(e => e.seat === s));
@@ -408,6 +428,7 @@ function seatHTML(s) {
   if (ro && inHand && !out) note = folded ? 'FOLD' : allIn ? '<span class="ai">ALL-IN</span>' : '';
   else if (winner) note = `${h.won[s] > h.commits[s] ? `<span class="w up">+${fmtBb(h.won[s] - h.commits[s], bb)} BB</span>` : '<span class="w up">CHOP</span>'}${h.names && h.names[s] ? `<span class="hn">${esc(h.names[s])}</span>` : ''}`;
   else if (settled && h.names && h.names[s]) note = `<span class="hn">${esc(h.names[s])}</span>`;
+  else if (T.cleared && p.place) note = ordinal(p.place).toUpperCase();   // 終局して片付けた卓：順位
   else if (p.status === 'out' && !(vl && h.eliminated.some(e => e.seat === s))) note = p.place ? ordinal(p.place).toUpperCase() : 'OUT';   // このハンドで飛んだ順位は演出の後
   else if (p.status === 'left') note = 'LEFT';
   else if (la && !acting) note = `<span class="pl k-${la.kind}" data-i="${la.i}">${PL[la.kind]}</span>`;
@@ -427,7 +448,7 @@ function seatHTML(s) {
 }
 /** いま見せるベット（遷移の途中ならその時点のもの。精算済みなら無し） */
 function shownBets() {
-  const h = T.v.hand, sg = stage();
+  const h = shownHand(), sg = stage();
   if (!h) return null;
   if (sg && sg.bets) return sg.bets;
   return h.phase === 'settled' ? null : h.streetBet;
@@ -456,7 +477,7 @@ function isWinner(h, s) {
 
 /* ---------- 描画のあとの演出 ---------- */
 function afterRender() {
-  const t = T, v = t.v, h = v.hand, sh = t.sh, ro = runout(), sg = stage();
+  const t = T, v = t.v, h = shownHand(), sh = t.sh, ro = runout(), sg = stage();
   if (!h) return;
   const board = ro ? ro.board : sg && sg.board != null ? sg.board : h.board.length, settled = h.phase === 'settled' && !veiled();
   const bets = shownBets() || [];
@@ -690,12 +711,12 @@ function renderDock() {
     const lead = rematchLeader(rm, v.endedAt, clock.now()), n = rm.stay.length;
     html = `<span class="eyebrow">REMATCH</span><span class="dk-title rm-n"><b>${n}</b><small>/${v.n}</small></span>${lead === me
       ? `<button class="btn accent" data-act="rematch" type="button" style="flex:0 1 34%;min-width:92px;margin-left:auto"${n < 2 || t.rmBusy ? ' disabled' : ''}>Rematch<small>${n}人</small></button>`
-      : '<span class="dots"><i></i><i></i><i></i></span>'}<button class="pre plain" data-act="menu" type="button">Menu</button>`;
+      : '<span class="dots"><i></i><i></i><i></i></span>'}`;
   } else if (v.status === 'finished' || v.status === 'cancelled') {
-    html = `<span class="eyebrow">${v.status === 'cancelled' ? 'CANCELLED' : 'GAME OVER'}</span><span class="dk-title ${p.place === 1 ? 'y' : ''}">${p.place ? ordinal(p.place) : ''}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button><button class="pre plain" data-act="menu" type="button">Menu</button>`;
+    html = `<span class="eyebrow">${v.status === 'cancelled' ? 'CANCELLED' : 'GAME OVER'}</span><span class="dk-title ${p.place === 1 ? 'y' : ''}">${p.place ? ordinal(p.place) : ''}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button>`;
   } else if (p.status === 'out') {
     // 観戦中：結果と、メニューへ戻るボタン
-    html = `<span class="eyebrow">WATCHING</span><span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button><button class="pre plain" data-act="menu" type="button">Menu</button>`;
+    html = `<span class="eyebrow">WATCHING</span><span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button>`;
   } else if (p.status === 'sitout' || v.status === 'paused') {
     html = `<span class="eyebrow">${v.status === 'paused' ? 'PAUSED' : 'SITTING OUT'}</span><span class="dk-title">${v.status === 'paused' ? '<b class="secs" id="pauseLeft"></b>' : ''}</span>${p.status === 'sitout' ? '<button class="btn accent" data-act="sitin" type="button" style="flex:0 0 36%">I\'m back</button>' : ''}`;
   } else if (h && h.phase === 'settled') {

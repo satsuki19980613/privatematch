@@ -90,9 +90,10 @@ const SAY = {
   idle: ['うーん', 'ここは降りる', '強気だね', 'gg', 'まじか', 'lol', 'wow', 'なるほど', '次こそ', 'きつい…', 'ブラフでしょ', 'hmm',
     '読まれてる気がする', 'そろそろ勝ちたい', 'いけると思ったのに', 'ブラインド上がるの早いね', 'ok'],
   bye: ['gg', 'gg wp', 'おつかれさまでした', 'ありがとうございました'],
-  // ちょうど上限（CHAT_MAX_UNITS = 40）の文。?chat=many のときだけ
+  // 吹き出し 1 つの上限（BUBBLE_MAX_UNITS = 40）ちょうどの文と、分けて出す長い文。?chat=many のときだけ
   long: ['リバーでそれを引かれたら本当にもう無理だ', 'さっきのオールインは完全にブラフでしょ！', 'that river was brutal, nice hand though!',
-    'GG! 次はもっとうまくやるからね、覚えてて', 'ブラインドが上がる前にもう少し増やしたい', 'Folded the best hand again, unbelievable'],
+    'GG! 次はもっとうまくやるからね、覚えてて', 'ブラインドが上がる前にもう少し増やしたい', 'Folded the best hand again, unbelievable',
+    'さっきのリバーは本当にきつかった。次のハンドで取り返すからね、見てて', 'I really thought my flush was good there, but your full house got me again'],
 };
 const talkState = R => (R.talk ??= { at: Date.now() + between(TALK), queue: [], last: -1, hello: false, bye: false });
 // 喋れる Bot の席（退出した Bot は喋らない。直前に喋った席と except は避ける）

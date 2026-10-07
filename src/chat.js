@@ -1,6 +1,7 @@
 // 卓のチャット（PRIVATE MATCH だけ）の文字の決まり。サーバー（server/game/rules.js の postChat）とブラウザ（入力欄）の両方が使う。
 // 幅の単位：全角（East Asian Width の W / F 相当・絵文字）= 2、それ以外 = 1。コードポイント単位で数える。
-export const CHAT_MAX_UNITS = 40;          // 全角 20 文字 / 半角 40 文字
+export const CHAT_MAX_UNITS = 80;          // 全角 40 文字 / 半角 80 文字（20 文字では足りないという声で 2 倍にした）
+export const BUBBLE_MAX_UNITS = 40;        // 吹き出し 1 つ（全角 20 文字）。長い発言は splitChat で分けて順に出す
 export const CHAT_MIN_INTERVAL_MS = 1000;  // 同じ席の連投の間隔
 export const CHAT_ROOM_MAX = 2000;         // 1 部屋の上限件数
 
@@ -41,6 +42,34 @@ export function clipChat(s) {
     out += g; n += u;
   }
   return out;
+}
+
+// 吹き出しを分ける切れ目にしたい文字（この文字の後ろで切る）
+const BREAK = /[\s、。，．,.!?！？…・」』）)]$/u;
+/** 長い発言を吹き出しに分ける。1 つは max（幅の単位）以内、数は最少、長さはなるべく均等（最後だけ短い切れ端にしない）。
+ *  切れ目は均等な位置に近い空白・句読点の後ろを選ぶ（max の 15% までずれてよい）。書記素の途中では切らない。前後の空白は落とす */
+export function splitChat(s, max = BUBBLE_MAX_UNITS) {
+  s = String(s ?? '');
+  const gs = graphemes(s), P = [0];
+  for (const g of gs) P.push(P[P.length - 1] + chatUnits(g));
+  const total = P[gs.length];
+  if (total <= max) return [s];
+  const out = [];
+  let a = 0;
+  while (a < gs.length) {
+    const rem = total - P[a];
+    if (rem <= max) { out.push(gs.slice(a).join('')); break; }
+    const k = Math.ceil(rem / max), goal = P[a] + rem / k;   // 残りを k 個に均等に分けたときの切れ目
+    let best = -1, score = Infinity;
+    for (let b = a + 1; b <= gs.length && P[b] - P[a] <= max; b++) {
+      if (total - P[b] > max * (k - 1)) continue;   // 残りが k - 1 個に入らない
+      const sc = Math.abs(P[b] - goal) - (BREAK.test(gs[b - 1]) ? max * .15 : 0);
+      if (sc < score) { score = sc; best = b; }
+    }
+    if (best < 0) { best = a + 1; while (best < gs.length && P[best + 1] - P[a] <= max) best++; }   // 幅の大きい書記素で均等にできない：詰める
+    out.push(gs.slice(a, best).join('')); a = best;
+  }
+  return out.map(x => x.trim()).filter(Boolean);
 }
 
 // 空白類（改行・タブ・NBSP・全角スペースなど）→ 半角スペース
