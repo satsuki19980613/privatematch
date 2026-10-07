@@ -1,7 +1,7 @@
 // 卓：2〜6 席（自分は常に下）、ボード、ポット、操作ドック、ハンドの結果（ショーダウンの演出）、ポーリングと tick、試合の結果と再戦。
 // 状態はサーバーのビュー（room_poll / act / tick）だけから作る。ルールで決めるのは legalActions(view) だけ。
-import { legalActions, dueAt } from '../engine.js';
-import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf, RUNOUT, runoutMs } from '../structure.js';
+import { legalActions, dueAt, fxSeat } from '../engine.js';
+import { BLIND_TABLES, modeLabel, ACTION_MS, levelMsOf, RUNOUT, runoutMs, FX, FX_MS } from '../structure.js';
 import { equities, pctOf, bestFive } from '../equity.js';
 import { PACE, plan, nextToApply } from '../pace.js';
 import { rematchLeader } from '../../server/game/rules.js';
@@ -12,6 +12,8 @@ import { viewportHooks, gliding } from './viewport.js';
 import { quickSizes, stepChips } from '../betsize.js';
 import { getSizes } from './settings.js';
 import { markOf, onNotes } from '../history/notes.js';
+import * as fxshow from './fxshow.js';
+import { getFx } from './gif.js';
 
 const GRACE_MS = 1500;
 const sum = a => a.reduce((s, x) => s + x, 0);
@@ -44,6 +46,7 @@ export function leave() {
   if (T.ro) { T.ro.done = true; T.ro.timers.forEach(clearTimeout); }
   if (T.sg) { T.sg.done = true; T.sg.timers.forEach(clearTimeout); }
   document.querySelectorAll('.fly,.ai-banner').forEach(e => e.remove());
+  fxshow.clear();
   $('#table').classList.remove('tense');
   for (const d of ['#overDlg', '#leaveDlg']) if ($(d).open) $(d).close();
   chat.stop();
@@ -163,8 +166,9 @@ function apply(v, instant) {
   if ((t.rs || sheetOpen()) && (!(h && h.toAct === v.seat && h.phase === 'betting' && v.status === 'running') || !t.rs || t.rs.handNo !== h.handNo || t.rs.street !== h.street || stage())) closeSheet();
   // 終わったハンドを端末に写す（少し待ってまとめて）
   // （演出の間はハンド履歴に結果が出ないよう、終わってから）
-  if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (p && p.veil ? p.hold + runoutMs(h.runFrom) : 0)); }
+  if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (p && p.veil ? p.hold + runoutMs(h.runFrom) + (fxOf(v) != null ? FX_MS : 0) : 0)); }
   chat.onView(v);
+  if (privateRoom(v) && v.fx) fxshow.prepare(v.fx);   // 勝者の演出 GIF を先に読んでおく
   render();
   if (!stage()) autoPre();
   checkResult();
@@ -243,11 +247,14 @@ function showResult() {
 }
 
 /* ---------- 再戦 ---------- */
+const privateRoom = v => !!(v && v.room && v.room.kind === 'private');
+// 席に残る・再戦で送る演出 GIF（試合の途中で設定を変えた分も再戦に入る。PRIVATE MATCH だけ）
+const fxBody = () => (privateRoom(T && T.v) ? { fx: getFx() } : {});
 async function stay() {
   const t = T; if (!t || t.rmBusy) return;
   t.rmBusy = true; if ($('#overDlg').open) showResult();
   try {
-    const r = await net().game({ op: 'stay', room: t.id });
+    const r = await net().game({ op: 'stay', room: t.id, ...fxBody() });
     if (T !== t) return;
     t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); poll();
   } catch (e) {
@@ -260,7 +267,7 @@ async function rematch() {
   const t = T; if (!t || t.rmBusy) return;
   t.rmBusy = true; renderDock();
   try {
-    const r = await net().game({ op: 'rematch', room: t.id });
+    const r = await net().game({ op: 'rematch', room: t.id, ...fxBody() });
     if (T !== t) return;
     clock.offset = r.now - Date.now(); toast('REMATCH'); app.nav.enterRoom(r.room, r);
   } catch (e) {
@@ -480,8 +487,11 @@ function afterRender() {
 /* ===================== ショーダウンの演出（オールインのランアウトを含む） ===================== */
 // 精算済みのビューはボード 5 枚・全員の手札・勝者を一度に運んでくるので、それを RUNOUT（structure.js。エンジンが次のハンドまで待つ時間と同じ）の順に見せる：
 //   ベットをポットへ（オールインなら ALL-IN の帯）→ 手札を表に → 勝率 → フロップ → ターン（それぞれ勝率を更新して止める）
-//   → リバー（まだ逆転があれば伏せて置き、端を持ち上げてから表に）→ 勝者の 5 枚・ポットの移動・順位。
+//   → リバー（まだ逆転があれば伏せて置き、端を持ち上げてから表に）→（PRIVATE MATCH で勝者が演出 GIF を設定していれば、
+//   勝負が決まって一間おいてから卓の中央に GIF → 消してボードに戻る。structure.js の FX）→ 勝者の 5 枚・ポットの移動・順位。
 // 演出の間は結果（勝者・役名・増えたスタック・飛んだ順位・ドックの WINS・結果のダイアログ）を伏せる。
+/** 演出 GIF を出す席（PRIVATE MATCH の精算済みのショーダウンだけ。engine.js の fxSeat） */
+const fxOf = v => (privateRoom(v) ? fxSeat(v.hand, v.fx) : null);
 /** 演出中なら その状態、そうでなければ null */
 function runout() {
   const t = T, h = t && t.v && t.v.hand;
@@ -493,6 +503,14 @@ function startRunout(v) {
   const ro = t.ro = { handNo: h.handNo, from, board: from, back: false, reveal: false, tense: false, eq: null, eqShow: null, flipMs: 420, stagger: 110, done: false, timers: [] };
   const at = (ms, f) => ro.timers.push(setTimeout(() => { if (T === t && t.ro === ro && !ro.done) f(); }, ms));
   const eqAt = n => equities(h.shown, h.board.slice(0, n), { seed: h.handNo * 7919 + n });
+  // 勝負が決まって一間おいたところ（y）で結果へ。勝者の演出 GIF があれば先に中央に出し、消してボードに戻ってからポットを勝者へ
+  const fs = fxOf(v), extra = fs != null ? FX_MS : 0;
+  const finale = y => {
+    if (fs == null) return at(y, () => endRunout(true));
+    at(y, () => { if (!fxshow.play($('#table'), v.fx[fs], v.names[fs], fs === v.seat)) endRunout(true); });   // 読み込めていなければ出さずに結果へ
+    at(y + FX.in + FX.show, () => fxshow.hide());
+    at(y + FX_MS, () => endRunout(true));
+  };
   const seats = h.shown.map((c, s) => (c ? s : -1)).filter(s => s >= 0);
   gather();
   if (from < 5 || seats.some(s => h.allIn[s])) banner('ALL-IN');
@@ -506,7 +524,7 @@ function startRunout(v) {
     at(x + 650, () => setEq(eqAt(n)));
     x += R.street;
   }
-  if (from >= 5) { at(x, () => endRunout(true)); t.holdUntil = Math.max(t.holdUntil, Date.now() + x + PACE.beat); return; }
+  if (from >= 5) { finale(x); t.holdUntil = Math.max(t.holdUntil, Date.now() + x + extra + PACE.beat); return; }
   // リバー：まだ勝ちの目が 2 人以上にある（引き分けしかない場合を除く）なら溜める
   const pre = eqAt(4), alive = pre.filter(e => e > 0);
   const tense = alive.length > 1 && alive.some(e => Math.abs(e - alive[0]) > 1e-9);
@@ -516,19 +534,20 @@ function startRunout(v) {
     at(x + RIVER.peelAt, () => riverPeel());
     at(x + RIVER.turnAt, () => riverTurn(() => { ro.back = false; ro.board = 5; T.sh.board = 5; render(); }));
     at(x + 1850, () => { ro.tense = false; setEq(eqAt(5)); });
-    at(x + R.river, () => endRunout(true));
-    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + R.river + PACE.beat);
+    finale(x + R.river);
+    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + R.river + extra + PACE.beat);
   } else {
     // 決着がついている：普通にめくって早めに結果へ（次のハンドまでの時間は、そのぶん結果を長く見せる）
     at(x, () => { ro.board = 5; ro.flipMs = 460; render(); });
     at(x + 550, () => setEq(eqAt(5)));
-    at(x + 1300, () => endRunout(true));
-    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + 1300 + PACE.beat);
+    finale(x + 1300);
+    t.holdUntil = Math.max(t.holdUntil, Date.now() + x + 1300 + extra + PACE.beat);
   }
 }
 function endRunout(show) {
   const t = T, ro = t && t.ro; if (!ro || ro.done) return;
   ro.done = true; ro.timers.forEach(clearTimeout);
+  fxshow.hide(show ? FX.out : 0);
   $('#table').classList.remove('tense');
   if (show) { render(); checkResult(); pump(); }
 }

@@ -1,5 +1,6 @@
 // Neon Function "game"：HTTP の振る舞い（CORS・認証・振り分け）。JWT の検証と DB は deps で受け取り、単体テストできるようにする。
 import { MoveError, KINDS } from './rules.js';
+import { normalizeFx } from '../../src/fx.js';
 
 export const MAX_BODY = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,14 +33,16 @@ export function createHandler(deps) {
     } catch { return reply(422, { error: 'malformed' }); }
     if (!body || typeof body !== 'object') return reply(422, { error: 'malformed' });
     const room = typeof body.room === 'string' && UUID.test(body.room) ? body.room : null;
+    // 演出 GIF（create / join / stay / rematch に任意で付く。正しくない slug は「なし」として扱い、参加は止めない）
+    const fx = body.fx === undefined ? undefined : normalizeFx(body.fx);
     try {
       switch (body.op) {
         case 'create':
           if (!KINDS.includes(body.kind) || !body.config || typeof body.config !== 'object') return reply(422, { error: 'malformed' });
-          return reply(200, await deps.create(uid, body.kind, body.config));
+          return reply(200, await deps.create(uid, body.kind, body.config, fx));
         case 'join':
           if (typeof body.code !== 'string' || !CODE.test(body.code)) return reply(422, { error: 'malformed' });
-          return reply(200, await deps.join(uid, body.code));
+          return reply(200, await deps.join(uid, body.code, fx));
         case 'leave':
           if (!room) return reply(422, { error: 'malformed' });
           return reply(200, await deps.leave(uid, room));
@@ -48,10 +51,10 @@ export function createHandler(deps) {
           return reply(200, await deps.request(uid, room, { op: 'act', ver: body.ver, move: body.move }));
         case 'stay':
           if (!room) return reply(422, { error: 'malformed' });
-          return reply(200, await deps.stay(uid, room));
+          return reply(200, await deps.stay(uid, room, fx));
         case 'rematch':
           if (!room) return reply(422, { error: 'malformed' });
-          return reply(200, await deps.rematch(uid, room));
+          return reply(200, await deps.rematch(uid, room, fx));
         case 'sitout': case 'sitin':
           if (!room) return reply(422, { error: 'malformed' });
           return reply(200, await deps.request(uid, room, { op: body.op }));

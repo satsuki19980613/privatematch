@@ -18,6 +18,7 @@ import { legalActions, dueAt, handRecord, newTable, act, tick } from './engine.j
 import { equities } from './equity.js';
 import { DEFAULT_CONFIG } from './structure.js';
 import { CHAT_ROOM_MAX } from './chat.js';
+import { DEMO_SLUGS } from './fxDemo.js';
 
 const q = new URLSearchParams(location.search);
 const WAIT = q.has('wait') ? Math.max(0, +q.get('wait') || 0) : 1500;
@@ -39,6 +40,8 @@ const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;
 const fail = code => { const e = new Error(code); e.code = code; e.status = code === 'too_fast' ? 429 : 409; return e; };
 const between = ([a, b]) => a + Math.random() * (b - a);
 const pickOf = a => a[Math.floor(Math.random() * a.length)];
+// PRIVATE MATCH の Bot の演出 GIF（4 人に 3 人。見本の slug。src/fxDemo.js）
+const botFx = room => (room.kind === 'private' && Math.random() < 0.75 ? pickOf(DEMO_SLUGS) : null);
 const newRoom = (room, show = null) => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null, show, wait: show ? 250 : WAIT });
 // &short（と演出の確認の rematch）：開始直後のスタックを 2〜4 BB に削る
 function shorten(room, on = SHORT) {
@@ -154,7 +157,7 @@ function advanceGame(R) {
   let room = R.room;
   if (!room.started && room.status === 'waiting' && room.members.includes(ME) && now >= R.nextJoin) {
     const uid = botUid(); R.bots.add(uid);
-    save(R, { room: shorten(joinRoom(room, uid, pickName(room.names), now, Math.random), SHORT || R.show === 'rematch') });
+    save(R, { room: shorten(joinRoom(room, uid, pickName(room.names), now, Math.random, botFx(room)), SHORT || R.show === 'rematch') });
     if (R.show === 'river' && R.room.started) rigFirst(R);
     R.nextJoin = now + R.wait;
     return advanceGame(R);
@@ -209,7 +212,7 @@ function rigFirst(R) {
   const r0 = R.room, meSeat = r0.members.indexOf(ME), flip = Math.random() < 0.5;
   const stacks = r0.members.map(u => (u === ME ? 100 : 15) * r0.state.hand.bb);
   for (let i = 0; i < 400; i++) {
-    const st = newTable({ config: r0.config, names: r0.names, now: r0.state.startedAt, stacks });
+    const st = newTable({ config: r0.config, names: r0.names, now: r0.state.startedAt, stacks, fx: r0.state.fx });
     if (i === 399 || tenseRunout(st, r0.state.startedAt, meSeat, flip && i < 300)) { R.room = { ...r0, state: st }; return; }
   }
 }
@@ -239,9 +242,9 @@ function botsAfterGame(R, now) {
   R.rematchAt ??= now + 2500;
   if (now >= R.rematchAt) startRematch(R, R.room.members[lead], now);
 }
-function startRematch(R, uid, now) {
+function startRematch(R, uid, now, fx) {
   const names = new Map(R.room.members.map((u, s) => [u, u === ME ? me.nickname : R.room.names[s]]));
-  const out = rematchRoom(R.room, uid, { id: crypto.randomUUID(), code: genCode(Math.random), names }, now, Math.random);
+  const out = rematchRoom(R.room, uid, { id: crypto.randomUUID(), code: genCode(Math.random), names, fx }, now, Math.random);
   save(R, { room: out.room });
   const N = { ...newRoom(shorten(out.next, SHORT || R.show === 'rematch'), R.show), bots: new Set(out.next.members.filter(u => R.bots.has(u))) };
   rooms.set(N.room.id, N);
@@ -312,7 +315,7 @@ export async function game(body) {
         if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
         const id = crypto.randomUUID();
         const config = show ? { ...DEFAULT_CONFIG, ...SHOWS[show] } : body.config;
-        const room = createRoom({ id, code: genCode(Math.random), kind: body.kind, uid: ME, name: me.nickname, config, now });
+        const room = createRoom({ id, code: genCode(Math.random), kind: body.kind, uid: ME, name: me.nickname, config, now, fx: body.fx });
         const R = { ...newRoom(room, show), nextJoin: now + (show ? 400 : WAIT * 2) };
         rooms.set(id, R);
         return lag(replyOf(R));
@@ -322,16 +325,16 @@ export async function game(body) {
         if (!R) throw new MoveError('not_found');
         if (!R.room.members.includes(ME)) {
           const cur = mine(); if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
-          save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, Math.random), SHORT || R.show === 'rematch') });
+          save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, Math.random, body.fx), SHORT || R.show === 'rematch') });
           R.nextJoin = now + WAIT;
         }
         return lag(replyOf(R));
       }
       case 'leave': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, leaveRoom(R.room, ME, now)); return lag(replyOf(R)); }
-      case 'stay': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, stayRoom(R.room, ME, now)); return lag(replyOf(R)); }
+      case 'stay': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, stayRoom(R.room, ME, now, body.fx)); return lag(replyOf(R)); }
       case 'rematch': {
         const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');
-        return lag(replyOf(startRematch(R, ME, now)));
+        return lag(replyOf(startRematch(R, ME, now, body.fx)));
       }
       case 'act': case 'sitin': case 'sitout': {
         const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');

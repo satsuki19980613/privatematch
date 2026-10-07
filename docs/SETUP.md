@@ -37,6 +37,15 @@ Neon Auth・Google ログイン・Data API・開発用ブランチ `dev` は、�
 | Variable | `NEON_PROD_BRANCH` | 本番に使う Neon のブランチ名（既定 `production`。その名前が無ければプロジェクトの既定のブランチを使う） |
 | Secret | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 自前の Google OAuth クライアント（無ければ Neon の共有アプリ。同意画面に Neon の表示が出る） |
 
+### 演出 GIF（KLIPY。任意）
+PRIVATE MATCH の勝者の演出 GIF は KLIPY の API を使う。キーが無ければ設定に「演出 GIF」が出ず、ほかは今までどおり動く。
+1. https://partner.klipy.com で登録し、**API Keys** でアプリ（Web）を作ってキーを得る。登録時の API 利用規約は保存しておく。
+2. Cloudflare Pages の **Settings → Variables and Secrets** に、Production と Preview の両方へ `VITE_KLIPY_KEY` = そのキーを入れる（ビルド時に読む）。
+   このキーはブラウザから KLIPY を直接呼ぶための公開の値（KLIPY の規約で、API もメディアも利用者のブラウザから直接読む決まり）。
+3. 作ったばかりのキーは **Testing**（アプリ全体で 1 時間 100 回まで）。公開する前に Partner Panel から **Production** を申請する（無料・回数の上限なし）。
+4. Partner Panel の **Content filtering** で、ブロックする語を必要に応じて足す（アプリ側は `content_filter=high` で呼ぶ。結果の並べ替え・間引きは規約で禁止）。
+- 開発：`.env.development.local` に `VITE_KLIPY_KEY` を書く。キー無しでも `?fake` / `?demo` は手元の見本（`src/fxDemo.js`）で全部確かめられる。
+
 秘密の値（API キー・DB の接続文字列）はリポジトリに書かない。コミットされるのは公開の住所（Neon Auth・Data API・Function の URL）だけ。
 
 ## 2. デプロイ

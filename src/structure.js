@@ -134,4 +134,9 @@ export function runoutMs(from) {
   const R = RUNOUT;
   return R.gather + R.reveal + (from < 3 ? R.street : 0) + (from < 4 ? R.street : 0) + (from < 5 ? R.river : 0) + R.latency;
 }
+// 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（RUNOUT の結果の間）おいてから卓の中央に出し、
+//   消してボードに戻ってから、ポットを勝者へ動かす。in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで。
+//   出す席があるハンドは、エンジンが次のハンドを FX_MS だけ遅らせる
+export const FX = { in: 280, show: 2600, out: 320, gap: 250 };
+export const FX_MS = FX.in + FX.show + FX.out + FX.gap;
 export const PAUSED_EXPIRES_MS = 10 * 60000;  // 一時停止の期限

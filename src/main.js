@@ -10,6 +10,7 @@ import * as ingame from './ui/ingame.js';
 import { openRules } from './ui/rules.js';
 import { openSettings, onSizesChange } from './ui/settings.js';
 import { syncRecent } from './history/sync.js';
+import { useDemo } from './klipy.js';
 
 app.net = realNet; // http://localhost:<port>/?fake では src/fakeNet.js に差し替える（開発のみ）
 
@@ -93,6 +94,8 @@ async function boot() {
   // ?demo：ログインもサーバーも使わない（Bot と打てる・STATS にサンプル）。開発中は ?fake も同じ代役を使う
   if (q.has('demo') || (import.meta.env.DEV && q.has('fake'))) {
     app.net = await import('./fakeNet.js');
+    // 演出 GIF は KLIPY の代わりに手元の見本（src/fxDemo.js）
+    useDemo((await import('./fxDemo.js')).demo);
     if (q.has('demo')) { document.body.classList.add('demo'); try { await (await import('./demo.js')).seed(); } catch (e) { /* IndexedDB が使えない */ } }
   }
   app.booting = app.net.online;

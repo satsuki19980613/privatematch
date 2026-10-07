@@ -1,6 +1,9 @@
-// 設定のモーダル（#setDlg）：ベットサイズ。ヘッダの歯車とメニューの SETTINGS から開く。端末に保存（localStorage）。
-// 候補の計算は src/betsize.js。卓のベットのシート（table.js）は開くたびに getSizes() を読む。
+// 設定のモーダル（#setDlg）：入口（ベットサイズ・演出 GIF の 2 つのボタン）→ それぞれのページ。ヘッダの歯車とメニューの SETTINGS から開く。
+// どちらも端末に保存（localStorage）。演出 GIF を選べない（KLIPY のキーが無い）ときは入口を出さずにベットサイズを開く。
+// ベットサイズの候補の計算は src/betsize.js。卓のベットのシート（table.js）は開くたびに getSizes() を読む。演出 GIF のページは src/ui/gif.js。
 import { STEPS, MAX_ITEMS, SCENES, UNITS, normalizeSizes, defaultSizes, makeSize, sortSizes, parseSize } from '../betsize.js';
+import { available as fxAvailable } from '../klipy.js';
+import * as gif from './gif.js';
 import { $, esc, head, openDlg, toast, localGet, localSet } from './util.js';
 
 const KEY = 'pm-betsizes';
@@ -10,6 +13,7 @@ const UNIT_LABEL = { bb: 'BB', x: 'x', '%': '%' };
 let sizes = null;
 const unit = { vsRaise: 'x', vsBet: 'x' };   // 追加するときの単位（2 つある場面だけ）
 let onChange = () => {};
+let page = 'hub';   // 'hub' | 'bet' | 'fx'
 
 export function getSizes() {
   if (!sizes) { try { sizes = normalizeSizes(JSON.parse(localGet(KEY))); } catch (e) { sizes = normalizeSizes(null); } }
@@ -19,7 +23,21 @@ function save() { localSet(KEY, JSON.stringify(sizes)); onChange(); }
 /** 設定が変わったら呼ぶ（開いているベットのシートを作り直す） */
 export function onSizesChange(fn) { onChange = fn; }
 
-export function openSettings() { getSizes(); paint(); openDlg('#setDlg'); }
+export function openSettings() { getSizes(); gif.reset(); go(fxAvailable() ? 'hub' : 'bet'); openDlg('#setDlg'); }
+function go(p) { page = p; paint(); $('#setBody').scrollTop = 0; }
+const backHTML = () => (fxAvailable() ? '<button class="back" id="setBack" type="button">← BACK</button>' : '');
+function paint() {
+  const body = $('#setBody');
+  body.onscroll = null;
+  if (page === 'hub') {
+    body.innerHTML = head('SETTINGS', '設定') + `<div class="set-hub">
+      <button class="mbtn" data-go="bet" type="button"><span>ベットサイズ<small>Bet / Raise の候補・スライダーの刻み</small></span><span class="rt">→</span></button>
+      <button class="mbtn" data-go="fx" type="button"><span>演出 GIF<small>PRIVATE MATCH のショーダウン</small></span><span class="rt">${gif.getFx() ? 'ON' : '→'}</span></button></div>`;
+    body.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  } else if (page === 'fx') gif.paint(body, backHTML());
+  else paintBet();
+  const bk = $('#setBack'); if (bk) bk.onclick = () => go('hub');
+}
 
 function sceneHTML(sc) {
   const list = sizes[sc], full = list.length >= MAX_ITEMS, us = UNITS[sc], u = us.length > 1 ? unit[sc] : us[0];
@@ -30,9 +48,9 @@ function sceneHTML(sc) {
     <div class="sz-chips">${list.map(s => `<button class="sz-chip" type="button" data-del="${esc(s)}" aria-label="${esc(s)} を消す">${parseSize(s).v}<small>${UNIT_LABEL[parseSize(s).u]}</small><i aria-hidden="true"></i></button>`).join('')}<span class="sz-chip fixed">All-in</span></div>
   </section>`;
 }
-function paint() {
+function paintBet() {
   const body = $('#setBody');
-  body.innerHTML = head('SETTINGS', 'ベットサイズ') + `
+  body.innerHTML = backHTML() + head('SETTINGS', 'ベットサイズ') + `
     <section class="sz"><h3>Slider<span>BB</span></h3>
       <div class="seg" id="szStep">${STEPS.map(s => `<button type="button" data-s="${s}" aria-pressed="${sizes.step === s}">${s}</button>`).join('')}</div></section>
     ${SCENES.map(sceneHTML).join('')}

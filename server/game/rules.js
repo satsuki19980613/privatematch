@@ -1,13 +1,16 @@
 // 部屋のルール（docs/ARCHITECTURE.md §4）：作成・参加（満席で開始）・退出・アクション・時間で進む処理・ビュー・チャット。
 // 入出力も時計も持たない純関数（now と rnd は引数で受け取る）。fakeNet もブラウザでこれを使う。
 //
-// 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], state, ver, createdAt, startedAt, rematch }
+// 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], fx: [slug | null], state, ver, createdAt, startedAt, rematch }
 //   status: 'waiting' | 'running' | 'paused' | 'finished' | 'cancelled'（開始後はエンジンの状態と同じ）
 //   members: 待機中は参加順（先頭が作成者）、開始後は席順。state はエンジンの状態（山札を含む。サーバーだけが持つ）
+//   fx: 席ごとの演出 GIF（KLIPY の slug。src/fx.js）。PRIVATE MATCH だけで、FREE MATCH は全員 null。開始時にエンジンへ渡す（engine.js の fxSeat）。
+//       以前の部屋には無い（null は全員なし）
 //   rematch: 終局後の再戦の受付 { stay: [席]（席に残った順）, gone: [席]（Menu へ去った）, next: { id, code } | null（始まった再戦の部屋） }。無ければ null
 import { newTable, act, tick, sitin, sitout, leave, viewFor, handRecord, dueAt, EngineError } from '../../src/engine.js';
 import { normalizeConfig, WAITING_EXPIRES_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../../src/structure.js';
 import { normalizeChat, CHAT_MIN_INTERVAL_MS } from '../../src/chat.js';
+import { normalizeFx } from '../../src/fx.js';
 
 export const KINDS = ['private', 'free'];
 
@@ -21,30 +24,35 @@ export function shuffle(a, rnd) { a = [...a]; for (let i = a.length - 1; i > 0; 
 export const genCode = rnd => String(Math.floor(rnd() * 1e6)).padStart(6, '0');
 
 const live = room => ['waiting', 'running', 'paused'].includes(room.status);
+/** 席ごとの演出 GIF（以前の部屋は全員 null） */
+export const fxOf = room => room.fx ?? room.members.map(() => null);
+const fxFor = (kind, fx) => (kind === 'private' ? normalizeFx(fx) : null);
 
-/** 部屋を作る（作成者が最初の参加者） */
-export function createRoom({ id, code, kind, uid, name, config, now }) {
+/** 部屋を作る（作成者が最初の参加者）。fx = 作成者の演出 GIF（PRIVATE MATCH だけ残す） */
+export function createRoom({ id, code, kind, uid, name, config, now, fx = null }) {
   if (!KINDS.includes(kind)) throw new MoveError('malformed');
   const cfg = normalizeConfig(config);
   if (!cfg) throw new MoveError('malformed');
-  return { id, code, kind, host: uid, config: cfg, status: 'waiting', started: false, members: [uid], names: [name], state: null, ver: 1, createdAt: now, startedAt: null, rematch: null };
+  return { id, code, kind, host: uid, config: cfg, status: 'waiting', started: false, members: [uid], names: [name], fx: [fxFor(kind, fx)], state: null, ver: 1, createdAt: now, startedAt: null, rematch: null };
 }
 
-/** 参加する。満席になったら席をシャッフルして開始する。=> 新しい room（引数は変えない） */
-export function joinRoom(room, uid, name, now, rnd) {
+/** 参加する。満席になったら席をシャッフルして開始する。fx = 参加する人の演出 GIF。=> 新しい room（引数は変えない） */
+export function joinRoom(room, uid, name, now, rnd, fx = null) {
   if (room.members.includes(uid)) return room;
   if (room.status !== 'waiting' || room.started) throw new MoveError('room_closed');
   if (now - room.createdAt >= WAITING_EXPIRES_MS) throw new MoveError('room_closed');
   if (room.members.length >= room.config.players) throw new MoveError('room_full');
   const r = clone(room);
+  r.fx = [...fxOf(room), fxFor(room.kind, fx)];
   r.members.push(uid); r.names.push(name); r.ver++;
   if (r.members.length === r.config.players) start(r, now, rnd);
   return r;
 }
 function start(r, now, rnd) {
   const order = shuffle(r.members.map((u, i) => i), rnd);
-  r.members = order.map(i => r.members[i]); r.names = order.map(i => r.names[i]);
-  r.state = newTable({ config: r.config, names: r.names, now, rnd });
+  const fx = fxOf(r);
+  r.members = order.map(i => r.members[i]); r.names = order.map(i => r.names[i]); r.fx = order.map(i => fx[i]);
+  r.state = newTable({ config: r.config, names: r.names, now, rnd, fx: r.kind === 'private' ? r.fx : null });
   r.started = true; r.startedAt = now; r.status = r.state.status;
 }
 
@@ -74,6 +82,7 @@ export function leaveRoom(room, uid, now) {
   if (!room.started) {
     const r = clone(room);
     if (uid === room.host) { r.status = 'cancelled'; r.ver++; return { room: r, record: null }; }
+    r.fx = fxOf(room).filter((_, s) => s !== seat);
     r.members.splice(seat, 1); r.names.splice(seat, 1); r.ver++;
     return { room: r, record: null };
   }
@@ -149,22 +158,24 @@ function markGone(room, seat) {
   r.rematch = { ...rm, stay: rm.stay.filter(s => s !== seat), gone: [...rm.gone, seat] }; r.ver++;
   return r;
 }
-/** 終局後に席に残る（再戦を待つ）。=> { room, record: null } */
-export function stayRoom(room, uid, now) {
+/** 終局後に席に残る（再戦を待つ）。fx（undefined でなければ）= 再戦で使う演出 GIF（試合の途中で設定を変えた分）。=> { room, record: null } */
+export function stayRoom(room, uid, now, fx) {
   const seat = seatOf(room, uid);
   if (seat < 0) throw new MoveError('not_found');
   if (!rematchOpen(room, now) || room.state.players[seat].status === 'left') throw new MoveError('room_closed');
-  const rm = rematchOf(room);
-  if (rm.stay.includes(seat)) return { room, record: null };
+  const rm = rematchOf(room), f = fx === undefined ? fxOf(room)[seat] : fxFor(room.kind, fx);
+  if (rm.stay.includes(seat) && f === fxOf(room)[seat]) return { room, record: null };
   const r = clone(room);
-  r.rematch = { ...rm, stay: [...rm.stay, seat], gone: rm.gone.filter(s => s !== seat) }; r.ver++;
+  r.fx = fxOf(room).map((x, s) => (s === seat ? f : x));
+  if (!rm.stay.includes(seat)) { r.rematch = { ...rm, stay: [...rm.stay, seat], gone: rm.gone.filter(s => s !== seat) }; r.ver++; }
   return { room: r, record: null };
 }
 /**
  * 再戦を始める（再戦を始められる席の人だけ）。押した人も席に残ったことになる。席に残った人のうち、ほかの部屋に居る人（busy: Set<uid>）は除く。
- * names: uid → 今の表示名。=> { room: 元の部屋（rematch.next に新しい部屋）, next: 開始済みの新しい部屋（人数 = 残った人数、ほかの設定は同じ）}
+ * names: uid → 今の表示名。fx（undefined でなければ）= 押した人の今の演出 GIF（ほかの人は元の部屋の fx）。
+ * => { room: 元の部屋（rematch.next に新しい部屋）, next: 開始済みの新しい部屋（人数 = 残った人数、ほかの設定は同じ）}
  */
-export function rematchRoom(room, uid, { id, code, names, busy = new Set() }, now, rnd) {
+export function rematchRoom(room, uid, { id, code, names, busy = new Set(), fx }, now, rnd) {
   const seat = seatOf(room, uid);
   if (seat < 0) throw new MoveError('not_found');
   if (!rematchOpen(room, now)) throw new MoveError('room_closed');
@@ -175,6 +186,7 @@ export function rematchRoom(room, uid, { id, code, names, busy = new Set() }, no
   if (uids.length < 2) throw new MoveError('not_enough');
   const next = createRoom({ id, code, kind: room.kind, uid, name: names.get(uid) ?? room.names[seat], config: { ...room.config, players: uids.length }, now });
   next.members = uids; next.names = uids.map(u => names.get(u) ?? room.names[seatOf(room, u)]);
+  next.fx = uids.map(u => (u === uid && fx !== undefined ? fxFor(room.kind, fx) : fxFor(room.kind, fxOf(room)[seatOf(room, u)])));
   start(next, now, rnd);
   const r = clone(room);
   r.rematch = { ...rm, stay, next: { id, code } }; r.ver++;

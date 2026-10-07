@@ -5,7 +5,7 @@
 // 関数は `st` をその場で書き換えて返す。違法な呼び出しは EngineError を投げ、そのとき `st` は変わらない。
 import {
   blindsAt, nextLevel, levelMsOf, payoutsFor, normalizeConfig, BASE_BB,
-  ACTION_MS, TIME_BANK_MS, AUTO_TO_SITOUT, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, runoutMs,
+  ACTION_MS, TIME_BANK_MS, AUTO_TO_SITOUT, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, runoutMs, FX_MS,
 } from './structure.js';
 
 export const RANKCH = '23456789TJQKA';
@@ -118,8 +118,8 @@ const bump = st => { st.ver++; return st; };
 
 /* ---------------- 作成 ---------------- */
 // opts: { config, names: [n 人], now, rnd?: () => [0,1)（シード用。無ければ crypto）, button?: 初回のボタン席（テスト用）,
-//         stacks?: 開始スタック（テスト用。省略時は全員 startBb × BASE_BB） }
-export function newTable({ config, names, now, rnd, button, stacks }) {
+//         stacks?: 開始スタック（テスト用。省略時は全員 startBb × BASE_BB）, fx?: [n 人]（席ごとの演出 GIF の slug か null。PRIVATE MATCH だけ） }
+export function newTable({ config, names, now, rnd, button, stacks, fx }) {
   const cfg = normalizeConfig(config);
   if (!cfg) throw new Error('newTable: bad config');
   const n = cfg.players;
@@ -133,6 +133,7 @@ export function newTable({ config, names, now, rnd, button, stacks }) {
     players: start.map(stack => ({ stack, status: 'active', timeBankMs: TIME_BANK_MS, autoCount: 0, place: null, pt: null })),
     handNo: 0, prevSbPos: null, prevBbSeat: null, seed, ctr: 0,
     hand: null, nextAt: null, status: 'running', pausedAt: null, endedAt: null, winner: null,
+    fx: Array.isArray(fx) && fx.length === n && fx.some(x => typeof x === 'string') ? fx.map(x => (typeof x === 'string' ? x : null)) : null,
   };
   let b = button;
   if (b == null) { const s = stream(st); b = s.below(n); s.done(); }
@@ -469,7 +470,22 @@ function settle(st, now) {
   }
   // 退出していない生存者が 1 人になったら、残りの退出者を待たずに終了（一時停止 → 中止になるのを防ぐ）
   if (stillPlaying(st).length <= 1) return finishWithoutOpponents(st, now);
-  st.nextAt = now + BETWEEN_HANDS_MS + runoutMs(h.runFrom);
+  st.nextAt = now + BETWEEN_HANDS_MS + runoutMs(h.runFrom) + (fxSeat(h, st.fx) != null ? FX_MS : 0);
+}
+
+/**
+ * 演出 GIF を出す席（structure.js の FX）：ショーダウンで精算したハンドで、取り分（won − 拠出）がいちばん多い 1 人。
+ * その人が GIF を設定していない・同じ取り分が並んだ（チョップ）・フォールドで終わった・fx が無い（FREE MATCH）なら null。
+ * h = 精算済みのハンド（ビューの hand でもよい）、fx = 席ごとの slug | null
+ */
+export function fxSeat(h, fx) {
+  if (!fx || !h || h.phase !== 'settled' || !h.shown || h.runFrom == null || !h.won) return null;
+  let best = 0, seat = null, tie = false;
+  h.won.forEach((w, s) => {
+    const g = w - h.commits[s];
+    if (g > best) { best = g; seat = s; tie = false; } else if (g > 0 && g === best) tie = true;
+  });
+  return seat != null && !tie && fx[seat] ? seat : null;
 }
 
 /* ---------------- 記録とビュー ---------------- */
