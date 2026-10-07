@@ -3,10 +3,11 @@
 //   leave / act / sitin / sitout / tick : rooms 行をロック（for update）→ ルールを適用 → 保存（ハンドが終わっていれば room_hands に記録）
 //   chat : rooms 行をロック → その席の最後の発言時刻（DB の時計）→ postChat → chat_seq を +1 して room_chat に追加（rooms.ver は変えない）
 //   stay : rooms 行をロック → 席に残る（終局後の再戦の受付。演出 GIF を変えていれば再戦の分を書き換える）
+//   fx : rooms 行をロック → 演出 GIF を変える（部屋に入った後に設定で変えた分）
 //   rematch : 席に残った人の profiles 行をロック → rooms 行をロック → ほかの部屋に居る人を除いて新しい部屋を作って開始 → 元の部屋に rematch.next
 // ロックの順番は常に profiles → rooms。
 import { randomUUID } from 'node:crypto';
-import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom } from './rules.js';
+import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
 
 const LOCK_TIMEOUT = '5s';
@@ -111,6 +112,7 @@ export function makeDb(pool, deps = {}) {
 
     leave: step((room, uid) => leaveRoom(room, uid, now())),
     stay: step((room, uid, fx) => stayRoom(room, uid, now(), fx)),
+    setFx: step((room, uid, fx) => setRoomFx(room, uid, fx)),
 
     // 再戦：席に残った人で同じ設定の新しい部屋を始める。=> 新しい部屋の reply
     rematch: (uid, id, fx) => tx(pool, async c => {

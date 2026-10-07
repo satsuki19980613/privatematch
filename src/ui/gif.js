@@ -8,7 +8,14 @@ import { $, esc, head, localGet, localSet } from './util.js';
 const key = () => (klipy.isDemo() ? 'pm-fx-demo' : 'pm-fx');
 /** 選んでいる演出 GIF の slug（選べない・選んでいなければ null） */
 export const getFx = () => (klipy.available() ? normalizeFx(localGet(key())) : null);
-function setFx(slug) { localSet(key(), slug || ''); }
+let onChange = () => {};
+/** GIF を変えたときに呼ぶ（main.js：部屋に入っていればサーバーへ送る） */
+export function onFxChange(fn) { onChange = fn; }
+function setFx(slug) {
+  const prev = getFx();
+  localSet(key(), slug || '');
+  if (getFx() !== prev) onChange(getFx());
+}
 
 // 開いている間の状態（検索語・読んだページ・結果）。seq で古い返事を捨てる
 const S = { q: '', page: 0, items: [], next: false, busy: false, err: false, seq: 0 };

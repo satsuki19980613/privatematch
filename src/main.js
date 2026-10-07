@@ -9,6 +9,7 @@ import * as stats from './ui/stats.js';
 import * as ingame from './ui/ingame.js';
 import { openRules } from './ui/rules.js';
 import { openSettings, onSizesChange } from './ui/settings.js';
+import { onFxChange } from './ui/gif.js';
 import { syncRecent } from './history/sync.js';
 import { useDemo } from './klipy.js';
 
@@ -78,6 +79,11 @@ function takeInvite() {
 $('#rulesBtn').addEventListener('click', openRules);
 $('#setBtn').addEventListener('click', openSettings);
 onSizesChange(table.sizesChanged);
+// 部屋に入った後に演出 GIF を変えたら、すぐ部屋にも反映する（PRIVATE MATCH だけ。サーバーが FREE MATCH は無視する）
+onFxChange(fx => {
+  const id = table.activeId() || room.activeId();
+  if (id) app.net.game({ op: 'fx', room: id, fx }).catch(() => {});
+});
 $('#leaveBtn').addEventListener('click', table.askLeave);
 ingame.init(); // チャット履歴・ハンド履歴のボタンとモーダル
 $('#themeToggle').addEventListener('click', () => {

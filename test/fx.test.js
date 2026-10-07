@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { normalizeFx, pickMedia } from '../src/fx.js';
 import { newTable, act, legalActions, fxSeat, viewFor } from '../src/engine.js';
 import { DEFAULT_CONFIG, BETWEEN_HANDS_MS, FX, FX_MS, runoutMs } from '../src/structure.js';
-import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, stayRoom, rematchRoom, fxOf } from '../server/game/rules.js';
+import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, stayRoom, rematchRoom, fxOf, setRoomFx } from '../server/game/rules.js';
 import { createHandler } from '../server/game/handler.js';
 
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -16,12 +16,13 @@ test('normalizeFx：英数字・ハイフン・下線の slug だけ。それ以
   for (const s of ['', '-abc', 'a b', 'a/b', 'a?x=1', 'https://x', 'x'.repeat(121), 'ａｂｃ', null, undefined, 3, {}, ['a']]) assert.equal(normalizeFx(s), null, String(s));
 });
 
-test('pickMedia：卓は軽い動画（md の mp4）を、一覧は小さい動く画像（sm の webp）を選ぶ。形式が直に並ぶ形・壊れた形も', () => {
+test('pickMedia：卓（md）も一覧（sm）も動く画像（webp）を選ぶ（iPhone は画面外の動画を先読みしない）。形式が直に並ぶ形・壊れた形も', () => {
   const m = (u, w = 100, h = 75) => ({ url: u, width: w, height: h });
   const file = { hd: { gif: m('hd.gif'), mp4: m('hd.mp4') }, md: { gif: m('md.gif'), webp: m('md.webp'), mp4: m('md.mp4', 320, 240) }, sm: { webp: m('sm.webp'), mp4: m('sm.mp4') }, xs: { jpg: m('xs.jpg') } };
-  assert.deepEqual(pickMedia(file, 'full'), { url: 'md.mp4', video: true, w: 320, h: 240 });
+  assert.deepEqual(pickMedia(file, 'full'), { url: 'md.webp', video: false, w: 100, h: 75 });
   assert.deepEqual(pickMedia(file, 'thumb'), { url: 'sm.webp', video: false, w: 100, h: 75 });
-  assert.equal(pickMedia({ hd: { gif: m('hd.gif') } }, 'full').url, 'hd.gif');   // 動画が無ければ画像
+  assert.equal(pickMedia({ hd: { gif: m('hd.gif'), mp4: m('hd.mp4') } }, 'full').url, 'hd.gif');   // webp が無ければ gif
+  assert.equal(pickMedia({ md: { mp4: m('md.mp4') } }, 'full').url, 'md.mp4');                    // 画像が無ければ動画
   assert.deepEqual(pickMedia({ webp: 'flat.webp' }, 'thumb'), { url: 'flat.webp', video: false, w: 0, h: 0 });
   for (const bad of [null, 'x', {}, { md: { mp4: { url: '' } } }, { md: { jpg: m('only.jpg') } }]) assert.equal(pickMedia(bad), null);
 });
@@ -138,20 +139,44 @@ test('rules：席に残るときに GIF を変えられ、再戦は残った人�
   assert.deepEqual(nf.fx, [null, null]); assert.equal(nf.state.fx, null);
 });
 
+test('rules：部屋に入った後に GIF を変えるとすぐ反映（待機中は開始時に・進行中はエンジンにも）。FREE MATCH・同じ値は何もしない', () => {
+  // 待機中
+  let w = createRoom({ id: 'w', code: '000001', kind: 'private', uid: U(1), name: 'A', config: CFG3, now: 0 });
+  ({ room: w } = setRoomFx(w, U(1), 'later'));
+  assert.deepEqual(w.fx, ['later']); assert.equal(w.ver, 2);
+  // 進行中：エンジンの状態とビューに入り、ver が上がる
+  let r = room3('private', [null, null, null]);
+  assert.equal(r.state.fx, null);
+  const v0 = r.ver, s2 = r.members.indexOf(U(2));
+  ({ room: r } = setRoomFx(r, U(2), 'mid-game'));
+  assert.equal(r.ver, v0 + 1); assert.equal(r.fx[s2], 'mid-game'); assert.equal(r.state.fx[s2], 'mid-game');
+  assert.equal(viewsOf(r)[0].fx[s2], 'mid-game');
+  const same = setRoomFx(r, U(2), 'mid-game').room; assert.equal(same, r);   // 同じ値は何もしない
+  ({ room: r } = setRoomFx(r, U(2), null));
+  assert.equal(r.state.fx, null);   // 全員なしに戻ったらエンジンには持たせない
+  // FREE MATCH は何もしない・メンバーでなければ not_found
+  const f = room3('free', [null, null, null]);
+  assert.equal(setRoomFx(f, U(1), 'x').room, f);
+  assert.throws(() => setRoomFx(r, U(9), 'x'), e => e.code === 'not_found');
+});
+
 /* ---------------- HTTP ---------------- */
 test('handler：create / join / stay / rematch の fx を確かめて渡す（無ければ undefined、正しくなければ null）', async () => {
   const calls = [];
   const rec = op => async (...a) => { calls.push([op, ...a]); return { ok: 1 }; };
-  const h = createHandler({ allowedOrigins: [], verifyToken: async () => U(1), create: rec('create'), join: rec('join'), stay: rec('stay'), rematch: rec('rematch') });
+  const h = createHandler({ allowedOrigins: [], verifyToken: async () => U(1), create: rec('create'), join: rec('join'), stay: rec('stay'), rematch: rec('rematch'), setFx: rec('fx') });
   const R = '11111111-2222-4333-8444-555555555555';
   const post = body => h(new Request('https://x/', { method: 'POST', headers: { Authorization: 'Bearer t', 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
   const cfg = { ...DEFAULT_CONFIG, players: 2 };
   for (const body of [
     { op: 'create', kind: 'private', config: cfg, fx: 'crown' }, { op: 'create', kind: 'free', config: cfg },
     { op: 'join', code: '123456', fx: '<script>' }, { op: 'stay', room: R, fx: null }, { op: 'rematch', room: R, fx: 'gg' },
+    { op: 'fx', room: R, fx: 'new' }, { op: 'fx', room: R },
   ]) assert.equal((await post(body)).status, 200);
+  assert.equal((await post({ op: 'fx', fx: 'x' })).status, 422);   // 部屋が無い
   assert.deepEqual(calls, [
     ['create', U(1), 'private', cfg, 'crown'], ['create', U(1), 'free', cfg, undefined],
     ['join', U(1), '123456', null], ['stay', U(1), R, null], ['rematch', U(1), R, 'gg'],
+    ['fx', U(1), R, 'new'], ['fx', U(1), R, null],
   ]);
 });

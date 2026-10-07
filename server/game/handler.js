@@ -61,6 +61,9 @@ export function createHandler(deps) {
         case 'tick':
           if (!room) return reply(422, { error: 'malformed' });
           return reply(200, await deps.tick(uid, room));
+        case 'fx':
+          if (!room) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.setFx(uid, room, fx ?? null));
         case 'chat':
           if (!room || typeof body.text !== 'string') return reply(422, { error: 'malformed' });
           return reply(200, await deps.chat(uid, room, body.text));

@@ -15,7 +15,7 @@
 //   rematch  3 人・2〜4BB ですぐ終わり、Bot は全員席に残る（席に残る → Rematch）
 //   fx       4 人（PRIVATE MATCH）。river と同じ打ち方・スタックで、毎回ショーダウンになり勝者の演出 GIF が出る配りを選ぶ。
 //            自分が GIF を設定していれば 7 割は自分が勝つ（自分の GIF）、残りと未設定なら Bot が勝つ（Bot は全員が見本の GIF を持つ）
-import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader } from '../server/game/rules.js';
+import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader, setRoomFx } from '../server/game/rules.js';
 import { legalActions, dueAt, handRecord, newTable, act, tick, fxSeat } from './engine.js';
 import { equities } from './equity.js';
 import { DEFAULT_CONFIG } from './structure.js';
@@ -354,6 +354,7 @@ export async function game(body) {
         return lag(replyOf(R));
       }
       case 'leave': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, leaveRoom(R.room, ME, now)); return lag(replyOf(R)); }
+      case 'fx': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, setRoomFx(R.room, ME, body.fx ?? null)); return lag(replyOf(R)); }
       case 'stay': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, stayRoom(R.room, ME, now, body.fx)); return lag(replyOf(R)); }
       case 'rematch': {
         const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');

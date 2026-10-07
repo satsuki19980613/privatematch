@@ -13,11 +13,13 @@ const mediaOf = (x, fmt) => {
 };
 /**
  * KLIPY の file（{ hd|md|sm|xs: { gif|webp|jpg|mp4|webm: { url, width, height } } }。大きさの段が無く形式が直に並ぶこともある）から 1 つ選ぶ。
- * use = 'full'（卓の中央：軽い動画を優先）| 'thumb'（一覧：小さい動く画像を優先）。=> { url, video, w, h } | null
+ * use = 'full'（卓の中央）| 'thumb'（一覧）。どちらも動く画像（webp → gif）を優先し、無ければ動画。
+ * 卓で動画を使わないのは、iPhone の Safari が画面に出していない動画を先読みせず、勝った瞬間に間に合わないため（画像はどの端末でも先読みできる）。
+ * => { url, video, w, h } | null
  */
 export function pickMedia(file, use = 'full') {
   if (!file || typeof file !== 'object') return null;
-  const fmts = use === 'full' ? [...VIDEO, ...IMAGE] : [...IMAGE, ...VIDEO];
+  const fmts = [...IMAGE, ...VIDEO];
   for (const f of fmts) for (const sz of use === 'full' ? SIZES_FULL : SIZES_THUMB) { const m = mediaOf(file[sz] && file[sz][f], f); if (m) return m; }
   for (const f of fmts) { const m = mediaOf(file[f], f); if (m) return m; }
   return null;

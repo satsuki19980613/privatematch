@@ -134,6 +134,27 @@ export function postChat(room, uid, text, lastAt, now) {
   return { seat, text: t };
 }
 
+/**
+ * 演出 GIF を変える（部屋に入った後に設定で変えた分。PRIVATE MATCH だけで、FREE MATCH は何もしない）。待機中は開始時に、
+ * 進行中はエンジンの状態（state.fx）にもすぐ入れる（次に精算するハンドから。全員のビューに届くよう ver を上げる）。
+ * 終局後は再戦で使う分。=> { room, record: null }
+ */
+export function setRoomFx(room, uid, fx) {
+  const seat = seatOf(room, uid);
+  if (seat < 0) throw new MoveError('not_found');
+  const f = fxFor(room.kind, fx);
+  if (room.kind !== 'private' || f === fxOf(room)[seat]) return { room, record: null };
+  const r = clone(room);
+  r.fx = fxOf(room).map((x, s) => (s === seat ? f : x));
+  if (r.started && r.state && live(r)) {
+    const all = r.state.fx ?? r.members.map(() => null);
+    r.state.fx = all.map((x, s) => (s === seat ? f : x));
+    if (!r.state.fx.some(Boolean)) r.state.fx = null;
+  }
+  r.ver++;
+  return { room: r, record: null };
+}
+
 /* ---------------- 再戦（終局後に席に残った人で、同じ設定の新しい部屋を始める） ---------------- */
 const rematchOf = room => room.rematch ?? { stay: [], gone: [], next: null };
 // ビューと判定に使う形：途中で退出した（left）席も去った扱い。host は作成者の席
