@@ -600,7 +600,7 @@ describe('DB：チャットの QA（専用 DB）', { skip: !DBURL && 'TEST_DATAB
     await pool.query(`do $$ begin
       if not exists (select from pg_roles where rolname = 'anonymous') then create role anonymous; end if;
       if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if; end $$`);
-    await pool.query('create schema neon_auth; create table neon_auth."user"(id uuid primary key, email text not null unique); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "idToken" text, "accessToken" text, "refreshToken" text)');
+    await pool.query('create schema neon_auth; create table neon_auth."user"(id uuid primary key, email text not null unique, name text not null, image text); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "idToken" text, "accessToken" text, "refreshToken" text); create table neon_auth.session(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "ipAddress" text, "userAgent" text)');
     const dir = new URL('../db/migrations/', import.meta.url);
     for (const f of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) await pool.query(readFileSync(new URL(f, dir), 'utf8'));
   });

@@ -1,5 +1,5 @@
 # 本物のサーバーとの通信確認（scripts/live-check.mjs）。
-#   prod: 本番のサイト・ログイン中継・Function・Data API に、ログインせずに届くか（書き込まない）。Neon Auth の設定も表示する
+#   prod: 本番のサイト・ログイン中継・Function・Data API に、ログインせずに届くか（書き込まない）。Neon Auth の設定も表示し、認証で届く個人の情報が DB に残っていないかも数える
 #   e2e:  開発用の Neon ブランチ dev にこのコミットのサーバーを配備し、テスト用の利用者 4 人で部屋の作成から終局・記録の取得まで遊ぶ
 # 起動：Actions → Live → Run workflow、作業ブランチ（claude/**）への push（サーバーや確認スクリプトが変わったとき）、毎週月曜
 name: Live
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
   push:
     branches: ['claude/**']
-    paths: ['scripts/live-check.mjs', '.github/workflows/live.yml', 'server/**', 'db/**', 'src/engine.js', 'src/structure.js']
+    paths: ['scripts/live-check.mjs', 'scripts/auth-audit.mjs', '.github/workflows/live.yml', 'server/**', 'db/**', 'src/engine.js', 'src/structure.js']
   schedule:
     - cron: '17 0 * * 1'
 
@@ -44,6 +44,8 @@ jobs:
           echo "== config email-password get"; ep=$($C neon-auth config email-password get --branch "$B" || true); echo "$ep"
           # 本番は Google だけ（scripts/setup-neon.mjs が閉じる）。開いていたら失敗にする
           if echo "$ep" | grep -Eq 'Enabled: +true'; then echo "::error::本番の Neon Auth でメールとパスワードの登録が開いています"; exit 1; fi
+          # 認証で届く個人の情報（メールアドレス・表示名・画像・トークン・IP アドレス）が本番の DB に残っていないか（読み取りだけ）
+          node scripts/auth-audit.mjs --branch "$B"
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROD_BRANCH: ${{ vars.NEON_PROD_BRANCH }}
@@ -88,3 +90,7 @@ jobs:
           GAME_URL: ${{ steps.fn.outputs.game_url }}
           ORIGIN: http://localhost:5180
         run: timeout 900 node scripts/live-check.mjs e2e
+      - name: 認証で届く個人の情報が dev の DB に残っていないか（いま作った利用者とセッションも含めて）
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: node scripts/auth-audit.mjs --branch dev

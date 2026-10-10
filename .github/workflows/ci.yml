@@ -33,7 +33,7 @@ jobs:
       - run: npm ci
       - name: テスト用の DB（Neon と同じロールと neon_auth のひな形）にマイグレーションを適用
         run: |
-          psql -h localhost -U postgres -d pmtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key, email text not null unique); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "idToken" text, "accessToken" text, "refreshToken" text);'
+          psql -h localhost -U postgres -d pmtest -v ON_ERROR_STOP=1 -c 'create role anonymous; create role authenticated; create schema neon_auth; create table neon_auth."user"(id uuid primary key, email text not null unique, name text not null, image text); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "idToken" text, "accessToken" text, "refreshToken" text); create table neon_auth.session(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "ipAddress" text, "userAgent" text);'
           for f in db/migrations/*.sql; do psql -h localhost -U postgres -d pmtest -v ON_ERROR_STOP=1 -q -f "$f"; done
       - run: npm test
       - run: npm run build
