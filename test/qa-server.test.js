@@ -514,7 +514,10 @@ describe('QA server（専用 DB）', { skip }, () => {
       const ok = await call(fetchH, tm, { op: 'act', room: c.json.room, ver: v1.ver, move: L.canCheck ? { type: 'check' } : { type: 'call' } });
       assert.equal(ok.status, 200);
       assert.equal((await call(fetchH, t1, { op: 'leave', room: c.json.room })).status, 200);
-      assert.equal((await call(fetchH, t2, { op: 'leave', room: c.json.room })).status, 409);            // game_over（もう終わっている）
+      // もう終わっている：終局後の leave は再戦の対象から外れるだけ（ARCHITECTURE §4 の rematch.gone）。ほかの操作は game_over
+      assert.equal((await call(fetchH, t2, { op: 'leave', room: c.json.room })).status, 200);
+      const over = await call(fetchH, t2, { op: 'sitout', room: c.json.room });
+      assert.equal(over.status, 409); assert.equal(over.json.error, 'game_over');
     });
 
     test('エラーコードと HTTP ステータスの対応（ARCHITECTURE §5）。内部エラーの詳細は返さない', async () => {
@@ -857,11 +860,13 @@ describe('QA server（専用 DB）', { skip }, () => {
         }
         // 終局後の me()
         for (const u of us) { const me = await rpc(u, 'me'); assert.equal(me.room, null); assert.ok(me.recent.some(x => x.id === g.roomId)); }
-        // 終わった後の操作は game_over。もう一度部屋を作れる
+        // 終わった後の操作は game_over（leave だけは再戦の対象から外れる＝rematch.gone で、何度でも通る）。もう一度部屋を作れる
         const db = mkDb();
         assert.equal(await outcome(db.tick(us[0], g.roomId)), 'game_over');
         assert.equal(await outcome(db.request(us[0], g.roomId, { op: 'sitout' })), 'game_over');
-        assert.equal(await outcome(db.leave(us[0], g.roomId)), 'game_over');
+        assert.equal(await outcome(db.leave(us[0], g.roomId)), 'ok');
+        assert.equal(await outcome(db.leave(us[0], g.roomId)), 'ok');
+        assert.ok((await rowOf(g.roomId)).rematch.gone.includes(g.seats[0]));
         assert.equal(await outcome(db.create(us[0], 'private', CFG(2))), 'ok');
       });
     }
