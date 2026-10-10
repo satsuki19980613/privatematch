@@ -10,7 +10,6 @@ import { makeDb } from './db.js';
 
 const env = n => { const v = process.env[n]; if (!v) throw new Error(`missing env ${n}`); return v; };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const posNum = (n, d) => { const v = Number(process.env[n]); return Number.isFinite(v) && v > 0 ? v : d; };
 
 const pool = new pg.Pool({ connectionString: env('DATABASE_URL'), max: 3 });
 attachDatabasePool(pool);
@@ -32,8 +31,6 @@ const handler = createHandler({
     return typeof payload.sub === 'string' && UUID.test(payload.sub) ? payload.sub.toLowerCase() : null;
   },
   ...db,
-  // 手番・時間切れの進行・チャットを合わせても 1 人で毎秒 1〜2 回。それを大きく超える連打だけを止める（FLOOD_BURST / FLOOD_PER_SEC で変えられる）
-  flood: { burst: posNum('FLOOD_BURST', 40), perSec: posNum('FLOOD_PER_SEC', 5) },
   logError(m, e) { console.error(m, e instanceof Error ? `${e.name}: ${e.message}` : String(e)); },
 });
 

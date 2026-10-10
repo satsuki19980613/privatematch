@@ -248,11 +248,8 @@ async function e2e() {
   const other = await rpc(users[3], 'room_hands', { p_room: room, p_after: 0 });
   check('参加していない人は room_hands を読めない', other.status >= 400 || (Array.isArray(other.json) && other.json.length === 0), `${other.status} ${other.body.slice(0, 80)}`);
 
-  // 回数の制限（db/migrations/20261010200000_rate_limit.sql・server/game/handler.js）。試合に入っていない users[3] で確かめる
+  // 回数の制限（db/migrations/20261010200000_rate_limit.sql・20261010210000_rate_req.sql）。試合に入っていない users[3] で確かめる
   const lim = users[3];
-  const burst = await Promise.all(Array.from({ length: 120 }, () => game(lim, { op: 'tick', room: crypto.randomUUID() })));
-  const by = burst.reduce((m, r) => { const k = r.code === 'too_many' ? '429 too_many' : String(r.status); m[k] = (m[k] || 0) + 1; return m; }, {});
-  check('Function への連打は途中から 429 too_many', burst.some(r => r.status === 429 && r.code === 'too_many'), JSON.stringify(by));
   let misses = 0;
   for (let i = 0; i < 30 && misses < 10; i++) {
     const r = await rpc(lim, 'room_peek', { p_code: String(Math.floor(Math.random() * 1e6)).padStart(6, '0') });
@@ -260,11 +257,19 @@ async function e2e() {
   }
   const blocked = await rpc(lim, 'room_peek', { p_code: code });
   check('部屋番号のはずれが 10 回で room_peek は too_many（当たりの番号でも）', misses === 10 && blocked.status >= 400 && /too_many/.test(blocked.body), `はずれ ${misses} 回 → ${blocked.status} ${blocked.body.slice(0, 80)}`);
-  await sleep(9000);   // 連打の制限が戻るのを待つ
   const blockedJoin = await game(lim, { op: 'join', code });
   check('上限に達した人は join も too_many', blockedJoin.status === 429 && blockedJoin.code === 'too_many', `${blockedJoin.status} ${blockedJoin.code}`);
   const free = await rpc(users[2], 'room_peek', { p_code: code });
   check('ほかの人の room_peek は通る', free.status === 200 && free.json && free.json.id === room, `${free.status}`);
+  // Function への連打（1 分に 300 回）。同時に 30 回ずつ、330 回送る
+  const by = {};
+  for (let i = 0; i < 11; i++) {
+    const rs = await Promise.all(Array.from({ length: 30 }, () => game(lim, { op: 'tick', room: crypto.randomUUID() })));
+    for (const r of rs) { const k = r.code === 'too_many' ? '429 too_many' : String(r.status); by[k] = (by[k] || 0) + 1; }
+  }
+  check('Function への連打は 300 回を超えると 429 too_many', (by['429 too_many'] || 0) >= 20 && (by['404'] || 0) >= 250, JSON.stringify(by));
+  const calm = await game(users[2], { op: 'tick', room: crypto.randomUUID() });
+  check('ほかの人のリクエストは通る', calm.status === 404, `${calm.status}`);
   summary('開発用ブランチで本物の通信を使って 1 試合');
 }
 

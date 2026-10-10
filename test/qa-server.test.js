@@ -316,7 +316,7 @@ describe('QA server（専用 DB）', { skip }, () => {
 
   // ================= 3. handler.js / index.js（本物の JWT 検証経路） =================
   describe('HTTP と JWT（index.js をそのまま読み込む）', () => {
-    let jwksSrv, badJwksSrv, ISS, keys, fetchH, fetchBad, fetchFlood, evil, users;
+    let jwksSrv, badJwksSrv, ISS, keys, fetchH, fetchBad, evil, users;
     const ORIGINS = 'https://app.example, http://localhost:5180';
     const START = { op: 'create', kind: 'free', config: CFG(2) };
 
@@ -335,6 +335,8 @@ describe('QA server（専用 DB）', { skip }, () => {
       return { status: r.status, json, headers: r.headers, text };
     };
     const reset = () => pool.query("update public.rooms set status = 'cancelled', ended_at = now() where status in ('waiting','running','paused')");
+    // 1 人のトークンで続けて何十回も呼ぶので、テストごとに連打の回数を戻す（制限そのものは「連打は 1 分に 300 回まで」で確かめる）
+    beforeEach(() => pool.query("delete from public.rate_limits where kind = 'req'"));
 
     before(async () => {
       users = await newUsers(4);
@@ -352,12 +354,7 @@ describe('QA server（専用 DB）', { skip }, () => {
       // index.js は import 時に環境変数を読む。正常な JWKS と、落ちている JWKS の 2 つのインスタンスを作る
       process.env.DATABASE_URL = dbUrl; process.env.NEON_AUTH_BASE_URL = `${ISS}/neondb/auth`; process.env.ALLOWED_ORIGINS = ORIGINS;
       process.env.NEON_AUTH_JWKS_URL = `${ISS}/jwks`;
-      // このスイートは 1 人のトークンで続けて何十回も呼ぶので、連打の制限は外しておく（制限そのものは fetchFlood で確かめる）
-      process.env.FLOOD_BURST = '1000000';
       fetchH = (await import('../server/game/index.js?qa=good')).default.fetch;
-      process.env.FLOOD_BURST = '3'; process.env.FLOOD_PER_SEC = '0.001';
-      fetchFlood = (await import('../server/game/index.js?qa=flood')).default.fetch;
-      process.env.FLOOD_BURST = '1000000'; delete process.env.FLOOD_PER_SEC;
       process.env.NEON_AUTH_JWKS_URL = `http://127.0.0.1:${badJwksSrv.address().port}/jwks`;
       fetchBad = (await import('../server/game/index.js?qa=bad')).default.fetch;
     });
@@ -466,14 +463,23 @@ describe('QA server（専用 DB）', { skip }, () => {
       const r = await call(fetchH, await sign({}, { exp: null }), START); await reset();
       assert.equal(r.status, 401);
     });
-    test('連打は 429 too_many（1 人ごと。正しくないトークンは 401 のままで数えない。CORS のヘッダは付く）', async () => {
+    test('連打は 1 分に 300 回まで（DB で数える。1 人ごと。正しくないトークンは 401 のままで数えない。CORS のヘッダは付く。窓が明けると戻る）', async () => {
       const tok = await sign({}, { sub: users[1] }), other = await sign({}, { sub: users[2] }), tick = { op: 'tick', room: randomUUID() };
-      for (let i = 0; i < 5; i++) assert.equal((await call(fetchFlood, await sign({}, { key: { ...keys.ed, privateKey: evil.privateKey } }), tick)).status, 401);
-      for (let i = 0; i < 3; i++) assert.equal((await call(fetchFlood, tok, tick)).status, 404);
-      const r = await call(fetchFlood, tok, tick, { origin: ORIGINS.split(',')[0] });
+      const nOf = async u => (await pool.query("select n from public.rate_limits where uid = $1 and kind = 'req'", [u])).rows[0]?.n ?? 0;
+      for (let i = 0; i < 3; i++) assert.equal((await call(fetchH, await sign({}, { sub: users[1], key: { ...keys.ed, privateKey: evil.privateKey } }), tick)).status, 401);
+      assert.equal(await nOf(users[1]), 0);
+      for (let i = 0; i < 3; i++) assert.equal((await call(fetchH, tok, tick)).status, 404);   // 失敗したリクエストも数える
+      assert.equal(await nOf(users[1]), 3);
+      await pool.query("update public.rate_limits set n = 300 where uid = $1 and kind = 'req'", [users[1]]);
+      const r = await call(fetchH, tok, tick, { origin: ORIGINS.split(',')[0] });
       assert.equal(r.status, 429); assert.deepEqual(r.json, { error: 'too_many' });
       assert.equal(r.headers.get('Access-Control-Allow-Origin'), ORIGINS.split(',')[0]);
-      assert.equal((await call(fetchFlood, other, tick)).status, 404);
+      assert.equal((await call(fetchH, other, tick)).status, 404);
+      await pool.query("update public.rate_limits set since = since - interval '61 seconds' where uid = $1 and kind = 'req'", [users[1]]);
+      assert.equal((await call(fetchH, tok, tick)).status, 404);
+      assert.equal(await nOf(users[1]), 1);
+      // neon_auth に居ない人（消えたアカウントのトークン）は数えずに先へ進む（500 にしない）
+      assert.equal((await call(fetchH, await sign({}, { sub: randomUUID() }), tick)).status, 404);
     });
     test('JWKS に届かないとき 401（ログアウト扱い）ではなく 503 にしたい', async () => {
       const r = await call(fetchBad, await sign(), START);

@@ -78,30 +78,25 @@ test('HTTP：認証・入力の検証・エラーの対応', async () => {
   assert.equal((await h(new Request('https://f/', { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } }))).headers.get('Access-Control-Allow-Origin'), null);
 });
 
-test('HTTP：連打の制限（deps.flood。1 人ごとに数え、時間で戻る。未ログインは数えない）', async () => {
-  let now = 1_000_000, ticks = 0;
+test('HTTP：連打の制限（deps.flood が false なら 429。ログイン済みの人だけ数え、数えるのに失敗しても止めない）', async () => {
+  const seen = [], errs = []; let ticks = 0, mode = 'ok';
   const h = createHandler({
     allowedOrigins: [], verifyToken: async t => (t === 'a' ? U(1) : t === 'b' ? U(2) : null),
-    tick: async () => { ticks++; return {}; }, logError: () => {}, flood: { burst: 3, perSec: 2 }, now: () => now,
+    tick: async () => { ticks++; return {}; }, logError: (m, e) => errs.push([m, e.message]),
+    flood: async uid => { seen.push(uid); if (mode === 'boom') throw new Error('db down'); return !(mode === 'full' && uid === U(1)); },
   });
   const tick = async t => { const r = await h(new Request('https://f/', { method: 'POST', headers: { Authorization: `Bearer ${t}` }, body: JSON.stringify({ op: 'tick', room: U(9) }) })); return [r.status, (await r.json()).error]; };
-  for (let i = 0; i < 3; i++) assert.deepEqual(await tick('a'), [200, undefined]);
-  assert.deepEqual(await tick('a'), [429, 'too_many']);
-  assert.equal(ticks, 3);                                   // 止めた分は DB に届かない
-  assert.deepEqual(await tick('b'), [200, undefined]);      // ほかの人は別に数える
-  for (let i = 0; i < 5; i++) assert.deepEqual(await tick('x'), [401, 'not_authenticated']);
-  now += 500;                                               // 0.5 秒で 1 回分が戻る
   assert.deepEqual(await tick('a'), [200, undefined]);
+  assert.deepEqual(await tick('x'), [401, 'not_authenticated']);   // 未ログインは数えない
+  assert.deepEqual(seen, [U(1)]);
+  mode = 'full';
   assert.deepEqual(await tick('a'), [429, 'too_many']);
-  now += 60_000;                                            // 戻るのは burst まで
-  for (let i = 0; i < 3; i++) assert.deepEqual(await tick('a'), [200, undefined]);
-  assert.deepEqual(await tick('a'), [429, 'too_many']);
-  now -= 5_000;                                             // 時計が戻っても増えない・壊れない
-  assert.deepEqual(await tick('a'), [429, 'too_many']);
+  assert.equal(ticks, 1);                                           // 止めた分は先へ進まない
+  assert.deepEqual(await tick('b'), [200, undefined]);              // ほかの人は別
+  mode = 'boom';
+  assert.deepEqual(await tick('a'), [200, undefined]);              // 数えられなくても止めない
+  assert.deepEqual(errs, [['game: flood', 'db down']]);
   assert.equal(STATUS.too_many, 429);
-  // flood を渡さなければ数えない
-  const free = createHandler({ allowedOrigins: [], verifyToken: async () => U(1), tick: async () => ({}), logError: () => {} });
-  for (let i = 0; i < 100; i++) assert.equal((await free(new Request('https://f/', { method: 'POST', headers: { Authorization: 'Bearer a' }, body: JSON.stringify({ op: 'tick', room: U(9) }) }))).status, 200);
 });
 
 // ---------------- DB の結合テスト ----------------

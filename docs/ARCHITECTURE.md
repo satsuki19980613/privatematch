@@ -99,7 +99,7 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 
 エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）、`too_many`（429。回数の制限）。
 
-回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。どちらも DB で数える（`rate_limits`）。ほかに、Function への連打を 1 人あたり毎秒 5 回・まとめて 40 回までにする（`deps.flood`。インスタンスのメモリの中で数えるので目安）。
+回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。Function へのリクエスト（ログイン済みの分。成功も失敗も）は 1 分に 300 回（`deps.flood`）。どれも DB で数える（`rate_limits`。Function はリクエストごとにメモリが分かれるので、メモリの中では数えられない）。Data API の読み取り（`room_poll` など）は数えていない。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
@@ -108,7 +108,7 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms、rematch（終局後の再戦の受付。`20261008000000_rematch.sql`）、fx（席ごとの演出 GIF の slug。`20261009000000_fx.sql`） |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
-| `rate_limits` | 回数の制限（uid × 種類 `code` / `create` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`） |
+| `rate_limits` | 回数の制限（uid × 種類 `code` / `create` / `req` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`・`20261010210000_rate_req.sql`） |
 
 認証で届く個人の情報は残さない（`20261010000000_auth_scrub.sql`・`20261010100000_auth_scrub_profile.sql`）：Neon Auth が書く行を、書き込みのたびにトリガーで置き換える。`neon_auth."user"` の `email` は `<id>@privatematch.invalid`、`name` は `Player`、`image` は空。`neon_auth.account` の `idToken` / `accessToken` / `refreshToken` は空。`neon_auth.session` の `ipAddress` / `userAgent` は空。アプリはどれも使わない。残っていないかは `scripts/auth-audit.mjs`（Live が本番と dev で数える）。
 

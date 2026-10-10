@@ -8,6 +8,7 @@
 // ロックの順番は常に profiles → rooms。
 // 回数の制限（db/migrations/20261010200000_rate_limit.sql）：create は成功した分を数える（上限を超えたら too_many。ほかの理由で失敗した分は巻き戻るので数えない）。
 // join は部屋番号のはずれを数える（はずれをコミットしてから not_found を返す。上限に達していれば番号を調べる前に too_many）。
+// flood はリクエストごとに 1 回、トランザクションの外で数える（失敗したリクエストも数える。20261010210000_rate_req.sql）。
 import { randomUUID } from 'node:crypto';
 import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
@@ -82,6 +83,9 @@ export function makeDb(pool, deps = {}) {
   });
 
   return {
+    // 連打の制限（handler がログイン済みのリクエストごとに呼ぶ）。=> 上限の内なら true。neon_auth に居ない人は数えない（この先で no_profile / not_found になる）
+    flood: uid => pool.query("select public.rate_hit($1,'req') as ok", [uid]).then(r => r.rows[0].ok, e => { if (e && e.code === '23503') return true; throw e; }),
+
     create: (uid, kind, config, fx) => tx(pool, async c => {
       await c.query('select public.purge_rooms()');
       const name = await lockMe(c, uid);
