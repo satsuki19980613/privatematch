@@ -6,7 +6,7 @@
 //   - 検索欄のプレースホルダーは「Search KLIPY」（src/ui/settings.js）
 // ?fake / ?demo では手元の見本（src/fxDemo.js。Bot の GIF）も同じ形で引ける（useDemo）。キーがあれば検索は本物の KLIPY で、
 // 自分が選んだ本物の GIF をデモの卓でも確かめられる。キーが無ければ検索も見本だけ。
-import { pickMedia } from './fx.js';
+import { pickMedia, isKlipyUrl } from './fx.js';
 import { localGet, localSet } from './ui/util.js';
 
 const KEY = import.meta.env.VITE_KLIPY_KEY ?? '';
@@ -32,7 +32,8 @@ function customerId() {
 function itemOf(x) {
   if (!x || typeof x.slug !== 'string' || (x.type && x.type !== 'gif')) return null;
   const thumb = pickMedia(x.file, 'thumb'), full = pickMedia(x.file, 'full');
-  return thumb && full ? { slug: x.slug, title: typeof x.title === 'string' ? x.title : '', thumb, full } : null;
+  // API が返した URL でも、KLIPY のメディアでなければ使わない
+  return thumb && full && isKlipyUrl(thumb.url) && isKlipyUrl(full.url) ? { slug: x.slug, title: typeof x.title === 'string' ? x.title : '', thumb, full } : null;
 }
 // slug → item（この画面を開いている間だけ。URL は API が返したものをそのまま使う）
 const cache = new Map();

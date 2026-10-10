@@ -48,7 +48,7 @@ export function fromUpstream(res){
   const headers=new Headers();
   res.headers.forEach((v,k)=>{const key=k.toLowerCase();if(key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length')return;headers.set(k,v)});
   for(const c of res.headers.getSetCookie())headers.append('set-cookie',firstPartyCookie(c));
-  headers.set('cache-control','no-store');
+  headers.set('cache-control','no-store');headers.set('x-content-type-options','nosniff');
   return new Response(res.body,{status:res.status,statusText:res.statusText,headers});
 }
 

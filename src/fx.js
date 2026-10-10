@@ -4,7 +4,12 @@ export const FX_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/;
 /** slug として正しければそのまま、それ以外（空・長すぎ・記号・文字列でない）は null */
 export const normalizeFx = x => (typeof x === 'string' && FX_SLUG.test(x) ? x : null);
 
-const SIZES_FULL = ['md', 'hd', 'sm', 'xs'], SIZES_THUMB = ['sm', 'xs', 'md', 'hd'];
+/** KLIPY のメディアの URL か（https で、ホストが klipy.com の下。public/_headers の img-src / media-src と同じ範囲） */
+export function isKlipyUrl(u) {
+  try { const x = new URL(u); return x.protocol === 'https:' && x.hostname.endsWith('.klipy.com'); } catch { return false; }
+}
+
+const SIZES_FULL =['md', 'hd', 'sm', 'xs'], SIZES_THUMB = ['sm', 'xs', 'md', 'hd'];
 const VIDEO = ['mp4', 'webm'], IMAGE = ['webp', 'gif'];
 const mediaOf = (x, fmt) => {
   if (typeof x === 'string' && x) return { url: x, video: VIDEO.includes(fmt), w: 0, h: 0 };

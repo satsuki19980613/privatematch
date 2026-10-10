@@ -85,6 +85,7 @@ test('Set-Cookie: multiple preserved individually, Domain/Partitioned dropped, S
   assert.equal(res.headers.get('access-control-allow-origin'), null);
   assert.equal(res.headers.get('access-control-allow-credentials'), null);
   assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');   // Pages の _headers は Functions の応答には付かない
   assert.equal(res.headers.get('content-encoding'), null);
   assert.equal(await res.text(), '{"url":"https://accounts.google.com/x"}');
 });

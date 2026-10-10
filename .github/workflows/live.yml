@@ -71,8 +71,8 @@ jobs:
           ALLOW_LOCALHOST: '1'
         run: |
           node scripts/setup-neon.mjs --branch dev
-          # テスト用の利用者をメールとパスワードで作るため（dev だけ。本番は Google のみ）
-          node node_modules/neonctl/bin/cli.js neon-auth config email-password update --branch dev --enabled --no-require-email-verification --project-id "$NEON_PROJECT_ID" --no-color
+          # テスト用の利用者をメールとパスワードで作るため（dev だけ。本番は Google のみ）。この確認の間だけ開け、最後のステップで閉じる
+          node node_modules/neonctl/bin/cli.js neon-auth config email-password update --branch dev --enabled --no-require-email-verification --no-disable-sign-up --project-id "$NEON_PROJECT_ID" --no-color
       - name: マイグレーションと Function の配備（dev）
         id: fn
         env:
@@ -94,3 +94,9 @@ jobs:
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: node scripts/auth-audit.mjs --branch dev
+      # dev の住所は公開のログから分かるので、開けたままにすると誰でも登録できてしまう
+      - name: dev のメールとパスワードの登録を閉じる
+        if: always()
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: node node_modules/neonctl/bin/cli.js neon-auth config email-password update --branch dev --no-enabled --disable-sign-up --project-id "$NEON_PROJECT_ID" --no-color

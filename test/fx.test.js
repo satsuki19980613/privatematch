@@ -2,7 +2,7 @@
 // 部屋での持ち運び（rules.js の create / join / 開始 / leave / stay / rematch）、HTTP の受け渡し（handler.js）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeFx, pickMedia } from '../src/fx.js';
+import { normalizeFx, pickMedia, isKlipyUrl } from '../src/fx.js';
 import { newTable, act, legalActions, fxSeat, viewFor } from '../src/engine.js';
 import { DEFAULT_CONFIG, BETWEEN_HANDS_MS, FX, FX_MS, runoutMs } from '../src/structure.js';
 import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, stayRoom, rematchRoom, fxOf, setRoomFx } from '../server/game/rules.js';
@@ -14,6 +14,12 @@ const U = i => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 test('normalizeFx：英数字・ハイフン・下線の slug だけ。それ以外は null', () => {
   for (const s of ['walter-blame-government-1', 'abc', 'A_b-9', 'demo-crown', 'x'.repeat(120)]) assert.equal(normalizeFx(s), s);
   for (const s of ['', '-abc', 'a b', 'a/b', 'a?x=1', 'https://x', 'x'.repeat(121), 'ａｂｃ', null, undefined, 3, {}, ['a']]) assert.equal(normalizeFx(s), null, String(s));
+});
+
+test('isKlipyUrl：https で klipy.com の下のホストだけ（data: / http / ほかのホスト / 似た名前は通さない）', () => {
+  for (const ok of ['https://static.klipy.com/ii/a/b.webp', 'https://static2.klipy.com/x.gif', 'https://a.b.klipy.com/x.mp4']) assert.equal(isKlipyUrl(ok), true, ok);
+  for (const bad of ['http://static.klipy.com/x.gif', 'https://klipy.com.evil.example/x.gif', 'https://evilklipy.com/x.gif', 'https://example.com/?u=.klipy.com', 'data:image/svg+xml,<svg/>',
+    'javascript:alert(1)', '/assets/x.gif', 'x.webp', '', null, undefined, 5, {}]) assert.equal(isKlipyUrl(bad), false, String(bad));
 });
 
 test('pickMedia：卓（md）も一覧（sm）も動く画像（webp）を選ぶ（iPhone は画面外の動画を先読みしない）。形式が直に並ぶ形・壊れた形も', () => {

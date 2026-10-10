@@ -551,6 +551,20 @@ test('IMPORT: 型の違う行は読み飛ばす（roomId が文字列でない /
   assert.deepEqual((await store.allGames()).map(g => g.roomId), ['ok']); assert.deepEqual((await store.handsOf('ok')).map(h => h.handNo), [1]);
 });
 
+test('IMPORT: 画面を固めるハンド（street が範囲外・アクションが多すぎる・board が配列でない）は読み飛ばす', async () => {
+  fresh();
+  const ok = sampleHand('ok', 1), act = ok.actions[0] ?? { seat: 0, street: 0, kind: 'fold' };
+  assert.equal(store.validHand(ok), true);
+  const bad = [
+    { ...ok, handNo: 2, actions: [{ ...act, street: 1e9 }] }, { ...ok, handNo: 3, actions: [{ ...act, street: -1 }] }, { ...ok, handNo: 4, actions: [{ ...act, seat: 6 }] },
+    { ...ok, handNo: 5, actions: Array.from({ length: 1001 }, () => ({ ...act })) }, { ...ok, handNo: 6, board: null }, { ...ok, handNo: 7, board: 'x' },
+  ];
+  for (const h of bad) assert.equal(store.validHand(h), false, `hand ${h.handNo}`);
+  assert.equal(store.validHand({ ...ok, handNo: 8, actions: [{ ...act, street: 3 }] }), true);
+  await store.importAll({ app: 'privatematch', games: [sampleGame('ok')], hands: [ok, ...bad] });
+  assert.deepEqual((await store.handsOf('ok')).map(h => h.handNo), [1]);
+});
+
 test('IMPORT: __proto__ / constructor キーを含んでもプロトタイプ汚染しない', async () => {
   fresh();
   const evil = JSON.parse('{"app":"privatematch","games":[{"roomId":"p","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted2":1}}}],"hands":[{"roomId":"p","handNo":1,"__proto__":{"polluted3":1}}]}');

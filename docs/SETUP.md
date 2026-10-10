@@ -57,5 +57,5 @@ PRIVATE MATCH の勝者の演出 GIF は KLIPY の API を使う。キーが無�
 - 画面だけ：Codespaces などで `npm install && npm run dev` → `http://localhost:5180/?fake`（サーバー無し。Bot が相手をする）。
   - `&wait=ms` Bot の入室間隔、`&idle` Bot が動かない、`&fast` Bot の思考を短く
 - 本物のサーバーにつなぐ：Deploy を `dev` で実行し、Summary の URL を `.env.development.local` に書く（`.env.example` 参照）。
-- 本物の通信確認：Actions の **Live**（`.github/workflows/live.yml`）。本番のサイト・ログイン中継・Function・Data API に届くかを読み取りだけで確かめ、開発用ブランチ `dev` では作業ブランチのサーバーを配備してテスト用の利用者 4 人で 1 試合を打つ。作業ブランチ（`claude/**`）への push と毎週月曜に走る。
+- 本物の通信確認：Actions の **Live**（`.github/workflows/live.yml`）。本番のサイト・ログイン中継・Function・Data API に届くかを読み取りだけで確かめ、開発用ブランチ `dev` では作業ブランチのサーバーを配備してテスト用の利用者 4 人で 1 試合を打つ。作業ブランチ（`claude/**`）への push と毎週月曜に走る。`dev` のメールとパスワードの登録は、テスト用の利用者を作るこの確認の間だけ開け、終わったら閉じる（`dev` の住所は公開のログから分かるため）。認証で届く個人の情報が DB に残っていないかも、本番と `dev` で数える（`scripts/auth-audit.mjs`）。
 - テスト：`npm test`。DB の結合テストは `TEST_DATABASE_URL` があるときだけ走る（CI では Postgres のサービスで毎回走る）。

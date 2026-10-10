@@ -90,6 +90,7 @@ const card = c => int(c) && c >= 0 && c < 52;
 const cards = v => v == null || (Array.isArray(v) && v.length <= 5 && v.every(card));
 const nums = (v, n = 6) => Array.isArray(v) && v.length <= n && v.every(x => x == null || num(x));
 const KINDS = ['fold', 'check', 'call', 'bet', 'raise', 'allin'];
+const MAX_ACTIONS = 1000;   // 1 ハンドのアクション数（実際は多くて数十。読み込むファイルで画面が固まらないための上限）
 export function validGame(g) {
   return !!g && typeof g === 'object' && str(g.roomId, 64) && optInt(g.seat) && g.seat >= 0 && g.seat < 6 &&
     ['running', 'finished', 'cancelled'].includes(g.status) && ['private', 'free'].includes(g.kind) && (g.code == null || str(g.code, 16)) &&
@@ -100,10 +101,10 @@ export function validGame(g) {
 }
 export function validHand(h) {
   return !!h && typeof h === 'object' && str(h.roomId, 64) && int(h.handNo) && h.handNo > 0 && int(h.level) && num(h.bb) && num(h.sb) && num(h.ante) &&
-    optInt(h.btn) && optInt(h.sbSeat) && int(h.bbSeat) && nums(h.startStacks) && cards(h.board) && cards(h.hole) &&
+    optInt(h.btn) && optInt(h.sbSeat) && int(h.bbSeat) && nums(h.startStacks) && Array.isArray(h.board) && cards(h.board) && cards(h.hole) &&
     Array.isArray(h.shown) && h.shown.length <= 6 && h.shown.every(x => x == null || x === false || (Array.isArray(x) && x.every(card))) &&
     Array.isArray(h.names) && h.names.every(x => x == null || str(x, 64)) &&
-    Array.isArray(h.actions) && h.actions.every(a => a && int(a.seat) && int(a.street) && KINDS.includes(a.kind) && optNum(a.betTo) && optNum(a.put)) &&
+    Array.isArray(h.actions) && h.actions.length <= MAX_ACTIONS && h.actions.every(a => a && int(a.seat) && a.seat >= 0 && a.seat < 6 && int(a.street) && a.street >= 0 && a.street <= 3 && KINDS.includes(a.kind) && optNum(a.betTo) && optNum(a.put)) &&
     Array.isArray(h.pots) && h.pots.every(p => p && num(p.amount) && Array.isArray(p.winners) && p.winners.every(int)) &&
     Array.isArray(h.eliminated) && h.eliminated.every(e => e && int(e.seat) && int(e.place)) && Array.isArray(h.won);
 }
