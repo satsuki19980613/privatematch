@@ -1,5 +1,9 @@
 # PrivateMatch
 
+[![CI](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml)
+[![Live](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml)
+[![CodeQL](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml)
+
 知り合いと気軽にポーカーの SIT & GO（No-Limit Hold'em）を遊ぶ Web アプリ。
 
 サイト：https://privatematch.pages.dev/
@@ -54,6 +58,19 @@
 制限に当たると「回数が多すぎます」と出る。回数は Google アカウントごとに数えている。
 
 確かめ方：コードを変えるたびにテストで（[test/qa-server.test.js](test/qa-server.test.js)）、さらに開発用の環境で本物の通信を使って、制限が実際に効くことと 1 試合が制限に当たらず終わることを確かめている（[scripts/live-check.mjs](scripts/live-check.mjs)・[Live の実行結果](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml)）。
+
+### 自動の確認
+
+このページの上のバッジは、次の確認に通っていることを示す（安全を保証するものではない）。
+
+| 確認 | 何を確かめているか | いつ |
+|---|---|---|
+| [CI](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml) | テスト（データベースを使うものを含む）とビルド | コードを変えるたび |
+| [Live](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml) | 本番のサイトとサーバーに届くか、本番のデータベースに個人の情報が残っていないか。開発用の環境では、本物の通信で 1 試合と回数の制限 | 毎週と、サーバーを変えたとき |
+| [CodeQL](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml) | GitHub 公式のコードスキャン（危ない書き方が無いか） | コードを変えるたびと毎週 |
+| [Mozilla HTTP Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=privatematch.pages.dev) | 公開しているサイトの保護ヘッダ。**A+**（125 点、12 項目すべて合格。2026-10-10 に測定） | リンク先でいつでも測り直せる |
+
+問題を見つけたときの知らせ方は [SECURITY.md](SECURITY.md)。
 
 ## 開発
 

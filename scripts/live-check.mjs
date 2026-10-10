@@ -25,7 +25,7 @@ async function timed(label, url, init = {}) {
 function summary(title) {
   const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
   const lines = [`### ${title}`, '', `${results.length - failed} / ${results.length} 件 OK`, '', '| 確認 | 結果 | 詳細 |', '|---|---|---|',
-    ...results.map(r => `| ${r.name} | ${r.ok ? 'OK' : '**NG**'} | ${String(r.detail).replace(/\|/g, '\\|').slice(0, 200)} |`),
+    ...results.map(r => `| ${r.name} | ${r.ok ? 'OK' : '**NG**'} | ${String(r.detail).replace(/[\\|]/g, '\\$&').slice(0, 200)} |`),
     '', '| 通信 | 回数 | 中央値 ms | 95% ms | 最大 ms |', '|---|---|---|---|---|',
     ...Object.entries(lat).map(([k, a]) => `| ${k} | ${a.length} | ${pct(a, 0.5).toFixed(0)} | ${pct(a, 0.95).toFixed(0)} | ${Math.max(...a).toFixed(0)} |`), ''];
   console.log(lines.join('\n'));
