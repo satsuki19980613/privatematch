@@ -1,9 +1,10 @@
 # Cloudflare Pages の応答ヘッダ。`npm run preview` も同じ値を使う（vite.config.js）。
 # style-src 'unsafe-inline'：画面が要素ごとの CSS 変数（席の位置・カードの遅延・持ち時間）を書くため。スクリプトは 'self' だけ。
+# font-src：フォントはこのサイトから配る（src/fonts.css。Google Fonts へは通信しない）。
 # connect-src：このサイト（/api/auth の中継）と Neon（Data API・Function "game"。どちらも *.neon.tech）と KLIPY の API（api.klipy.com。演出 GIF）。
 # img-src / media-src：演出 GIF のメディア（KLIPY の static*.klipy.com からブラウザが直接読む。src/klipy.js）。
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://*.klipy.com; media-src https://*.klipy.com; connect-src 'self' https://*.neon.tech https://api.klipy.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://*.klipy.com; media-src https://*.klipy.com; connect-src 'self' https://*.neon.tech https://api.klipy.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000

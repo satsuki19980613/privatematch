@@ -31,6 +31,8 @@ function authProxy(authUrl){
 export default defineConfig(({mode})=>{
   const proxy=authProxy(loadEnv(mode,'.','VITE_').VITE_NEON_AUTH_URL);
   return{
+    // fonts are always separate files (an inlined data: font would be blocked by font-src 'self' in public/_headers)
+    build:{assetsInlineLimit:file=>(/\.woff2?$/.test(file)?false:undefined)},
     server:{port:5180,strictPort:true,proxy},
     preview:{port:4180,strictPort:true,headers:pagesHeaders(),proxy},
   };

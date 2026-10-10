@@ -1,0 +1,10 @@
+/* フォントはこのサイトから配る（Google Fonts へは通信しない。開いただけで IP アドレスが Google に届かないように）。
+   @fontsource のファイルを Vite が assets に入れる。日本語は文字の範囲ごとに分かれていて、使う分だけ読み込まれる。
+   太さは src/style.css で使っているものだけ：--f-num（Inter Tight）400/500/600/700、--f-ui（Zen Kaku Gothic New）400/500/700 */
+@import '@fontsource/inter-tight/400.css';
+@import '@fontsource/inter-tight/500.css';
+@import '@fontsource/inter-tight/600.css';
+@import '@fontsource/inter-tight/700.css';
+@import '@fontsource/zen-kaku-gothic-new/400.css';
+@import '@fontsource/zen-kaku-gothic-new/500.css';
+@import '@fontsource/zen-kaku-gothic-new/700.css';
