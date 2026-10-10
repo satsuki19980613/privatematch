@@ -1,0 +1,39 @@
+# GitHub 公式のコードスキャン（CodeQL）。JavaScript（ブラウザ・サーバー・スクリプト）とワークフローの定義を調べ、
+# 見つかったものはリポジトリの Security タブ（Code scanning）に出る。push・プルリクエスト・毎週火曜に走る。
+name: CodeQL
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  schedule:
+    - cron: '23 1 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          # 既定より広い検査（security-extended）
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
