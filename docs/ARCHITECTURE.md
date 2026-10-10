@@ -97,7 +97,9 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 
 `fx`（演出 GIF の slug。ブラウザは PRIVATE MATCH のときだけ送る）は任意で、正しくなければ null として扱う（参加は止めない）。
 
-エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）。
+エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）、`too_many`（429。回数の制限）。
+
+回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。どちらも DB で数える（`rate_limits`）。ほかに、Function への連打を 1 人あたり毎秒 5 回・まとめて 40 回までにする（`deps.flood`。インスタンスのメモリの中で数えるので目安）。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
@@ -106,10 +108,11 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms、rematch（終局後の再戦の受付。`20261008000000_rematch.sql`）、fx（席ごとの演出 GIF の slug。`20261009000000_fx.sql`） |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
+| `rate_limits` | 回数の制限（uid × 種類 `code` / `create` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`） |
 
 認証で届く個人の情報は残さない（`20261010000000_auth_scrub.sql`・`20261010100000_auth_scrub_profile.sql`）：Neon Auth が書く行を、書き込みのたびにトリガーで置き換える。`neon_auth."user"` の `email` は `<id>@privatematch.invalid`、`name` は `Player`、`image` は空。`neon_auth.account` の `idToken` / `accessToken` / `refreshToken` は空。`neon_auth.session` の `ipAddress` / `userAgent` は空。アプリはどれも使わない。残っていないかは `scripts/auth-audit.mjs`（Live が本番と dev で数える）。
 
-RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、private でなければ `[]`）。
+RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`（無ければ null で、はずれとして数える。上限に達していれば `too_many`）、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、private でなければ `[]`）。
 
 ## 7. 端末の記録（`src/history/*`）
 - IndexedDB `privatematch`：`games`（1 試合 1 件）と `hands`（`[roomId, handNo]`）。

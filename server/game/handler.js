@@ -9,12 +9,24 @@ const CODE = /^[0-9]{6}$/;
 export const STATUS = {
   not_found: 404, no_profile: 403, stale: 409, not_yet: 409, game_over: 409, not_your_turn: 409, busy: 409, not_started: 409,
   room_closed: 409, room_full: 409, in_other_room: 409, illegal: 422, malformed: 422,
-  chat_closed: 409, too_fast: 429, chat_full: 409, not_host: 409, not_enough: 409,
+  chat_closed: 409, too_fast: 429, chat_full: 409, not_host: 409, not_enough: 409, too_many: 429,
 };
+// 1 人あたりの連打の制限（deps.flood = { burst, perSec } があるとき）。このインスタンスのメモリの中で数えるので目安。
+// 部屋番号の総当たりと部屋の作りすぎは DB で数える（db/migrations/20261010200000_rate_limit.sql）
+const FLOOD_USERS = 5000;
 
 export function createHandler(deps) {
   const allowed = new Set(deps.allowedOrigins);
   const log = deps.logError ?? ((m, e) => console.error(m, e));
+  const flood = deps.flood ?? null, clock = deps.now ?? Date.now, buckets = new Map();   // uid → { n: 残り, at: 最後に数えた時刻 }
+  function allow(uid) {
+    if (!flood) return true;
+    const t = clock(); let b = buckets.get(uid);
+    if (!b) { if (buckets.size >= FLOOD_USERS) buckets.clear(); buckets.set(uid, b = { n: flood.burst, at: t }); }
+    b.n = Math.min(flood.burst, b.n + Math.max(0, t - b.at) / 1000 * flood.perSec); b.at = t;
+    if (b.n < 1) return false;
+    b.n -= 1; return true;
+  }
   return async req => {
     const origin = req.headers.get('Origin');
     const cors = { Vary: 'Origin' }; if (origin && allowed.has(origin)) cors['Access-Control-Allow-Origin'] = origin;
@@ -24,6 +36,7 @@ export function createHandler(deps) {
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '');
     let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch (e) { if (e && e.unavailable) return reply(503, { error: 'unavailable' }); uid = null; }
     if (!uid) return reply(401, { error: 'not_authenticated' });
+    if (!allow(uid)) return reply(429, { error: 'too_many' });
     let body;
     try {
       // 上限はバイト数で（先に Content-Length を見て、大きければ読まない）

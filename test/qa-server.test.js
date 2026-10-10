@@ -82,7 +82,7 @@ describe('QA server（専用 DB）', { skip }, () => {
   // ================= 1. 権限（RLS・GRANT） =================
   describe('権限', () => {
     test('表は authenticated / anonymous から読み書きできない（RLS 有効・GRANT 無し）', async () => {
-      for (const t of ['profiles', 'rooms', 'room_hands', 'room_chat']) {
+      for (const t of ['profiles', 'rooms', 'room_hands', 'room_chat', 'rate_limits']) {
         const { rows: [c] } = await pool.query('select relrowsecurity from pg_class where oid = $1::regclass', [`public.${t}`]);
         assert.equal(c.relrowsecurity, true, `${t} の RLS`);
         for (const role of ['authenticated', 'anonymous', 'public'])
@@ -230,6 +230,7 @@ describe('QA server（専用 DB）', { skip }, () => {
       assert.deepEqual(Object.keys(list[0]).sort(), ['code', 'config', 'createdAt', 'host', 'id', 'seated']);
       assert.equal(list[0].seated, 1);
       // 並びは新しい順で最大 100 件
+      now += 1000;   // 同じ時刻だと並びが決まらない
       const rs = []; for (const u of await newUsers(3)) rs.push((await db.create(u, 'free', CFG(3))).room);
       const ids = (await rpc(g, 'free_rooms')).map(x => x.id);
       assert.deepEqual(ids.slice(0, 3).sort(), [...rs].sort()); assert.equal(ids.length, 4);
@@ -315,7 +316,7 @@ describe('QA server（専用 DB）', { skip }, () => {
 
   // ================= 3. handler.js / index.js（本物の JWT 検証経路） =================
   describe('HTTP と JWT（index.js をそのまま読み込む）', () => {
-    let jwksSrv, badJwksSrv, ISS, keys, fetchH, fetchBad, evil, users;
+    let jwksSrv, badJwksSrv, ISS, keys, fetchH, fetchBad, fetchFlood, evil, users;
     const ORIGINS = 'https://app.example, http://localhost:5180';
     const START = { op: 'create', kind: 'free', config: CFG(2) };
 
@@ -351,7 +352,12 @@ describe('QA server（専用 DB）', { skip }, () => {
       // index.js は import 時に環境変数を読む。正常な JWKS と、落ちている JWKS の 2 つのインスタンスを作る
       process.env.DATABASE_URL = dbUrl; process.env.NEON_AUTH_BASE_URL = `${ISS}/neondb/auth`; process.env.ALLOWED_ORIGINS = ORIGINS;
       process.env.NEON_AUTH_JWKS_URL = `${ISS}/jwks`;
+      // このスイートは 1 人のトークンで続けて何十回も呼ぶので、連打の制限は外しておく（制限そのものは fetchFlood で確かめる）
+      process.env.FLOOD_BURST = '1000000';
       fetchH = (await import('../server/game/index.js?qa=good')).default.fetch;
+      process.env.FLOOD_BURST = '3'; process.env.FLOOD_PER_SEC = '0.001';
+      fetchFlood = (await import('../server/game/index.js?qa=flood')).default.fetch;
+      process.env.FLOOD_BURST = '1000000'; delete process.env.FLOOD_PER_SEC;
       process.env.NEON_AUTH_JWKS_URL = `http://127.0.0.1:${badJwksSrv.address().port}/jwks`;
       fetchBad = (await import('../server/game/index.js?qa=bad')).default.fetch;
     });
@@ -460,6 +466,15 @@ describe('QA server（専用 DB）', { skip }, () => {
       const r = await call(fetchH, await sign({}, { exp: null }), START); await reset();
       assert.equal(r.status, 401);
     });
+    test('連打は 429 too_many（1 人ごと。正しくないトークンは 401 のままで数えない。CORS のヘッダは付く）', async () => {
+      const tok = await sign({}, { sub: users[1] }), other = await sign({}, { sub: users[2] }), tick = { op: 'tick', room: randomUUID() };
+      for (let i = 0; i < 5; i++) assert.equal((await call(fetchFlood, await sign({}, { key: { ...keys.ed, privateKey: evil.privateKey } }), tick)).status, 401);
+      for (let i = 0; i < 3; i++) assert.equal((await call(fetchFlood, tok, tick)).status, 404);
+      const r = await call(fetchFlood, tok, tick, { origin: ORIGINS.split(',')[0] });
+      assert.equal(r.status, 429); assert.deepEqual(r.json, { error: 'too_many' });
+      assert.equal(r.headers.get('Access-Control-Allow-Origin'), ORIGINS.split(',')[0]);
+      assert.equal((await call(fetchFlood, other, tick)).status, 404);
+    });
     test('JWKS に届かないとき 401（ログアウト扱い）ではなく 503 にしたい', async () => {
       const r = await call(fetchBad, await sign(), START);
       assert.notEqual(r.status, 401);
@@ -518,6 +533,61 @@ describe('QA server（専用 DB）', { skip }, () => {
       for (const op of ['create', 'join', 'leave', 'act', 'sitout', 'sitin']) {   // どの op でも同じ
         const rr = await post({ op, kind: 'free', config: CFG(2), code: '123456', room, ver: 1, move: { type: 'call' } }); assert.equal(rr.status, 500, op);
       }
+    });
+  });
+
+  // ================= 回数の制限（db/migrations/20261010200000_rate_limit.sql） =================
+  describe('回数の制限', () => {
+    const rewind = (uid, kind) => pool.query("update public.rate_limits set since = since - interval '11 minutes' where uid = $1 and kind = $2", [uid, kind]);
+    const countOf = async (uid, kind) => (await pool.query('select n from public.rate_limits where uid = $1 and kind = $2', [uid, kind])).rows[0]?.n ?? 0;
+
+    test('部屋番号のはずれは 10 分に 10 回まで（room_peek と join を合わせて数える）。達すると当たりの番号も通さず、窓が明けると戻る', async () => {
+      const db = mkDb(), [host, u, other] = await newUsers(3);
+      const room = await db.create(host, 'private', CFG(3)), code = room.view.room.code;
+      // 使われていない番号（ほかのテストの部屋と重ならないもの）
+      let miss; do { miss = String(Math.floor(Math.random() * 1e6)).padStart(6, '0'); } while ((await pool.query('select 1 from public.rooms where code = $1', [miss])).rowCount);
+      for (let i = 0; i < 12; i++) assert.equal((await rpc(u, 'room_peek', [code])).id, room.room);   // 当たりは数えない
+      assert.equal(await countOf(u, 'code'), 0);
+      for (let i = 0; i < 5; i++) assert.equal(await rpc(u, 'room_peek', [miss]), null);
+      for (let i = 0; i < 5; i++) assert.equal(await outcome(db.join(u, miss)), 'not_found');
+      assert.equal(await countOf(u, 'code'), 10);
+      await assert.rejects(rpc(u, 'room_peek', [code]), /too_many/);
+      await assert.rejects(rpc(u, 'room_peek', [miss]), /too_many/);
+      assert.equal(await outcome(db.join(u, code)), 'too_many');
+      assert.equal(await outcome(db.join(u, miss)), 'too_many');
+      assert.equal(await countOf(u, 'code'), 10);                                      // 止められている間は増えない
+      assert.equal((await rpc(other, 'room_peek', [code])).id, room.room);              // ほかの人は別に数える
+      await rewind(u, 'code');
+      assert.equal(await rpc(u, 'room_peek', [miss]), null);
+      assert.equal(await countOf(u, 'code'), 1);                                       // 窓が明けたら 1 から
+      assert.equal(await outcome(db.join(u, code)), 'ok');
+    });
+
+    test('部屋の作成は 10 分に 10 回まで（成功した分だけ数える）。窓が明けると戻る', async () => {
+      const db = mkDb(), [u, other] = await newUsers(2);
+      for (let i = 0; i < 10; i++) {
+        const r = await db.create(u, i % 2 ? 'free' : 'private', CFG(2));
+        assert.equal(await outcome(db.create(u, 'private', CFG(2))), 'in_other_room');   // 失敗した分は数えない
+        assert.equal(await outcome(db.create(u, 'secret', CFG(2))), 'in_other_room');
+        await db.leave(u, r.room);
+      }
+      assert.equal(await countOf(u, 'create'), 10);
+      assert.equal(await outcome(db.create(u, 'private', CFG(2))), 'too_many');
+      assert.equal(await countOf(u, 'create'), 10);
+      assert.equal(await outcome(db.create(other, 'private', CFG(2))), 'ok');
+      await rewind(u, 'create');
+      assert.equal(await outcome(db.create(u, 'private', CFG(2))), 'ok');
+      assert.equal(await countOf(u, 'create'), 1);
+    });
+
+    test('room_peek は JWT の sub が無い・neon_auth に居ない人を断る。rate_* は直接呼べず、rate_limits は読めない', async () => {
+      const [u] = await newUsers(1);
+      await assert.rejects(as('authenticated', {}, "select public.room_peek('123456')"), /not_authenticated/);
+      await assert.rejects(as('authenticated', { sub: randomUUID() }, "select public.room_peek('123456')"), /not_authenticated/);
+      for (const fn of [`rate_hit('${u}', 'code')`, `rate_blocked('${u}', 'code')`, "rate_rule('code')"])
+        await assert.rejects(as('authenticated', { sub: u }, `select public.${fn}`), e => e.code === '42501', fn);
+      await assert.rejects(as('authenticated', { sub: u }, 'select * from public.rate_limits'), e => e.code === '42501');
+      await assert.rejects(as('authenticated', { sub: u }, `delete from public.rate_limits where uid = '${u}'`), e => e.code === '42501');
     });
   });
 

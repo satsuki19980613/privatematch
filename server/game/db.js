@@ -6,6 +6,8 @@
 //   fx : rooms 行をロック → 演出 GIF を変える（部屋に入った後に設定で変えた分）
 //   rematch : 席に残った人の profiles 行をロック → rooms 行をロック → ほかの部屋に居る人を除いて新しい部屋を作って開始 → 元の部屋に rematch.next
 // ロックの順番は常に profiles → rooms。
+// 回数の制限（db/migrations/20261010200000_rate_limit.sql）：create は成功した分を数える（上限を超えたら too_many。ほかの理由で失敗した分は巻き戻るので数えない）。
+// join は部屋番号のはずれを数える（はずれをコミットしてから not_found を返す。上限に達していれば番号を調べる前に too_many）。
 import { randomUUID } from 'node:crypto';
 import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
@@ -85,6 +87,7 @@ export function makeDb(pool, deps = {}) {
       const name = await lockMe(c, uid);
       const cur = await activeRoom(c, uid);
       if (cur) throw new MoveError('in_other_room', { room: cur });
+      if (!(await c.query("select public.rate_hit($1,'create') as ok", [uid])).rows[0].ok) throw new MoveError('too_many');
       for (let i = 0; i < 10; i++) {
         const room = createRoom({ id: randomUUID(), code: genCode(rnd), kind, uid, name, config, now: now(), fx });
         const views = viewsOf(room);
@@ -96,19 +99,24 @@ export function makeDb(pool, deps = {}) {
       throw new MoveError('busy');
     }),
 
-    join: (uid, code, fx) => tx(pool, async c => {
-      await c.query('select public.purge_rooms()');
-      const name = await lockMe(c, uid);
-      const f = await c.query("select id from public.rooms where code=$1 and status in ('waiting','running','paused') order by created_at desc limit 1", [code]);
-      if (!f.rows[0]) throw new MoveError('not_found');
-      const room = await load(c, f.rows[0].id);
-      if (room.members.includes(uid)) return reply(room, uid);
-      const cur = await activeRoom(c, uid);
-      if (cur) throw new MoveError('in_other_room', { room: cur });
-      const next = joinRoom(room, uid, name, now(), rnd, fx);
-      const views = await save(c, next, null);
-      return reply(next, uid, views);
-    }),
+    join: async (uid, code, fx) => {
+      const out = await tx(pool, async c => {
+        await c.query('select public.purge_rooms()');
+        const name = await lockMe(c, uid);
+        if ((await c.query("select public.rate_blocked($1,'code') as no", [uid])).rows[0].no) throw new MoveError('too_many');
+        const f = await c.query("select id from public.rooms where code=$1 and status in ('waiting','running','paused') order by created_at desc limit 1", [code]);
+        if (!f.rows[0]) { await c.query("select public.rate_hit($1,'code')", [uid]); return null; }
+        const room = await load(c, f.rows[0].id);
+        if (room.members.includes(uid)) return reply(room, uid);
+        const cur = await activeRoom(c, uid);
+        if (cur) throw new MoveError('in_other_room', { room: cur });
+        const next = joinRoom(room, uid, name, now(), rnd, fx);
+        const views = await save(c, next, null);
+        return reply(next, uid, views);
+      });
+      if (!out) throw new MoveError('not_found');
+      return out;
+    },
 
     leave: step((room, uid) => leaveRoom(room, uid, now())),
     stay: step((room, uid, fx) => stayRoom(room, uid, now(), fx)),

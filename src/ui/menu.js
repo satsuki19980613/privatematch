@@ -203,7 +203,7 @@ export async function openJoin(code) {
   openDlg('#joinDlg');
   let r;
   try { r = await app.net.rpc('room_peek', { p_code: code }); }
-  catch (e) { body.innerHTML = head('JOIN', `部屋 ${esc(code)}`) + '<p>読み込めませんでした。</p>'; return; }
+  catch (e) { body.innerHTML = head('JOIN', `部屋 ${esc(code)}`) + `<p>${e.code === 'too_many' ? '回数が多すぎます。しばらく待ってからもう一度。' : '読み込めませんでした。'}</p>`; return; }
   if (!r) { body.innerHTML = head('JOIN', `部屋 ${esc(code)}`) + '<p>部屋が見つかりません。番号を確かめてください。</p>'; return; }
   if (r.member && ['waiting', 'running', 'paused'].includes(r.status)) { $('#joinDlg').close(); app.nav.enterRoom(r.id); return; }
   const open = r.status === 'waiting' && r.seated < r.config.players;
@@ -222,7 +222,7 @@ export async function openJoin(code) {
 export function showJoinError(e) {
   const code = e && e.code;
   if (code === 'in_other_room' && e.data && e.data.room) { toast('参加中の部屋があります'); app.nav.enterRoom(e.data.room); return; }
-  toast({ room_full: '満員です', room_closed: 'この部屋には参加できません', not_found: '部屋が見つかりません', busy: '混み合っています。もう一度',
+  toast({ room_full: '満員です', room_closed: 'この部屋には参加できません', not_found: '部屋が見つかりません', busy: '混み合っています。もう一度', too_many: '回数が多すぎます。しばらく待ってから',
     malformed: '設定を確かめてください' }[code] || '通信エラー。もう一度');
 }
 
