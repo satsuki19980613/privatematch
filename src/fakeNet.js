@@ -43,7 +43,7 @@ const botUid = () => `00000000-0000-4000-8000-${String(botSeq++).padStart(12, '0
 const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;
 const fail = code => { const e = new Error(code); e.code = code; e.status = code === 'too_fast' ? 429 : 409; return e; };
 const between = ([a, b]) => a + Math.random() * (b - a);
-const pickOf = a => a[Math.floor(Math.random() * a.length)];
+const pickOf = a => a[Math.floor(rnd() * a.length)];
 // PRIVATE MATCH の Bot の演出 GIF（4 人に 3 人。all なら全員。見本の slug。src/fxDemo.js）
 const botFx = (room, all) => (room.kind === 'private' && (all || Math.random() < 0.75) ? pickOf(DEMO_SLUGS) : null);
 // 配りを選び直す演出の確認（river / fx）
@@ -62,7 +62,7 @@ function shorten(room, on = SHORT) {
 function seedFree() {
   for (const [players, n, speed, mode] of [[6, 3, 'normal', 'club'], [4, 1, 'slow', 'rank-4'], [3, 2, 'veryslow', 'legend-avg']]) {
     const id = crypto.randomUUID(), host = botUid();
-    let room = createRoom({ id, code: genCode(rnd), kind: 'free', uid: host, name: NAMES[Math.floor(Math.random() * NAMES.length)], config: { ...DEFAULT_CONFIG, players, speed, mode }, now: Date.now() - 60000 });
+    let room = createRoom({ id, code: genCode(rnd), kind: 'free', uid: host, name: pickOf(NAMES), config: { ...DEFAULT_CONFIG, players, speed, mode }, now: Date.now() - 60000 });
     for (let i = 1; i < n; i++) room = joinRoom(room, botUid(), NAMES[(i * 3) % NAMES.length], Date.now(), rnd);
     rooms.set(id, { ...newRoom(room), bots: new Set(room.members) });
   }
