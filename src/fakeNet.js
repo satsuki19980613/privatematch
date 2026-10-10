@@ -21,6 +21,7 @@ import { equities } from './equity.js';
 import { DEFAULT_CONFIG } from './structure.js';
 import { CHAT_ROOM_MAX } from './chat.js';
 import { DEMO_SLUGS } from './fxDemo.js';
+import { secureRnd } from './rnd.js';
 
 const q = new URLSearchParams(location.search);
 const WAIT = q.has('wait') ? Math.max(0, +q.get('wait') || 0) : 1500;
@@ -36,8 +37,8 @@ const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 
 const me = { nickname: 'Satsuki' };
 const rooms = new Map();          // id → { room, hands: [{rec, holes}], botAt, nextJoin, bots: Set, chat: [{seq, seat, text, at}], chatLast: [席ごとの最後の発言時刻], talk }
 let botSeq = 2;
-// 部屋番号と席・山札のシャッフルに使う乱数（本物のサーバーと同じく Math.random は使わない。server/game/db.js の secureRnd）
-const rnd = () => crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
+// 部屋番号と席・山札のシャッフルに使う乱数は本物のサーバーと同じもの（src/rnd.js）
+const rnd = secureRnd;
 const lag = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 80 + Math.random() * 100));
 const botUid = () => `00000000-0000-4000-8000-${String(botSeq++).padStart(12, '0')}`;
 const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;

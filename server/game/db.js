@@ -12,10 +12,9 @@
 import { randomUUID } from 'node:crypto';
 import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
+import { secureRnd } from '../../src/rnd.js';
 
 const LOCK_TIMEOUT = '5s';
-// 山札のシャッフルに使う乱数（Math.random より良いもの。53 bit）
-const secureRnd = () => { const a = crypto.getRandomValues(new Uint32Array(2)); return ((a[0] >>> 5) * 67108864 + (a[1] >>> 6)) / 9007199254740992; };
 
 async function tx(pool, fn) {
   const c = await pool.connect();
