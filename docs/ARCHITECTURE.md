@@ -107,6 +107,8 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
 
+認証のメールアドレスは残さない（`20261010000000_auth_scrub.sql`）：Neon Auth が書く `neon_auth."user"` の `email` は書き込みのたびに `<id>@privatematch.invalid` に置き換え、`neon_auth.account` の `idToken` / `accessToken` / `refreshToken` は空にする（トリガー）。アプリはどれも使わない。
+
 RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、private でなければ `[]`）。
 
 ## 7. 端末の記録（`src/history/*`）

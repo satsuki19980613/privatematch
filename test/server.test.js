@@ -1,5 +1,5 @@
 // 部屋のルール（rules.js）・HTTP（handler.js）の単体テストと、TEST_DATABASE_URL があるときだけ動く DB の結合テスト。
-// 結合テストのデータベースには neon_auth."user"(id uuid) と anonymous / authenticated ロールを用意し、db/migrations を適用しておく
+// 結合テストのデータベースには neon_auth."user" / neon_auth.account のひな形（.github/workflows/ci.yml）と anonymous / authenticated ロールを用意し、db/migrations を適用しておく
 // （docs/ARCHITECTURE.md §7）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

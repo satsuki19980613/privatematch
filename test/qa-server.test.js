@@ -64,7 +64,7 @@ describe('QA server（専用 DB）', { skip }, () => {
     await pool.query(`do $$ begin
       if not exists (select from pg_roles where rolname = 'anonymous') then create role anonymous; end if;
       if not exists (select from pg_roles where rolname = 'authenticated') then create role authenticated; end if; end $$`);
-    await pool.query('create schema neon_auth; create table neon_auth."user"(id uuid primary key)');
+    await pool.query('create schema neon_auth; create table neon_auth."user"(id uuid primary key, email text not null unique); create table neon_auth.account(id uuid primary key default gen_random_uuid(), "userId" uuid not null references neon_auth."user"(id) on delete cascade, "idToken" text, "accessToken" text, "refreshToken" text)');
     for (const f of readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()) await pool.query(readFileSync(new URL(f, MIGRATIONS), 'utf8'));
     now = Date.now();
   });
@@ -99,6 +99,33 @@ describe('QA server（専用 DB）', { skip }, () => {
           await assert.rejects(as(role, { sub: u, role }, sql), e => e.code === '42501', `${role}: ${sql}`);
       await assert.rejects(as('authenticated', { sub: u }, 'create table public.evil(a int)'), e => e.code === '42501');
       await assert.rejects(as('authenticated', { sub: u }, 'select * from neon_auth."user"'), e => e.code === '42501');
+    });
+
+    test('認証のメールアドレスと Google のトークンは DB に残らない（書き込みのたびに置き換える。関数を実行できないロールが書いても）', async () => {
+      const userOf = async id => (await pool.query('select email from neon_auth."user" where id = $1', [id])).rows[0].email;
+      const tokensOf = async id => (await pool.query('select "idToken", "accessToken", "refreshToken" from neon_auth.account where "userId" = $1', [id])).rows;
+      const u = randomUUID();
+      await pool.query('insert into neon_auth."user"(id, email) values($1, $2)', [u, 'someone@gmail.com']);
+      assert.equal(await userOf(u), `${u}@privatematch.invalid`);
+      await pool.query(`update neon_auth."user" set email = 'again@gmail.com' where id = $1`, [u]);
+      assert.equal(await userOf(u), `${u}@privatematch.invalid`);
+      await pool.query(`insert into neon_auth.account("userId", "idToken", "accessToken", "refreshToken") values($1, 'id', 'access', 'refresh')`, [u]);
+      assert.deepEqual(await tokensOf(u), [{ idToken: null, accessToken: null, refreshToken: null }]);
+      await pool.query(`update neon_auth.account set "idToken" = 'id2', "accessToken" = 'access2', "refreshToken" = 'refresh2' where "userId" = $1`, [u]);
+      assert.deepEqual(await tokensOf(u), [{ idToken: null, accessToken: null, refreshToken: null }]);
+      // Neon Auth は別のロールで書く。トリガーの関数の EXECUTE を持たなくても置き換わる
+      await pool.query(`do $$ begin if not exists (select from pg_roles where rolname = 'qa_auth_writer') then create role qa_auth_writer; end if; end $$;
+        grant usage on schema neon_auth to qa_auth_writer; grant select, insert, update on neon_auth."user", neon_auth.account to qa_auth_writer`);
+      const { rows: [p] } = await pool.query(`select has_function_privilege('qa_auth_writer', 'public.auth_user_scrub()', 'execute') u, has_function_privilege('qa_auth_writer', 'public.auth_account_scrub()', 'execute') a`);
+      assert.deepEqual(p, { u: false, a: false });
+      const w = randomUUID();
+      await as('qa_auth_writer', undefined, 'insert into neon_auth."user"(id, email) values($1, $2)', [w, 'writer@gmail.com']);
+      await as('qa_auth_writer', undefined, `insert into neon_auth.account("userId", "idToken", "accessToken") values($1, 'id', 'access')`, [w]);
+      await as('qa_auth_writer', undefined, `update neon_auth."user" set email = 'writer2@gmail.com' where id = $1`, [w]);
+      assert.equal(await userOf(w), `${w}@privatematch.invalid`);
+      assert.deepEqual(await tokensOf(w), [{ idToken: null, accessToken: null, refreshToken: null }]);
+      const { rows: [left] } = await pool.query(`select count(*)::int n from neon_auth."user" where email not like '%@privatematch.invalid'`);
+      assert.equal(left.n, 0);
     });
 
     test('実行できる関数は ARCHITECTURE §6 の RPC 7 本だけ（anonymous は 0 本）。definer 関数は search_path 固定', async () => {

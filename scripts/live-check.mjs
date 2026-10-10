@@ -108,15 +108,15 @@ async function e2e() {
   const RUN = Date.now().toString(36);
   const users = [];
   async function signUp(i) {
-    const email = `pm-live-${RUN}-${i}@example.com`;
+    const email = `pm-live-${RUN}-${i}@example.com`, password = `Pw-${RUN}-${i}-live!`;
     const r = await timed('auth', AUTH + '/sign-up/email', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-      body: JSON.stringify({ email, password: `Pw-${RUN}-${i}-live!`, name: `Live ${i}` }) });
+      body: JSON.stringify({ email, password, name: `Live ${i}` }) });
     const cookie = r.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
     if (r.status !== 200 || !cookie) throw new Error(`sign-up ${r.status} ${r.body.slice(0, 200)}`);
     const t = await timed('auth', AUTH + '/token', { headers: { Cookie: cookie, Origin: ORIGIN } });
     if (t.status !== 200 || !t.json || !t.json.token) throw new Error(`token ${t.status} ${t.body.slice(0, 200)}`);
     const claims = JSON.parse(Buffer.from(t.json.token.split('.')[1], 'base64url'));
-    return { i, email, cookie, jwt: t.json.token, uid: claims.sub, claims };
+    return { i, email, password, cookie, jwt: t.json.token, uid: claims.sub, claims };
   }
   const call = async (label, url, u, body) => {
     const r = await timed(label, url, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN, ...(u ? { Authorization: `Bearer ${u.jwt}` } : {}) }, body: JSON.stringify(body) });
@@ -128,6 +128,12 @@ async function e2e() {
   for (let i = 0; i < 4; i++) users.push(await signUp(i));
   const c0 = users[0].claims;
   check('テスト用の利用者を 4 人作り JWT を得た', users.every(u => u.jwt && u.uid), `role=${c0.role} iss=${c0.iss} aud=${c0.aud} exp-iat=${c0.exp - c0.iat}s`);
+
+  // 認証のメールアドレスは DB に残らない（db/migrations/20261010000000_auth_scrub.sql）：登録したアドレスではもう見つからない
+  const si = await timed('auth', AUTH + '/sign-in/email', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+    body: JSON.stringify({ email: users[0].email, password: users[0].password }) });
+  check('登録したメールアドレスは DB に残らない（同じアドレスでログインできない）', si.status >= 400 && si.status < 500 && si.status !== 429,
+    `${si.status} ${si.json && si.json.code || ''} jwt.email=${/@privatematch\.invalid$/.test(c0.email || '') ? '置き換え済み' : c0.email ? '登録時のまま' : '無し'}`);
 
   // プロフィール
   for (const u of users) {
