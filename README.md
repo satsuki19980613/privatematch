@@ -39,6 +39,20 @@
 
 通信を中継する外部のサービス（Google・Cloudflare・Neon、演出 GIF を使うときは KLIPY）には、それぞれの規約のもとで接続の情報が届きます。
 
+## 安全のための仕組み
+
+- **ログイン** — Google でログインした人だけが遊べる。サーバーはリクエストごとにログインの署名・発行元・期限を確かめる。[server/game/index.js](server/game/index.js)
+- **手札と山札** — ほかの人の手札と山札はブラウザに送らない。データベースの表はブラウザから直接読めず、決まった関数が本人の分だけを返す。[src/engine.js](src/engine.js)（`viewFor`）・[20261005000000_init.sql](db/migrations/20261005000000_init.sql)
+- **部屋番号の総当たり** — はずれの番号を試せるのは 1 人あたり 10 分に 10 回まで。達すると、10 分たつまで正しい番号でも入れない。
+- **部屋の作りすぎ** — 部屋を作れるのは 1 人あたり 10 分に 10 回まで。
+- **連打** — サーバーへのリクエストは 1 人あたり 1 分に 300 回まで（ふつうに遊ぶ分には届かない）。
+
+回数はどれもデータベースで数えている。[20261010200000_rate_limit.sql](db/migrations/20261010200000_rate_limit.sql)・[20261010210000_rate_req.sql](db/migrations/20261010210000_rate_req.sql)
+
+制限に当たると「回数が多すぎます」と出る。回数は Google アカウントごとに数えている。
+
+確かめ方：コードを変えるたびにテストで（[test/qa-server.test.js](test/qa-server.test.js)）、さらに開発用の環境で本物の通信を使って、制限が実際に効くことと 1 試合が制限に当たらず終わることを確かめている（[scripts/live-check.mjs](scripts/live-check.mjs)・[Live の実行結果](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml)）。
+
 ## 開発
 
 - 開発：`npm install && npm run dev` → http://localhost:5180/?fake （サーバー無しで全画面を確認）
