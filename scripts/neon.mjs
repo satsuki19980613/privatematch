@@ -35,7 +35,7 @@ export function output(name, value) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 /** 末尾の / を取る */
-export const noTrail = s => { let n = s.length; while (s[n - 1] === '/') n--; return s.slice(0, n); };
+export const noTrail = s => { let n = s.length; while (s[n - 1] === '/') { n--; } return s.slice(0, n); };
 /** 出力の中の URL のうち、test に合い、suffix で終わるものを優先して 1 つ */
 export function pickUrl(text, test, suffix) {
   const urls = [...new Set(text.match(/https:\/\/[^"'\s,)]+/g) || [])].filter(u => test.test(u)).map(noTrail);

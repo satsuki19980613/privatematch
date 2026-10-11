@@ -13,8 +13,8 @@ export const NEON_AUTH_COOKIE=/^(__Secure-|__Host-)?neon-?auth\./;
 export const AUTH_PROXY_PREFIX='/api/auth';
 
 /** strip leading / trailing slashes */
-const noLead=s=>{let i=0;while(s[i]==='/')i++;return s.slice(i)};
-export const noTrail=s=>{let n=s.length;while(s[n-1]==='/')n--;return s.slice(0,n)};
+const noLead=s=>{let i=0;while(s[i]==='/'){i++}return s.slice(i)};
+export const noTrail=s=>{let n=s.length;while(s[n-1]==='/'){n--}return s.slice(0,n)};
 
 export function isProxiedPath(path){return PROXIED_PATHS.includes(noTrail(noLead(path)))}
 

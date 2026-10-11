@@ -17,7 +17,7 @@ const results = []; const lat = {};
 let failed = 0;
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail }); if (!ok) failed++;
-  console.log(oneLine(`${ok ? 'ok  ' : 'NG  '} ${name}${detail ? ` — ${detail}` : ''}`));
+  console.log(oneLine(`${ok ? 'ok  ' : 'NG  '} ${name}${detail ? ' — ' + detail : ''}`));
 }
 async function timed(label, url, init = {}) {
   const t = performance.now();
@@ -67,7 +67,10 @@ async function prod() {
   // Neon の共有 OAuth アプリでは Neon Auth を一度経由してから Google へ転送される。転送をたどって Google の同意画面に着くか
   let gurl = so.json?.url || '';
   const hops = [];
-  for (let i = 0; i < 4 && gurl && !gurl.startsWith(GOOGLE); i++) {
+  // たどるのは、このサイトと Neon（*.neon.tech）の https だけ（応答が指す先へ無条件には取りに行かない）
+  const siteHost = new URL(SITE).host;
+  const mayFollow = u => { try { const x = new URL(u); return x.protocol === 'https:' && (x.host === siteHost || x.hostname.endsWith('.neon.tech')); } catch { return false; } };
+  for (let i = 0; i < 4 && gurl && !gurl.startsWith(GOOGLE) && mayFollow(gurl); i++) {
     hops.push(new URL(gurl).host);
     const r = await timed('auth relay', gurl);
     gurl = r.headers.get('location') ? new URL(r.headers.get('location'), gurl).href : '';
