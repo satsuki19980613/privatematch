@@ -23,6 +23,12 @@
     "neonctl": "^6.4.0",
     "vite": "^8.3.1"
   },
+  "overrides": {
+    "neon": {
+      "@hono/node-server": "2.0.12",
+      "diff": "5.2.2"
+    }
+  },
   "engines": {
     "node": ">=22.12.0"
   }
