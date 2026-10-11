@@ -12,7 +12,7 @@ const pick = (a, r) => a[Math.floor(r() * a.length)];
 
 // 種から決まる乱数（作り直しても同じサンプルになる）
 function mulberry(seed) {
-  return () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 function move(st, seat, r, style) {
   const L = legalActions(st, seat), x = r(), stack = st.players[seat].stack;
@@ -35,14 +35,14 @@ function playGame(i, startAt, r) {
   const roomId = `demo-${String(i).padStart(4, '0')}`, hands = [];
   for (let guard = 0; guard < 20000 && st.status === 'running'; guard++) {
     const h = st.hand;
-    if (h && h.phase === 'betting' && h.toAct != null) {
+    if (h?.phase === 'betting' && h.toAct != null) {
       now += 2000 + Math.floor(r() * 6000);
       act(st, h.toAct, move(st, h.toAct, r, styles[h.toAct]), now);
     } else {
       now = Math.max(now, dueAt(st) ?? now);
       tick(st, now);
     }
-    const prev = hands[hands.length - 1];
+    const prev = hands.at(-1);
     const rec = handRecord(st);
     if (rec && (!prev || prev.handNo !== rec.rec.handNo)) hands.push({ ...rec.rec, hole: rec.holes[seat], roomId });
   }
@@ -61,12 +61,12 @@ export async function seed() {
   if (!reset && (await store.allGames()).length) return;
   if (reset) await store.clearAll();
   const r = mulberry(20261005);
-  let t = Date.now() - 90 * 86400_000;
+  let t = Date.now() - 90 * 86_400_000;
   for (let i = 0; i < GAMES; i++) {
     const { game, hands, endedAt } = playGame(i, t, r);
     await store.putHands(game.roomId, hands);
     await store.putGame(game);
-    t = endedAt + Math.floor((90 * 86400_000) / GAMES * (0.3 + r()));
+    t = endedAt + Math.floor((90 * 86_400_000) / GAMES * (0.3 + r()));
   }
   // 途中で中止になった試合も 1 つ
   await store.putGame({ roomId: 'demo-cancel', code: '424242', kind: 'free', config: { players: 4, startBb: 100, speed: 'normal', mode: 'club' }, seat: 0,

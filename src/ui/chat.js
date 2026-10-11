@@ -58,15 +58,15 @@ export function stop() {
 /** room_poll の応答ごと（seq = 部屋の最新の発言番号） */
 export function onPoll(seq) {
   if (!S.on || !S.loaded || seq == null) return;
-  if (+seq > S.seq) pull(false);
+  if (+seq > S.seq) void pull(false);
 }
 /** ビューの適用ごと */
 export function onView(v) {
   if (!S.room || !v) return;
   S.v = v;
-  const on = !!(v.room && v.room.kind === 'private');
+  const on = v.room?.kind === 'private';
   if (on !== S.on) { setOn(on); notify(); }
-  if (on && !S.loaded && !S.loading) pull(true);
+  if (on && !S.loaded && !S.loading) void pull(true);
   syncTurn();
 }
 
@@ -98,13 +98,13 @@ async function pull(silent) {
       notify();
     }
     S.loaded = true;
-  } catch (e) {
+  } catch {
     if (tk !== S.token) return;
     S.loaded = true;   // 読めなかった分は次の poll で
   } finally {
     if (tk === S.token) {
       S.loading = false;
-      if (S.again) { S.again = false; pull(false); }
+      if (S.again) { S.again = false; void pull(false); }
     }
   }
 }
@@ -114,7 +114,7 @@ async function send() {
   const text = normalizeChat(i.value);
   if (!text) { i.value = ''; syncLeft(); return; }
   const wait = S.lastSent + CHAT_MIN_INTERVAL_MS - Date.now();
-  if (wait > 0) { S.sending = true; syncLeft(); setTimeout(() => { S.sending = false; send(); }, wait + 30); return; }
+  if (wait > 0) { S.sending = true; syncLeft(); setTimeout(() => { S.sending = false; void send(); }, wait + 30); return; }
   const tk = S.token, v = S.v;
   const local = { seq: null, seat: v.seat, text, at: Date.now(), local: true };
   S.msgs.push(local); S.lastSent = Date.now();
@@ -124,7 +124,7 @@ async function send() {
   try {
     const r = await app.net.game({ op: 'chat', room: S.room, text });
     if (tk !== S.token) return;
-    const m = r && r.msg;
+    const m = r?.msg;
     if (m && local.seq == null) { local.seq = m.seq; local.at = m.at; local.text = m.text; S.seen.add(m.seq); }
     S.msgs.sort((a, b2) => (a.seq ?? Infinity) - (b2.seq ?? Infinity));
     notify();
@@ -133,7 +133,7 @@ async function send() {
     S.msgs = S.msgs.filter(x => x !== local); notify();
     if (b) retire(b, true);
     const ii = $('#chatIn'); if (ii && !ii.value) { ii.value = text; syncLeft(); }
-    const c = e && e.code;
+    const c = e?.code;
     if (c === 'too_fast') { S.lastSent = Date.now(); toast('少し待ってから'); }
     else toast(c === 'chat_closed' ? 'チャットは使えません' : c === 'malformed' ? '送れない文字があります' : c === 'chat_full' ? 'チャットの上限です' : '送信できませんでした');
   }
@@ -170,7 +170,7 @@ function ensureComposer() {
   cz.querySelector('#czX').onclick = () => closeComposer();
   i.addEventListener('compositionstart', () => { composing = true; });
   i.addEventListener('compositionend', () => { composing = false; clipInput(); });
-  i.addEventListener('input', () => { if (!composing) clipInput(); syncLeft(); });
+  i.addEventListener('input', () => { if (!composing) { clipInput(); } syncLeft(); });
   i.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (e.isComposing || e.keyCode === 229 || composing) return;   // IME の変換の取り消し
@@ -178,7 +178,7 @@ function ensureComposer() {
     }
     if (e.key === 'Enter') {
       if (e.isComposing || e.keyCode === 229 || composing) return;   // IME の確定は送信しない
-      e.preventDefault(); send();
+      e.preventDefault(); void send();
     }
   });
   i.addEventListener('blur', () => { setTimeout(() => { if (isOpen() && document.activeElement !== i && !document.hidden) closeComposer(); }, 0); });
@@ -197,7 +197,7 @@ function syncLeft() {
 }
 function syncTurn() {
   const b = $('#czTurn'); if (!b) return;
-  const v = S.v, h = v && v.hand;
+  const v = S.v, h = v?.hand;
   const mine = !!(v && h && v.status === 'running' && h.phase === 'betting' && h.toAct === v.seat);
   if (b.hidden === mine) b.hidden = !mine;
 }
@@ -239,7 +239,7 @@ document.addEventListener('keydown', e => {
 // 吹き出しは #chatBubbles（#stage を覆う層。卓の配置には関わらない）に置き、動いている間は毎フレーム、その席の札（無ければプレート）の
 // 真上に合わせる。卓がキーボードで縮小表示になっても文字の大きさは変わらない。1 席に 1 つ（同じ人の次の発言は前のものと入れ替わる）
 const live = [];   // { el, seat, timer, gone }
-const nameOf = m => (S.v && m.seat === S.v.seat ? 'YOU' : (S.v && S.v.names[m.seat]) || '');
+const nameOf = m => (S.v && m.seat === S.v.seat ? 'YOU' : S.v?.names[m.seat] || '');
 const dwell = text => Math.max(3500, Math.min(7000, 3000 + chatUnits(text) * 100));
 const layer = () => $('#chatBubbles');
 /** 席の色：YOU と、自分から見た席の順（1 = 左隣 … 5）。吹き出し・履歴・席の合図で同じ色を使う */
@@ -268,7 +268,7 @@ function bubble(m, rest) {
   return b;
 }
 // 席の札とプレートを合わせた箱（画面の座標。卓の縮小表示の変形も込み）と、プレートの幅
-const rect = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+const rect = e => { if (!e) { return null; } const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
 function anchorOf(seat) {
   const s = document.getElementById('seat' + seat); if (!s) return null;
   const h = rect(s.querySelector('.hole .card') && s.querySelector('.hole')), p = rect(s.querySelector('.sp'));
@@ -303,9 +303,9 @@ function obstacles(seat) {
 const M = 4, TAIL = 7;
 // 吹き出しの形の候補（幅 × 文字の大きさ）を測っておく。標準・細め・横長と、それぞれ少し小さい文字（11px まで）
 function shapes(b, a, R, BL, BR) {
-  const el = b.el, mine = b.seat === (S.v && S.v.seat);
+  const el = b.el, mine = b.seat === S.v?.seat;
   const prev = el.style.fontSize; el.style.fontSize = '';
-  const fs = parseFloat(getComputedStyle(el).fontSize) || 13; el.style.fontSize = prev;
+  const fs = Number.parseFloat(getComputedStyle(el).fontSize) || 13; el.style.fontSize = prev;
   const small = Math.max(11, Math.round(fs * .86 * 10) / 10);
   // 札の横の空き（横に置く細い形の幅）
   const gap = Math.round(Math.max(a.cl - R.left - BL, BR - (a.cr - R.left)) - TAIL - 4);
@@ -333,7 +333,7 @@ function shapes(b, a, R, BL, BR) {
   }
   // 最後の手段：1 行の帯（長い文は横に流して全部読ませる）。とても狭い卓（小さい画面の 5〜6 人・キーボードで縮小表示）用
   el.classList.add('tk');
-  for (const c of [...new Set([Math.round(Math.max(a.pw * .95, 96)), Math.round(Math.max(Math.min(gap, a.pw), 84))])]) {
+  for (const c of new Set([Math.round(Math.max(a.pw * .95, 96)), Math.round(Math.max(Math.min(gap, a.pw), 84))])) {
     const cap = Math.min(room, c);
     el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = small + 'px';
     out.push({ cap, fs: small, w: el.offsetWidth, h: el.offsetHeight, pen: 1400, tk: true });
@@ -344,7 +344,7 @@ function shapes(b, a, R, BL, BR) {
 }
 // 帯の文が入りきらなければ、往復で横に流す（読む速さ：1 秒に約 40px。端で少し止まる）
 function ticker(el) {
-  const box = el.querySelector('.cb-t'), t = box && box.firstElementChild; if (!t) return;
+  const box = el.querySelector('.cb-t'), t = box?.firstElementChild; if (!t) return;
   const over = Math.ceil(t.scrollWidth - box.clientWidth);
   el.style.setProperty('--shift', over > 2 ? -over + 'px' : '0px');
   el.style.setProperty('--tdur', over > 2 ? (2.4 + over / 40).toFixed(2) + 's' : '0s');
@@ -356,11 +356,11 @@ function place(b, placed) {
   const R = L.getBoundingClientRect(), tb = $('#table'), ti = $('#tInfo'), land = document.body.classList.contains('land');
   // 置ける範囲：横向きは卓の列だけ（右の列のドック・情報に出ない）。縦向きは情報の行より下
   const BL = land && tb ? Math.max(M, tb.offsetLeft) : M, BR = land && tb ? Math.min(R.width - M, tb.offsetLeft + tb.offsetWidth) : R.width - M;
-  const TOP = !land && ti && ti.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M, BOT = R.height - M;
-  const mine = b.seat === (S.v && S.v.seat), cx = (a.left + a.right) / 2 - R.left, at = a.top - R.top;
+  const TOP = !land && ti?.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M, BOT = R.height - M;
+  const mine = b.seat === S.v?.seat, cx = (a.left + a.right) / 2 - R.left, at = a.top - R.top;
   // 2px の余白を取って縁が触れないようにする
   const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left - 2, r: r.right - R.left + 2, t: r.top - R.top - 2, b: r.bottom - R.top + 2, k })).concat((placed || []).map(o => ({ ...o, l: o.l - 2, r: o.r + 2, t: o.t - 2, b: o.b + 2 })));
-  const area = (X, Y, w, h) => { let c = 0; for (const o of obs) { const dx = Math.min(o.r, X + w) - Math.max(o.l, X); if (dx <= 0) continue; const dy = Math.min(o.b, Y + h) - Math.max(o.t, Y); if (dy > 0) c += o.k * dx * dy; } return c; };
+  const area = (X, Y, w, h) => { let c = 0; for (const o of obs) { const dx = Math.min(o.r, X + w) - Math.max(o.l, X); if (dx <= 0) { continue; } const dy = Math.min(o.b, Y + h) - Math.max(o.t, Y); if (dy > 0) c += o.k * dx * dy; } return c; };
   // 吹き出しとしっぽ（上なら下に、横なら席の側に）の分を合わせた箱で重なりを数える
   const cost = (side, X, Y, w, h) => side === 'up' ? area(X, Y, w, h + TAIL) : side[0] === 'd' ? area(X, Y - TAIL, w, h + TAIL) : side[0] === 'l' ? area(X, Y, w + TAIL, h) : area(X - TAIL, Y, w + TAIL, h);
   const inside = (X, Y, w, h) => X >= BL - .5 && X + w <= BR + .5 && Y >= TOP - .5 && Y + h <= BOT + .5;
@@ -390,7 +390,7 @@ function place(b, placed) {
   };
   // いまの置き方（席からの相対位置）がまだ何にも重ならなければそのまま（毎フレームの探し直しをしない・ちらつかせない）
   const tgt = side => a.sides[+side[1]] || a.sides[0];
-  const base = side => { if (side === 'up') return [cx, at]; const t = tgt(side); return side[0] === 'd' ? [(t.l + t.r) / 2 - R.left, t.b - R.top] : [(side[0] === 'l' ? t.l : t.r) - R.left, t.cy - R.top]; };
+  const base = side => { if (side === 'up') { return [cx, at]; } const t = tgt(side); return side[0] === 'd' ? [(t.l + t.r) / 2 - R.left, t.b - R.top] : [(side[0] === 'l' ? t.l : t.r) - R.left, t.cy - R.top]; };
   let pick = null;
   if (b.cur && list[b.cur.i]) {
     const sh = list[b.cur.i], [bx, by] = base(b.cur.side), X = bx + b.cur.rx, Y = by + b.cur.ry;
@@ -472,7 +472,7 @@ function clearBubbles() {
 // 送信者の席のプレートの縁を、その人の色で一瞬光らせる
 function ping(seat) {
   const s = document.getElementById('seat' + seat); if (!s || REDUCE) return;
-  s.classList.remove('cping', ...[...s.classList].filter(c => c.startsWith('t-'))); void s.offsetWidth;
+  s.classList.remove('cping', ...[...s.classList].filter(c => c.startsWith('t-'))); s.getBoundingClientRect();   // 位置を計算させて、同じアニメーションをやり直せるようにする
   s.classList.add('cping', 't-' + toneOf(seat));
   clearTimeout(s._cpT); s._cpT = setTimeout(() => s.classList.remove('cping'), 1500);
 }
@@ -483,8 +483,8 @@ export function settle(fn) {
   if (!S.on) return fn();
   const run = [];
   for (const e of document.querySelectorAll('#seats .bchip')) for (const a of e.getAnimations()) {
-    const end = a.effect && a.effect.getComputedTiming().endTime;
-    if (a.playState === 'running' && end != null && isFinite(end)) { run.push([a, a.currentTime]); a.currentTime = end - 1; }
+    const end = a.effect?.getComputedTiming().endTime;
+    if (a.playState === 'running' && end != null && Number.isFinite(end)) { run.push([a, a.currentTime]); a.currentTime = end - 1; }
   }
   try { return fn(); } finally { for (const [a, t] of run) { try { a.currentTime = t; } catch (e) { /* 終わっていた */ } } }
 }
@@ -532,4 +532,4 @@ if (window.ResizeObserver) {
   for (const id of ['stage', 'dock']) { const e = document.getElementById(id); if (e) ro.observe(e); }
 }
 
-if (import.meta.env && import.meta.env.DEV) window.__chat = { S, live, bubble: m => bubble(m) };
+if (import.meta.env?.DEV) window.__chat = { S, live, bubble: m => bubble(m) };

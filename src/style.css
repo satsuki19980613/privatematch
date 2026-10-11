@@ -70,8 +70,8 @@ button,.card,input[type=range]{touch-action:manipulation}
 .stage,.menu,.top{-webkit-user-select:none;user-select:none}
 
 /* ===== app frame ===== */
-/* height: the visible area measured by src/ui/viewport.js (--app-h); bottom: the larger of the dynamic and maximum
-   safe-area insets, or the Android navigation bar fallback (--sab-fb) — see viewport.js */
+/* The height is the visible area measured by src/ui/viewport.js (--app-h). The bottom padding is the larger of the
+   dynamic and maximum safe-area insets, or the Android navigation bar fallback (--sab-fb). See viewport.js */
 .app{height:100vh;height:100dvh;height:var(--app-h,100dvh);display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;
   padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) var(--sab) env(safe-area-inset-left,0px)}
 :root{--sab:max(env(safe-area-inset-bottom,0px),env(safe-area-max-inset-bottom,0px),var(--sab-fb,0px))}

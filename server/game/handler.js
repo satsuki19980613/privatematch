@@ -4,7 +4,7 @@ import { normalizeFx } from '../../src/fx.js';
 
 export const MAX_BODY = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CODE = /^[0-9]{6}$/;
+const CODE = /^\d{6}$/;
 // MoveError の code → HTTP ステータス（それ以外は 422）
 export const STATUS = {
   not_found: 404, no_profile: 403, stale: 409, not_yet: 409, game_over: 409, not_your_turn: 409, busy: 409, not_started: 409,
@@ -28,7 +28,7 @@ export function createHandler(deps) {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
     if (req.method !== 'POST') return reply(405, { error: 'method_not_allowed' });
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '');
-    let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch (e) { if (e && e.unavailable) return reply(503, { error: 'unavailable' }); uid = null; }
+    let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch (e) { if (e?.unavailable) { return reply(503, { error: 'unavailable' }); } uid = null; }
     if (!uid) return reply(401, { error: 'not_authenticated' });
     if (!(await allow(uid))) return reply(429, { error: 'too_many' });
     let body;
@@ -78,7 +78,7 @@ export function createHandler(deps) {
           return reply(422, { error: 'malformed' });
       }
     } catch (e) {
-      if (e instanceof MoveError) return reply(STATUS[e.code] ?? 422, { error: e.code, ...(e.extra || {}) });
+      if (e instanceof MoveError) return reply(STATUS[e.code] ?? 422, { error: e.code, ...e.extra });
       log('game: unexpected error', e);
       return reply(500, { error: 'internal' });
     }

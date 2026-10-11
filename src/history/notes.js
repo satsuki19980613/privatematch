@@ -10,7 +10,7 @@ const DEMO = typeof location !== 'undefined' && new URLSearchParams(location.sea
 const KEY = DEMO ? 'pm-notes-demo' : 'pm-notes';
 const EMPTY = Object.freeze({ mark: 0, text: '' });
 const dict = () => Object.create(null);
-const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const own = Object.hasOwn;
 
 /** メモの文：改行とタブ以外の制御文字を消し、上限で切る */
 export const cleanNote = t => Array.from(String(t ?? '').replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '')).slice(0, NOTE_MAX).join('');

@@ -38,14 +38,14 @@ async function getSession(q){
   const r=await session('/get-session'+q);
   if(!r.ok)throw new NetError('session',r.status);
   const b=await r.json().catch(()=>null);
-  return b&&b.user&&b.user.id?{id:b.user.id}:null;
+  return b?.user?.id?{id:b.user.id}:null;
 }
 
 export async function signOut(){token=null;await session('/sign-out',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}
 
 // JWT for the Data API and the Function (15 min; refreshed 30 s before it expires)
 let token=null;
-const expOf=jwt=>{try{return JSON.parse(atob(jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp*1000}catch{return 0}};
+const expOf=jwt=>{try{return JSON.parse(atob(jwt.split('.')[1].replaceAll('-','+').replaceAll('_','/'))).exp*1000}catch{return 0}};
 const lostListeners=new Set();
 export const onSessionLost=f=>lostListeners.add(f);
 function lost(){token=null;lostListeners.forEach(f=>f())}

@@ -2,30 +2,35 @@
 //   node scripts/live-check.mjs prod  本番：サイト・ログイン中継・Function・Data API に、ログインせずに届くか（何も書き込まない）
 //   node scripts/live-check.mjs e2e   開発用ブランチ：テスト用の利用者を作り、部屋の作成から終局・記録の取得まで本物の通信で遊ぶ
 // 環境変数：SITE（prod）、AUTH_URL / DATA_URL / GAME_URL（両方）、ORIGIN（e2e。開発用ブランチが許す http://localhost:5180）
+import { randomInt } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { legalActions } from '../src/engine.js';
+import { noTrail } from './neon.mjs';
 
 const mode = process.argv[2];
-const env = n => { const v = process.env[n]; if (!v) { console.error(`環境変数 ${n} が必要です`); process.exit(2); } return v.replace(/\/+$/, ''); };
+// どれも通信先の URL（http か https で始まるものだけ受け取る）
+const env = n => { const v = process.env[n]; if (!v || !/^https?:\/\//.test(v)) { console.error(`環境変数 ${n}（http か https の URL）が必要です`); process.exit(2); } return noTrail(v); };
+const oneLine = s => String(s).replaceAll(/[\r\n]+/g, ' ');   // 応答の本文をログに出すときは 1 行にする
+const GOOGLE = 'https://accounts.google.com/';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = []; const lat = {};
 let failed = 0;
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail }); if (!ok) failed++;
-  console.log(`${ok ? 'ok  ' : 'NG  '} ${name}${detail ? ` — ${detail}` : ''}`);
+  console.log(oneLine(`${ok ? 'ok  ' : 'NG  '} ${name}${detail ? ` — ${detail}` : ''}`));
 }
 async function timed(label, url, init = {}) {
   const t = performance.now();
   const r = await fetch(url, { redirect: 'manual', ...init });
   const body = await r.text();
-  (lat[label] ??= []).push(performance.now() - t);
+  lat[label] ??= []; lat[label].push(performance.now() - t);
   let json = null; try { json = JSON.parse(body); } catch { /* not json */ }
   return { status: r.status, headers: r.headers, body, json };
 }
 function summary(title) {
   const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
   const lines = [`### ${title}`, '', `${results.length - failed} / ${results.length} 件 OK`, '', '| 確認 | 結果 | 詳細 |', '|---|---|---|',
-    ...results.map(r => `| ${r.name} | ${r.ok ? 'OK' : '**NG**'} | ${String(r.detail).replace(/[\\|]/g, '\\$&').slice(0, 200)} |`),
+    ...results.map(r => `| ${r.name} | ${r.ok ? 'OK' : '**NG**'} | ${String(r.detail).replace(/[\\|]/g, String.raw`\$&`).slice(0, 200)} |`),
     '', '| 通信 | 回数 | 中央値 ms | 95% ms | 最大 ms |', '|---|---|---|---|---|',
     ...Object.entries(lat).map(([k, a]) => `| ${k} | ${a.length} | ${pct(a, 0.5).toFixed(0)} | ${pct(a, 0.95).toFixed(0)} | ${Math.max(...a).toFixed(0)} |`), ''];
   console.log(lines.join('\n'));
@@ -54,20 +59,20 @@ async function prod() {
   const ok = await timed('auth relay', SITE + '/api/auth/ok');
   check('ログイン中継 /api/auth/ok が 200', ok.status === 200, `${ok.status} ${ok.body.slice(0, 80)}`);
   const sess = await timed('auth relay', SITE + '/api/auth/get-session');
-  check('未ログインの get-session が 200・利用者なし', sess.status === 200 && !(sess.json && sess.json.user), `${sess.status} ${sess.body.slice(0, 80)}`);
+  check('未ログインの get-session が 200・利用者なし', sess.status === 200 && !sess.json?.user, `${sess.status} ${sess.body.slice(0, 80)}`);
   const tok = await timed('auth relay', SITE + '/api/auth/token');
   check('未ログインの token が 401', tok.status === 401, `${tok.status} ${tok.body.slice(0, 80)}`);
   const so = await timed('auth relay', SITE + '/api/auth/sign-in/social', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: SITE },
     body: JSON.stringify({ provider: 'google', callbackURL: SITE + '/', errorCallbackURL: SITE + '/?error=login_failed', disableRedirect: true }) });
   // Neon の共有 OAuth アプリでは Neon Auth を一度経由してから Google へ転送される。転送をたどって Google の同意画面に着くか
-  let gurl = so.json && so.json.url || '';
+  let gurl = so.json?.url || '';
   const hops = [];
-  for (let i = 0; i < 4 && gurl && !/^https:\/\/accounts\.google\.com\//.test(gurl); i++) {
+  for (let i = 0; i < 4 && gurl && !gurl.startsWith(GOOGLE); i++) {
     hops.push(new URL(gurl).host);
     const r = await timed('auth relay', gurl);
     gurl = r.headers.get('location') ? new URL(r.headers.get('location'), gurl).href : '';
   }
-  check('Google ログインの開始が Google の同意画面に着く', so.status === 200 && /^https:\/\/accounts\.google\.com\//.test(gurl), `${so.status} ${[...hops, gurl && new URL(gurl).host].join(' → ') || so.body.slice(0, 120)}`);
+  check('Google ログインの開始が Google の同意画面に着く', so.status === 200 && gurl.startsWith(GOOGLE),`${so.status} ${[...hops, gurl && new URL(gurl).host].join(' → ') || so.body.slice(0, 120)}`);
   if (gurl) {
     const ru = new URL(gurl).searchParams.get('redirect_uri') || '';
     check('Google から戻る先が Neon Auth', /neon/.test(ru), ru.slice(0, 100));
@@ -114,7 +119,7 @@ async function e2e() {
     const cookie = r.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
     if (r.status !== 200 || !cookie) throw new Error(`sign-up ${r.status} ${r.body.slice(0, 200)}`);
     const t = await timed('auth', AUTH + '/token', { headers: { Cookie: cookie, Origin: ORIGIN } });
-    if (t.status !== 200 || !t.json || !t.json.token) throw new Error(`token ${t.status} ${t.body.slice(0, 200)}`);
+    if (t.status !== 200 || !t.json?.token) throw new Error(`token ${t.status} ${t.body.slice(0, 200)}`);
     const claims = JSON.parse(Buffer.from(t.json.token.split('.')[1], 'base64url'));
     return { i, email, password, cookie, jwt: t.json.token, uid: claims.sub, claims };
   }
@@ -133,12 +138,12 @@ async function e2e() {
   const si = await timed('auth', AUTH + '/sign-in/email', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
     body: JSON.stringify({ email: users[0].email, password: users[0].password }) });
   check('登録したメールアドレスは DB に残らない（同じアドレスでログインできない）', si.status >= 400 && si.status < 500 && si.status !== 429,
-    `${si.status} ${si.json && si.json.code || ''} jwt.email=${/@privatematch\.invalid$/.test(c0.email || '') ? '置き換え済み' : c0.email ? '登録時のまま' : '無し'}`);
+    `${si.status} ${si.json?.code || ''} jwt.email=${(c0.email || '').endsWith('@privatematch.invalid') ?'置き換え済み' : c0.email ? '登録時のまま' : '無し'}`);
 
   // プロフィール
   for (const u of users) {
     const r = await rpc(u, 'me');
-    check(`me（${u.i}）が 200・自動のニックネーム`, r.status === 200 && /^Player-/.test(r.json && r.json.nickname), `${r.status} ${r.body.slice(0, 120)}`);
+    check(`me（${u.i}）が 200・自動のニックネーム`, r.status === 200 && String(r.json?.nickname).startsWith('Player-'),`${r.status} ${r.body.slice(0, 120)}`);
     const n = await rpc(u, 'set_nickname', { p_name: `L${RUN.slice(-5)}${u.i}` });
     check(`set_nickname（${u.i}）`, n.status === 200, `${n.status} ${n.body.slice(0, 120)}`);
   }
@@ -149,18 +154,18 @@ async function e2e() {
 
   // FreeMatch：作る → 一覧に出る → 作成者が抜けると消える
   const fr = await game(users[0], { op: 'create', kind: 'free', config: { players: 2, startBb: 75, speed: 'normal', levelMin: 3, mode: 'club' } });
-  check('FreeMatch の部屋を作る', fr.status === 200 && fr.json.view && fr.json.view.lobby, `${fr.status} ${fr.body.slice(0, 120)}`);
+  check('FreeMatch の部屋を作る', fr.status === 200 && fr.json.view?.lobby, `${fr.status} ${fr.body.slice(0, 120)}`);
   const list = await rpc(users[1], 'free_rooms');
-  check('ほかの人の free_rooms に出る', list.status === 200 && list.json.some(x => x.id === fr.json.room), `${list.status} ${list.json && list.json.length} 件`);
+  check('ほかの人の free_rooms に出る', list.status === 200 && list.json.some(x => x.id === fr.json.room), `${list.status} ${list.json?.length} 件`);
   const fl = await game(users[0], { op: 'leave', room: fr.json.room });
-  check('作成者が抜けると中止', fl.status === 200 && fl.json.view && fl.json.view.status === 'cancelled', `${fl.status} ${fl.body.slice(0, 120)}`);
+  check('作成者が抜けると中止', fl.status === 200 && fl.json.view?.status === 'cancelled', `${fl.status} ${fl.body.slice(0, 120)}`);
   const list2 = await rpc(users[1], 'free_rooms');
   check('中止した部屋は free_rooms から消える', list2.status === 200 && !list2.json.some(x => x.id === fr.json.room));
 
   // PrivateMatch：3 人で終局まで
   const cfg = { players: 3, startBb: 75, speed: 'normal', levelMin: 3, mode: 'rank-3' };
   const cr = await game(users[0], { op: 'create', kind: 'private', config: cfg });
-  check('PrivateMatch の部屋を作る', cr.status === 200 && cr.json.view && cr.json.view.lobby && /^\d{6}$/.test(cr.json.view.room.code), `${cr.status} ${cr.body.slice(0, 160)}`);
+  check('PrivateMatch の部屋を作る', cr.status === 200 && cr.json.view?.lobby && /^\d{6}$/.test(cr.json.view.room.code), `${cr.status} ${cr.body.slice(0, 160)}`);
   const room = cr.json.room, code = cr.json.view.room.code;
   const again = await game(users[0], { op: 'create', kind: 'private', config: cfg });
   check('部屋に居るうちは別の部屋を作れない（in_other_room）', again.code === 'in_other_room' && again.json.room === room, `${again.status} ${again.code}`);
@@ -192,16 +197,16 @@ async function e2e() {
     for (const u of players) {
       const x = await poll(u);
       if ('deck' in (x.hand || {}) || 'seed' in x) leaks++;
-      if (x.hand) x.hand.hole.forEach((c, s) => { if (c && s !== x.seat && !(x.hand.shown && x.hand.shown[s])) leaks++; });
+      if (x.hand) x.hand.hole.forEach((c, s) => { if (c && s !== x.seat && !x.hand.shown?.[s]) leaks++; });
     }
     v = views.get(players[0].uid);
     if (v.status !== 'running' && v.status !== 'paused') break;
     const h = v.hand;
-    if (h && h.phase === 'betting') {
+    if (h?.phase === 'betting') {
       const sum = v.players.reduce((a, p) => a + p.stack, 0) + h.commits.reduce((a, b) => a + b, 0);
       if (sum !== start) conserve = false;
     }
-    if (h && h.phase === 'betting' && h.toAct != null) {
+    if (h?.phase === 'betting' && h.toAct != null) {
       const u = players.find(p => views.get(p.uid).seat === h.toAct), mine = views.get(u.uid), L = legalActions(mine, h.toAct);
       if (!L) { await sleep(500); continue; }
       if (!wrongTurn) {
@@ -227,7 +232,7 @@ async function e2e() {
       ticks++;
     }
   }
-  check('3 人の試合が終局した', v && v.status === 'finished', `status=${v && v.status} hands=${v && v.handNo} acts=${acts} ticks=${ticks}`);
+  check('3 人の試合が終局した', v?.status === 'finished', `status=${v?.status} hands=${v?.handNo} acts=${acts} ticks=${ticks}`);
   check('他席の手札・山札・乱数の種がビューに漏れない', leaks === 0, `${leaks} 件`);
   check('チップの合計が常に一定', conserve);
   const places = v.players.map(p => p.place).sort();
@@ -252,7 +257,7 @@ async function e2e() {
   const lim = users[3];
   let misses = 0;
   for (let i = 0; i < 30 && misses < 10; i++) {
-    const r = await rpc(lim, 'room_peek', { p_code: String(Math.floor(Math.random() * 1e6)).padStart(6, '0') });
+    const r = await rpc(lim, 'room_peek', { p_code: String(randomInt(1e6)).padStart(6, '0') });
     if (r.status === 200 && r.json === null) misses++; else if (r.status !== 200) break;
   }
   const blocked = await rpc(lim, 'room_peek', { p_code: code });
@@ -273,6 +278,9 @@ async function e2e() {
   summary('開発用ブランチで本物の通信を使って 1 試合');
 }
 
-try { await (mode === 'prod' ? prod() : mode === 'e2e' ? e2e() : Promise.reject(new Error('prod か e2e を指定してください'))); }
-catch (e) { check('実行', false, e.message); summary('通信確認（途中で止まった）'); }
+try {
+  if (mode === 'prod') await prod();
+  else if (mode === 'e2e') await e2e();
+  else throw new Error('prod か e2e を指定してください');
+} catch (e) { check('実行', false, e.message); summary('通信確認（途中で止まった）'); }
 process.exit(failed ? 1 : 0);

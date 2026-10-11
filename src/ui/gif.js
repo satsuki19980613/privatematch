@@ -36,15 +36,15 @@ export function paint(body, top) {
   const q = $('#fxQ');
   q.oninput = () => { clearTimeout(qT); qT = setTimeout(() => search(q.value), 450); };
   q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(qT); search(q.value); q.blur(); } };
-  $('#fxNone').onclick = () => { setFx(null); paintCur(); paintGrid(); };
+  $('#fxNone').onclick = () => { setFx(null); void paintCur(); paintGrid(); };
   $('#fxGrid').onclick = e => {
     const b = e.target.closest('[data-slug]'); if (!b) return;
-    setFx(b.dataset.slug); klipy.shared(b.dataset.slug, S.q); paintCur(); paintGrid();
+    setFx(b.dataset.slug); klipy.shared(b.dataset.slug, S.q); void paintCur(); paintGrid();
   };
   // 上（戻る・見出し・今の GIF・検索欄）は止めたまま、結果の一覧だけをスクロールする（下まで送ると次のページ）
   const list = $('#fxList');
-  list.onscroll = () => { if (S.next && !S.busy && list.scrollTop + list.clientHeight > list.scrollHeight - 240) load(S.page + 1); };
-  paintCur();
+  list.onscroll = () => { if (S.next && !S.busy && list.scrollTop + list.clientHeight > list.scrollHeight - 240) void load(S.page + 1); };
+  void paintCur();
   if (S.items.length) paintGrid(); else search(S.q, true);
 }
 
@@ -52,7 +52,7 @@ function search(text, force) {
   const q = String(text || '').trim().slice(0, 50);
   if (q === S.q && !force) return;
   S.q = q; S.items = []; S.page = 0; S.next = false;
-  load(1);
+  void load(1);
 }
 async function load(page) {
   const seq = ++S.seq;
@@ -61,7 +61,7 @@ async function load(page) {
     const r = await klipy.search(S.q, page);
     if (seq !== S.seq) return;
     S.items = page === 1 ? r.items : [...S.items, ...r.items]; S.page = page; S.next = r.next;
-  } catch (e) {
+  } catch {
     if (seq !== S.seq) return;
     S.err = true;
   }

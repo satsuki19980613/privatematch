@@ -71,7 +71,7 @@ export function play(host, slug, name, mine) {
 export function hide(ms = FX.out) {
   const w = cur; cur = null;
   if (!w) return;
-  const done = () => { const m = w.querySelector('video'); if (m) m.pause(); w.remove(); };
+  const done = () => { const m = w.querySelector('video'); if (m) { m.pause(); } w.remove(); };
   if (!ms || REDUCE || document.hidden) return done();
   const an = w.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: EASE, fill: 'forwards' });
   w.firstChild.animate([{ transform: 'none' }, { transform: 'scale(1.04)' }], { duration: ms, easing: EASE, fill: 'forwards' });
@@ -80,6 +80,6 @@ export function hide(ms = FX.out) {
 /** 卓を出るとき：消して、読み込んだものも手放す */
 export function clear() {
   hide(0);
-  for (const p of pool.values()) if (p.el && p.el.tagName === 'VIDEO') { p.el.removeAttribute('src'); p.el.load(); }
+  for (const p of pool.values()) if (p.el?.tagName === 'VIDEO') { p.el.removeAttribute('src'); p.el.load(); }
   pool.clear(); want = '';
 }

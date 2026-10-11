@@ -8,7 +8,7 @@ import pg from 'pg';
 import { createHandler } from './handler.js';
 import { makeDb } from './db.js';
 
-const env = n => { const v = process.env[n]; if (!v) throw new Error(`missing env ${n}`); return v; };
+const env = n => { const v = process.env[n]; if (!v) { throw new Error(`missing env ${n}`); } return v; };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const pool = new pg.Pool({ connectionString: env('DATABASE_URL'), max: 3 });

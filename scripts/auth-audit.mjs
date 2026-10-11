@@ -10,7 +10,7 @@ const client = new pg.Client({ connectionString: process.env.DATABASE_URL || awa
 await client.connect();
 let failed = 0;
 const lines = [`### 認証の個人の情報（${branch}）`, '', '| 確認 | 結果 | 件数 |', '|---|---|---|'];
-function check(name, ok, n) { if (!ok) failed++; lines.push(`| ${name} | ${ok ? 'OK' : '**NG**'} | ${n} |`); console.log(`${ok ? 'ok  ' : 'NG  '} ${name} — ${n}`); }
+function check(name, ok, n) { if (!ok) { failed++; } lines.push(`| ${name} | ${ok ? 'OK' : '**NG**'} | ${n} |`); console.log(`${ok ? 'ok  ' : 'NG  '} ${name} — ${n}`); }
 try {
   const { rows: [n] } = await client.query(`select
     (select count(*) from neon_auth."user")::int users,

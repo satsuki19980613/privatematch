@@ -23,7 +23,7 @@ async function run(roomId, view) {
     const list = await app.net.rpc('room_hands', { p_room: roomId, p_after: after });
     if (!Array.isArray(list) || !list.length) break;
     await store.putHands(roomId, list);
-    after = list[list.length - 1].handNo;
+    after = list.at(-1).handNo;
     if (list.length < 200) break;
   }
   await store.putGame(gameSummary(view, roomId, after));

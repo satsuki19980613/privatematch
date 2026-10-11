@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: 単体テスト
         run: npm test
 

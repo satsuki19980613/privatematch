@@ -62,11 +62,12 @@ export function handName(score) {
 
 /* ---------------- 乱数：ChaCha20 の鍵ストリーム（鍵 = st.seed 8 語、ブロックカウンタ = st.ctr） ---------------- */
 const rotl = (x, n) => (x << n) | (x >>> (32 - n));
+// x は Int32Array（足し算は代入で 32 bit に丸まる）
 function qr(x, a, b, c, d) {
-  x[a] = (x[a] + x[b]) | 0; x[d] = rotl(x[d] ^ x[a], 16);
-  x[c] = (x[c] + x[d]) | 0; x[b] = rotl(x[b] ^ x[c], 12);
-  x[a] = (x[a] + x[b]) | 0; x[d] = rotl(x[d] ^ x[a], 8);
-  x[c] = (x[c] + x[d]) | 0; x[b] = rotl(x[b] ^ x[c], 7);
+  x[a] += x[b]; x[d] = rotl(x[d] ^ x[a], 16);
+  x[c] += x[d]; x[b] = rotl(x[b] ^ x[c], 12);
+  x[a] += x[b]; x[d] = rotl(x[d] ^ x[a], 8);
+  x[c] += x[d]; x[b] = rotl(x[b] ^ x[c], 7);
 }
 function chachaBlock(inp) {
   const x = Int32Array.from(inp);
@@ -127,7 +128,7 @@ export function newTable({ config, names, now, rnd, button, stacks, fx }) {
   const seed = [];
   if (rnd) for (let i = 0; i < 8; i++) seed.push(Math.floor(rnd() * 4294967296) >>> 0);
   else seed.push(...globalThis.crypto.getRandomValues(new Uint32Array(8)));
-  const start = stacks ? stacks.slice() : Array(n).fill(cfg.startBb * BASE_BB);
+  const start = stacks ? stacks.slice() : new Array(n).fill(cfg.startBb * BASE_BB);
   const st = {
     ver: 0, config: cfg, n, names: names.slice(), startedAt: now, levelStartAt: now,
     players: start.map(stack => ({ stack, status: 'active', timeBankMs: TIME_BANK_MS, autoCount: 0, place: null, pt: null })),
@@ -169,10 +170,10 @@ function dealHand(st, now, forcedBtn) {
   const live = seatsOf(st).map(s => isLive(P[s]));
   const h = {
     handNo: st.handNo + 1, level, sb, bb, ante, btn: pos.btn, sbSeat: pos.sbSeat, bbSeat: pos.bbSeat,
-    street: 0, deck, hole: Array(n).fill(null), board: [],
+    street: 0, deck, hole: new Array(n).fill(null), board: [],
     startStacks: seatsOf(st).map(s => (live[s] ? P[s].stack : 0)),
-    commits: Array(n).fill(0), streetBet: Array(n).fill(0),
-    folded: live.map(x => !x), allIn: Array(n).fill(false),
+    commits: new Array(n).fill(0), streetBet: new Array(n).fill(0),
+    folded: live.map(x => !x), allIn: new Array(n).fill(false),
     toAct: null, streetLastBetTo: 0, lastBetSize: bb, actions: [],
     turnStart: null, deadline: null, phase: 'betting',
     won: null, shown: null, names: null, eliminated: [], pots: null, runFrom: null, startedAt: now, endedAt: null,
@@ -246,7 +247,7 @@ function advanceStreets(st, now) {
 // 画面のボタン出し分けとサーバーの検証で同じ関数を使う。山札を使わないのでビューにも使える。
 // => null（その席の手番でない）| { seat, canFold, canCheck, toCall, callPut, minTo, maxTo, aggression, pot, streetLastBetTo }
 //    minTo/maxTo はベット/レイズの「〜まで」（できなければ null）。maxTo = 自分のオールイン額。
-export function legalActions(st, seat = st.hand && st.hand.toAct) {
+export function legalActions(st, seat = st.hand?.toAct) {
   const h = st.hand;
   if (!h || st.status !== 'running' || h.phase !== 'betting' || seat == null || h.toAct !== seat) return null;
   const stack = st.players[seat].stack;
@@ -273,9 +274,9 @@ function resolve(st, seat, move) {
   const L = legalActions(st, seat), h = st.hand;
   const bad = m => new EngineError('illegal', m);
   if (!L) throw new EngineError('not_your_turn');
-  const type = move && move.type, my = h.streetBet[seat], stack = st.players[seat].stack;
-  if (type === 'fold') { if (!L.canFold) throw bad('cannot fold'); return { kind: 'fold', betTo: h.streetLastBetTo, put: 0 }; }
-  if (type === 'check') { if (!L.canCheck) throw bad('cannot check'); return { kind: 'check', betTo: h.streetLastBetTo, put: 0 }; }
+  const type = move?.type, my = h.streetBet[seat], stack = st.players[seat].stack;
+  if (type === 'fold') { if (!L.canFold) { throw bad('cannot fold'); } return { kind: 'fold', betTo: h.streetLastBetTo, put: 0 }; }
+  if (type === 'check') { if (!L.canCheck) { throw bad('cannot check'); } return { kind: 'check', betTo: h.streetLastBetTo, put: 0 }; }
   if (type === 'call') {
     if (L.callPut === null) throw bad('nothing to call');
     return { kind: L.callPut >= stack ? 'allin' : 'call', betTo: my + L.callPut, put: L.callPut };
@@ -317,7 +318,7 @@ function applyResolved(st, seat, r, auto, now) {
 function runAutoTurns(st, now) {
   for (let guard = 0; guard < 500; guard++) {
     const h = st.hand;
-    if (st.status !== 'running' || !h || h.phase !== 'betting' || h.toAct == null || !autoPlays(st.players[h.toAct])) return;
+    if (st.status !== 'running' || h?.phase !== 'betting' || h.toAct == null || !autoPlays(st.players[h.toAct])) return;
     const s = h.toAct, L = legalActions(st, s);
     applyResolved(st, s, resolve(st, s, { type: L.canCheck ? 'check' : 'fold' }), true, now);
   }
@@ -373,7 +374,7 @@ function nextHandOrPause(st, now) {
 export function sitout(st, seat, now) {
   const p = st.players[seat];
   if (st.status !== 'running' && st.status !== 'paused') throw new EngineError('game_over');
-  if (!p || p.status !== 'active') throw new EngineError('illegal');
+  if (p?.status !== 'active') throw new EngineError('illegal');
   p.status = 'sitout';
   runAutoTurns(st, now);
   return bump(st);
@@ -382,7 +383,7 @@ export function sitout(st, seat, now) {
 export function sitin(st, seat, now) {
   const p = st.players[seat];
   if (st.status !== 'running' && st.status !== 'paused') throw new EngineError('game_over');
-  if (!p || p.status !== 'sitout') throw new EngineError('illegal');
+  if (p?.status !== 'sitout') throw new EngineError('illegal');
   p.status = 'active'; p.autoCount = 0;
   if (st.status === 'paused') { st.status = 'running'; st.pausedAt = null; nextHandOrPause(st, now); }
   return bump(st);
@@ -401,9 +402,9 @@ export function leave(st, seat, now) {
 const stillPlaying = st => seatsOf(st).filter(s => st.players[s].status === 'active' || st.players[s].status === 'sitout');
 /** 退出していない生存者が 1 人以下になったら終了する。生存者が 1 位、退出した席は（進行中のハンドの拠出を戻した）スタックの多い順に残りの順位 */
 function finishWithoutOpponents(st, now) {
-  const still = stillPlaying(st), h = st.hand, inHand = h && h.phase === 'betting';
+  const still = stillPlaying(st), h = st.hand, inHand = h?.phase === 'betting';
   const chips = seatsOf(st).map(s => st.players[s].stack + (inHand ? h.commits[s] : 0));   // 返却前に確定する（返却後に足すと二重計上になる）
-  if (inHand) { for (const s of seatsOf(st)) st.players[s].stack = chips[s]; st.hand = null; }
+  if (inHand) { for (const s of seatsOf(st)) { st.players[s].stack = chips[s]; } st.hand = null; }
   const pay = payoutsFor(st.config), used = new Set(st.players.map(x => x.place).filter(x => x != null));
   const open = []; for (let pl = 1; pl <= st.n; pl++) if (!used.has(pl)) open.push(pl);
   const rest = seatsOf(st).filter(s => st.players[s].place == null)
@@ -416,14 +417,14 @@ function finishWithoutOpponents(st, now) {
 function settle(st, now) {
   const h = st.hand, n = st.n, P = st.players;
   const contenders = seatsOf(st).filter(s => !h.folded[s]);
-  const won = Array(n).fill(0);
+  const won = new Array(n).fill(0);
   let pots = [];
   if (contenders.length === 1) {
     won[contenders[0]] = sum(h.commits);
     pots = [{ amount: sum(h.commits), eligible: contenders.slice(), winners: contenders.slice() }];
   } else {
     // 拠出額のレイヤごとにポットを作る（コールされなかった超過分は本人だけが対象のポット＝返却）
-    const score = Array(n).fill(-1);
+    const score = new Array(n).fill(-1);
     for (const s of contenders) score[s] = eval7([...h.hole[s], ...h.board]);
     const levels = [...new Set(h.commits.filter(c => c > 0))].sort((a, b) => a - b);
     let prev = 0;
@@ -434,8 +435,8 @@ function settle(st, now) {
       let amount = 0; for (let s = 0; s < n; s++) amount += Math.min(h.commits[s], lvl) - Math.min(h.commits[s], prev);
       let eligible = contenders.filter(s => h.commits[s] >= lvl);
       if (!eligible.length) eligible = contenders.slice();
-      const last = layers[layers.length - 1];
-      if (last && last.eligible.join() === eligible.join()) last.amount += amount;
+      const last = layers.at(-1);
+      if (last?.eligible.join() === eligible.join()) last.amount += amount;
       else layers.push({ amount, eligible });
       prev = lvl;
     }
@@ -479,7 +480,7 @@ function settle(st, now) {
  * h = 精算済みのハンド（ビューの hand でもよい）、fx = 席ごとの slug | null
  */
 export function fxSeat(h, fx) {
-  if (!fx || !h || h.phase !== 'settled' || !h.shown || h.runFrom == null || !h.won) return null;
+  if (!fx || h?.phase !== 'settled' || !h.shown || h.runFrom == null || !h.won) return null;
   let best = 0, seat = null, tie = false;
   h.won.forEach((w, s) => {
     const g = w - h.commits[s];
@@ -492,13 +493,13 @@ export function fxSeat(h, fx) {
 /** 精算済みのハンドの記録（ハンド履歴として各自の端末に保存する形）。holes は全員分なのでサーバーだけが持つ */
 export function handRecord(st) {
   const h = st.hand;
-  if (!h || h.phase !== 'settled') return null;
+  if (h?.phase !== 'settled') return null;
   return {
     rec: {
       handNo: h.handNo, playedAt: h.startedAt, endedAt: h.endedAt, level: h.level, sb: h.sb, bb: h.bb, ante: h.ante,
       btn: h.btn, sbSeat: h.sbSeat, bbSeat: h.bbSeat, startStacks: h.startStacks.slice(),
-      shown: h.shown ? h.shown.map(c => (c ? c.slice() : null)) : Array(st.n).fill(null),
-      names: h.names ? h.names.slice() : Array(st.n).fill(null),
+      shown: h.shown ? h.shown.map(c => (c ? c.slice() : null)) : new Array(st.n).fill(null),
+      names: h.names ? h.names.slice() : new Array(st.n).fill(null),
       board: h.board.slice(), actions: h.actions.map(a => ({ ...a })), won: h.won.slice(), pots: structuredClone(h.pots),
       eliminated: h.eliminated.map(e => ({ ...e })),
     },
@@ -514,12 +515,12 @@ export function viewFor(st, seat) {
   if (hand) {
     const { deck, hole, ...h } = hand;
     v.hand = structuredClone(h);
-    v.hand.hole = hole.map((c, s) => (c && (s === seat || (hand.shown && hand.shown[s])) ? c.slice() : null));
+    v.hand.hole = hole.map((c, s) => (c && (s === seat || hand.shown?.[s]) ? c.slice() : null));
   } else v.hand = null;
   return v;
 }
 
 /** 不変条件の確認（テスト用）：チップの合計は常に n × 開始スタック */
 export function totalChips(st) {
-  return sum(st.players.map(p => p.stack)) + (st.hand && st.hand.phase === 'betting' ? sum(st.hand.commits) : 0);
+  return sum(st.players.map(p => p.stack)) + (st.hand?.phase === 'betting' ? sum(st.hand.commits) : 0);
 }

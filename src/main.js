@@ -16,7 +16,7 @@ import { useDemo } from './klipy.js';
 app.net = realNet; // http://localhost:<port>/?fake では src/fakeNet.js に差し替える（開発のみ）
 
 const INVITE_KEY = 'pm-invite';
-const CODE = /^[0-9]{6}$/;
+const CODE = /^\d{6}$/;
 
 /* ---------- 画面 ---------- */
 function showScreen(n) {
@@ -26,12 +26,12 @@ function showScreen(n) {
 function toMenu() {
   ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate();
   showScreen('menu'); setPane('main');
-  if (app.user) refreshMe();
+  if (app.user) void refreshMe();
 }
 function enterRoom(id, first) {
   if (table.activeId() === id) return;
   table.leave(); closeAllDlg(); showScreen('menu');
-  if (first && first.view && !first.view.lobby) return enterTable(id);
+  if (first?.view && !first.view.lobby) return enterTable(id);
   room.enter(id, first);
 }
 function enterTable(id) {
@@ -44,9 +44,9 @@ let synced = false;
 async function refreshMe() {
   try { app.prof = await app.net.rpc('me'); }
   catch (e) { if (e.code === 'not_authenticated') { app.user = null; app.prof = null; } renderMenu(); return null; }
-  if (!synced && app.prof && app.prof.recent) { synced = true; syncRecent(app.prof.recent).then(() => stats.invalidate()); }
+  if (!synced && app.prof?.recent) { synced = true; syncRecent(app.prof.recent).then(() => stats.invalidate(), () => { /* この端末に保存できない：次の起動でまた試す */ }); }
   // 部屋に居る（再読み込みなど）：待機室か卓へ戻る
-  const r = app.prof && app.prof.room;
+  const r = app.prof?.room;
   if (r && !table.active() && !room.activeId()) { enterRoom(r.id); return app.prof; }
   renderMenu();
   takeInvite();
@@ -71,8 +71,8 @@ function takeInvite() {
   let code = null;
   try { code = sessionStorage.getItem(INVITE_KEY); sessionStorage.removeItem(INVITE_KEY); } catch (e) { /* ignore */ }
   const u = new URL(location.href);
-  if (u.searchParams.has('room')) { if (!code && CODE.test(u.searchParams.get('room'))) code = u.searchParams.get('room'); u.searchParams.delete('room'); history.replaceState(null, '', u.pathname + u.search + u.hash); }
-  if (code && app.prof && !app.prof.room) openJoin(code);
+  if (u.searchParams.has('room')) { if (!code && CODE.test(u.searchParams.get('room'))) { code = u.searchParams.get('room'); } u.searchParams.delete('room'); history.replaceState(null, '', u.pathname + u.search + u.hash); }
+  if (code && app.prof && !app.prof.room) void openJoin(code);
 }
 
 /* ---------- ヘッダ・ダイアログ ---------- */
@@ -115,6 +115,6 @@ async function boot() {
   stashInvite();
   await refreshMe();
 }
-boot();
 // アプリとしてインストールできるように（キャッシュはしない。public/sw.js）
 if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+await boot();

@@ -38,6 +38,37 @@ const toRoom = r => ({
   members: r.members, names: r.names, fx: r.fx ?? null, state: r.state, ver: r.ver, rematch: r.rematch ?? null, createdAt: Math.round(r.created_ms), startedAt: r.started_ms == null ? null : Math.round(r.started_ms),
 });
 
+// uuid の文字列順
+const byText = (a, b) => (a < b ? -1 : Number(a > b));
+
+// 本人のプロフィールをロックして名前を返す
+async function lockMe(c, uid) {
+  const r = await c.query('select nickname from public.profiles where uid=$1 for update', [uid]);
+  if (!r.rows[0]) throw new MoveError('no_profile');
+  return r.rows[0].nickname;
+}
+async function activeRoom(c, uid) {
+  const r = await c.query('select public.active_room($1) as id', [uid]);
+  return r.rows[0].id;
+}
+async function load(c, id) {
+  const r = await c.query(`select ${COLS} from public.rooms where id=$1 for update`, [id]);
+  if (!r.rows[0]) throw new MoveError('not_found');
+  return toRoom(r.rows[0]);
+}
+async function save(c, room, record) {
+  const views = viewsOf(room), ended = !['waiting', 'running', 'paused'].includes(room.status);
+  await c.query(`update public.rooms set status=$2,started=$3,members=$4::uuid[],names=$5::text[],state=$6,ver=$7,views=$8,due_ms=$9,updated_at=now(),
+      started_at=case when $3 and started_at is null then now() else started_at end,ended_at=case when $10 then coalesce(ended_at,now()) else null end,rematch=$11,fx=$12 where id=$1`,
+    [room.id, room.status, room.started, room.members, room.names, room.state == null ? null : JSON.stringify(room.state), room.ver, JSON.stringify(views), dueOf(room), ended,
+      room.rematch == null ? null : JSON.stringify(room.rematch), room.fx == null ? null : JSON.stringify(room.fx)]);
+  if (record) {
+    await c.query('insert into public.room_hands(room,hand_no,rec,holes) values($1,$2,$3,$4) on conflict do nothing',
+      [room.id, record.rec.handNo, JSON.stringify(record.rec), JSON.stringify(record.holes)]);
+  }
+  return views;
+}
+
 export function makeDb(pool, deps = {}) {
   const now = deps.now ?? Date.now, rnd = deps.rnd ?? secureRnd;
 
@@ -46,33 +77,6 @@ export function makeDb(pool, deps = {}) {
     return { room: room.id, ver: room.ver, now: now(), view: pos < 0 ? null : room.started ? views[pos] : views[0] };
   };
 
-  // 本人のプロフィールをロックして名前を返す
-  async function lockMe(c, uid) {
-    const r = await c.query('select nickname from public.profiles where uid=$1 for update', [uid]);
-    if (!r.rows[0]) throw new MoveError('no_profile');
-    return r.rows[0].nickname;
-  }
-  async function activeRoom(c, uid) {
-    const r = await c.query('select public.active_room($1) as id', [uid]);
-    return r.rows[0].id;
-  }
-  async function load(c, id) {
-    const r = await c.query(`select ${COLS} from public.rooms where id=$1 for update`, [id]);
-    if (!r.rows[0]) throw new MoveError('not_found');
-    return toRoom(r.rows[0]);
-  }
-  async function save(c, room, record) {
-    const views = viewsOf(room), ended = !['waiting', 'running', 'paused'].includes(room.status);
-    await c.query(`update public.rooms set status=$2,started=$3,members=$4::uuid[],names=$5::text[],state=$6,ver=$7,views=$8,due_ms=$9,updated_at=now(),
-        started_at=case when $3 and started_at is null then now() else started_at end,ended_at=case when $10 then coalesce(ended_at,now()) else null end,rematch=$11,fx=$12 where id=$1`,
-      [room.id, room.status, room.started, room.members, room.names, room.state == null ? null : JSON.stringify(room.state), room.ver, JSON.stringify(views), dueOf(room), ended,
-        room.rematch == null ? null : JSON.stringify(room.rematch), room.fx == null ? null : JSON.stringify(room.fx)]);
-    if (record) {
-      await c.query('insert into public.room_hands(room,hand_no,rec,holes) values($1,$2,$3,$4) on conflict do nothing',
-        [room.id, record.rec.handNo, JSON.stringify(record.rec), JSON.stringify(record.holes)]);
-    }
-    return views;
-  }
   // 部屋の 1 手（rules の関数を適用して保存）
   const step = fn => (uid, id, ...args) => tx(pool, async c => {
     const room = await load(c, id);
@@ -83,7 +87,7 @@ export function makeDb(pool, deps = {}) {
 
   return {
     // 連打の制限（handler がログイン済みのリクエストごとに呼ぶ）。=> 上限の内なら true。neon_auth に居ない人は数えない（この先で no_profile / not_found になる）
-    flood: uid => pool.query("select public.rate_hit($1,'req') as ok", [uid]).then(r => r.rows[0].ok, e => { if (e && e.code === '23503') return true; throw e; }),
+    flood: uid => pool.query("select public.rate_hit($1,'req') as ok", [uid]).then(r => r.rows[0].ok, e => { if (e?.code === '23503') { return true; } throw e; }),
 
     create: (uid, kind, config, fx) => tx(pool, async c => {
       await c.query('select public.purge_rooms()');
@@ -132,7 +136,7 @@ export function makeDb(pool, deps = {}) {
       const pre = await c.query('select members,rematch from public.rooms where id=$1', [id]);
       if (!pre.rows[0]) throw new MoveError('not_found');
       const stay = (pre.rows[0].rematch?.stay ?? []).map(s => pre.rows[0].members[s]);
-      const uids = [...new Set([uid, ...stay])].filter(Boolean).sort();
+      const uids = [...new Set([uid, ...stay])].filter(Boolean).sort(byText);
       const prof = await c.query('select uid,nickname from public.profiles where uid = any($1::uuid[]) order by uid for update', [uids]);
       if (!prof.rows.some(r => r.uid === uid)) throw new MoveError('no_profile');
       const names = new Map(prof.rows.map(r => [r.uid, r.nickname]));

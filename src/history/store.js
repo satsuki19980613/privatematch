@@ -89,7 +89,7 @@ const str = (v, max = 200) => typeof v === 'string' && v.length <= max;
 const card = c => int(c) && c >= 0 && c < 52;
 const cards = v => v == null || (Array.isArray(v) && v.length <= 5 && v.every(card));
 const nums = (v, n = 6) => Array.isArray(v) && v.length <= n && v.every(x => x == null || num(x));
-const KINDS = ['fold', 'check', 'call', 'bet', 'raise', 'allin'];
+const KINDS = new Set(['fold', 'check', 'call', 'bet', 'raise', 'allin']);
 const MAX_ACTIONS = 1000;   // 1 ハンドのアクション数（実際は多くて数十。読み込むファイルで画面が固まらないための上限）
 export function validGame(g) {
   return !!g && typeof g === 'object' && str(g.roomId, 64) && optInt(g.seat) && g.seat >= 0 && g.seat < 6 &&
@@ -104,7 +104,7 @@ export function validHand(h) {
     optInt(h.btn) && optInt(h.sbSeat) && int(h.bbSeat) && nums(h.startStacks) && Array.isArray(h.board) && cards(h.board) && cards(h.hole) &&
     Array.isArray(h.shown) && h.shown.length <= 6 && h.shown.every(x => x == null || x === false || (Array.isArray(x) && x.every(card))) &&
     Array.isArray(h.names) && h.names.every(x => x == null || str(x, 64)) &&
-    Array.isArray(h.actions) && h.actions.length <= MAX_ACTIONS && h.actions.every(a => a && int(a.seat) && a.seat >= 0 && a.seat < 6 && int(a.street) && a.street >= 0 && a.street <= 3 && KINDS.includes(a.kind) && optNum(a.betTo) && optNum(a.put)) &&
+    Array.isArray(h.actions) && h.actions.length <= MAX_ACTIONS && h.actions.every(a => a && int(a.seat) && a.seat >= 0 && a.seat < 6 && int(a.street) && a.street >= 0 && a.street <= 3 && KINDS.has(a.kind) && optNum(a.betTo) && optNum(a.put)) &&
     Array.isArray(h.pots) && h.pots.every(p => p && num(p.amount) && Array.isArray(p.winners) && p.winners.every(int)) &&
     Array.isArray(h.eliminated) && h.eliminated.every(e => e && int(e.seat) && int(e.place)) && Array.isArray(h.won);
 }
@@ -113,7 +113,7 @@ const newer = (cur, g) => cur && (cur.status !== 'running' && g.status === 'runn
 
 /** 読み込み（同じ試合・ハンドは上書き。ただし端末のほうが進んだ試合はそのまま）。=> 保存した試合数 */
 export async function importAll(data) {
-  if (!data || data.app !== 'privatematch' || !Array.isArray(data.games) || !Array.isArray(data.hands)) throw new Error('format');
+  if (data?.app !== 'privatematch' || !Array.isArray(data.games) || !Array.isArray(data.hands)) throw new Error('format');
   const games = data.games.filter(validGame), hands = data.hands.filter(validHand);
   const db = await open(), t = db.transaction(['games', 'hands'], 'readwrite'), gs = t.objectStore('games'), hs = t.objectStore('hands');
   let n = 0;

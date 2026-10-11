@@ -88,7 +88,7 @@ async function startShowcase(kind) {
   try {
     const r = await app.net.game({ op: 'create', kind: 'private', config: DEFAULT_CONFIG, demo: kind, fx: getFx() });
     app.nav.enterRoom(r.room, r);
-  } catch (e) { toast('始められませんでした'); }
+  } catch { toast('始められませんでした'); }
 }
 function bindMain(el) {
   el.querySelector('#meBtn').onclick = openProfile;
@@ -132,11 +132,11 @@ function startFree() {
   stopFree(); const gen = ++freeGen; freeList = null;
   const tick = async () => {
     if (gen !== freeGen) return;
-    try { const r = await app.net.rpc('free_rooms'); if (gen !== freeGen) return; freeList = Array.isArray(r) ? r : []; if (pane === 'free') renderMenu(); }
-    catch (e) { if (gen === freeGen && freeList === null) { freeList = []; if (pane === 'free') renderMenu(); } }
+    try { const r = await app.net.rpc('free_rooms'); if (gen !== freeGen) { return; } freeList = Array.isArray(r) ? r : []; if (pane === 'free') renderMenu(); }
+    catch { if (gen === freeGen && freeList === null) { freeList = []; if (pane === 'free') renderMenu(); } }
     if (gen === freeGen) freeTimer = setTimeout(tick, document.hidden ? FREE_POLL_MS * 3 : FREE_POLL_MS);
   };
-  tick();
+  void tick();
 }
 function stopFree() { freeGen++; clearTimeout(freeTimer); }
 
@@ -171,7 +171,7 @@ function bindCreate(el) {
   });
   const btn = el.querySelector('#createBtn');
   btn.onclick = async () => {
-    if (btn.disabled) return; btn.disabled = true;
+    if (btn.disabled) { return; } btn.disabled = true;
     try {
       // 演出 GIF は PRIVATE MATCH だけ（FREE MATCH には送らない）
       const r = await app.net.game({ op: 'create', kind: createKind, config: cfg, ...(createKind === 'private' ? { fx: getFx() } : {}) });
@@ -220,8 +220,8 @@ export async function openJoin(code) {
   };
 }
 export function showJoinError(e) {
-  const code = e && e.code;
-  if (code === 'in_other_room' && e.data && e.data.room) { toast('参加中の部屋があります'); app.nav.enterRoom(e.data.room); return; }
+  const code = e?.code;
+  if (code === 'in_other_room' && e.data?.room) { toast('参加中の部屋があります'); app.nav.enterRoom(e.data.room); return; }
   toast({ room_full: '満員です', room_closed: 'この部屋には参加できません', not_found: '部屋が見つかりません', busy: '混み合っています。もう一度', too_many: '回数が多すぎます。しばらく待ってから',
     malformed: '設定を確かめてください' }[code] || '通信エラー。もう一度');
 }
@@ -237,7 +237,7 @@ export function openProfile() {
   openDlg('#profDlg');
   $('#nickSave').onclick = saveNick;
   $('#logoutBtn').onclick = async () => { $('#profDlg').close(); await app.nav.logout(); };
-  $('#nickIn').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); saveNick(); } };
+  $('#nickIn').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); void saveNick(); } };
 }
 async function saveNick() {
   const v = $('#nickIn').value.trim(), err = $('#nickErr');

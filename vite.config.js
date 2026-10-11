@@ -1,6 +1,6 @@
 import{readFileSync}from'node:fs';
 import{defineConfig,loadEnv}from'vite';
-import{AUTH_PROXY_PREFIX,authCookies,firstPartyCookie,isProxiedPath}from'./src/authProxy.js';
+import{AUTH_PROXY_PREFIX,authCookies,firstPartyCookie,isProxiedPath,noTrail}from'./src/authProxy.js';
 
 // headers of public/_headers (Cloudflare Pages) for `npm run preview`
 function pagesHeaders(){
@@ -20,10 +20,10 @@ function authProxy(authUrl){
   return{[AUTH_PROXY_PREFIX]:{
     target:upstream.origin,changeOrigin:true,
     bypass:req=>isProxiedPath((req.url??'').split('?')[0].slice(AUTH_PROXY_PREFIX.length))?undefined:false,
-    rewrite:p=>upstream.pathname.replace(/\/+$/,'')+p.slice(AUTH_PROXY_PREFIX.length),
+    rewrite:p=>noTrail(upstream.pathname)+p.slice(AUTH_PROXY_PREFIX.length),
     configure:proxy=>{
       proxy.on('proxyReq',r=>{const c=r.getHeader('cookie'),kept=authCookies(typeof c==='string'?c:null);if(kept)r.setHeader('cookie',kept);else r.removeHeader('cookie')});
-      proxy.on('proxyRes',res=>{const c=res.headers['set-cookie'];if(c)res.headers['set-cookie']=c.map(firstPartyCookie);for(const k of Object.keys(res.headers))if(k.startsWith('access-control-'))delete res.headers[k]});
+      proxy.on('proxyRes',res=>{const c=res.headers['set-cookie'];if(c){res.headers['set-cookie']=c.map(firstPartyCookie)}for(const k of Object.keys(res.headers))if(k.startsWith('access-control-'))delete res.headers[k]});
     },
   }};
 }

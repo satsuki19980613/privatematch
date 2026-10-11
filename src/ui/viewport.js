@@ -30,7 +30,7 @@ function probeInsets() {
   p.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
     'padding-top:env(safe-area-inset-top,0px);padding-bottom:max(env(safe-area-inset-bottom,0px),env(safe-area-max-inset-bottom,0px))';
   document.body.appendChild(p);
-  const cs = getComputedStyle(p), top = parseFloat(cs.paddingTop) || 0, bottom = parseFloat(cs.paddingBottom) || 0;
+  const cs = getComputedStyle(p), top = Number.parseFloat(cs.paddingTop) || 0, bottom = Number.parseFloat(cs.paddingBottom) || 0;
   p.remove();
   return { top, bottom };
 }
@@ -57,12 +57,12 @@ export function snapshot() {
   snap = true;
 }
 const stage = () => document.getElementById('stage');
-const cwNow = () => parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
+const cwNow = () => Number.parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
 const lane = () => document.getElementById('chatLane');   // its width is decided by the fit too (chat.js fitsLane)
-const lwNow = () => { const l = lane(); return l ? [parseFloat(l.style.width) || 0, parseFloat(l.style.getPropertyValue('--lane-dy')) || 0] : null; };
+const lwNow = () => { const l = lane(); return l ? [Number.parseFloat(l.style.width) || 0, Number.parseFloat(l.style.getPropertyValue('--lane-dy')) || 0] : null; };
 
 function setVars(h, cw, kbp, kbm, lw) {
-  const l = lw && lw[0] ? lane() : null;
+  const l = lw?.[0] ? lane() : null;
   if (l) { l.style.width = Math.round(lw[0] * 10) / 10 + 'px'; l.style.setProperty('--lane-dy', Math.round(lw[1] * 10) / 10 + 'px'); }
   cur.h = h; cur.kbp = kbp; cur.kbm = kbm;
   root.style.setProperty('--app-h', Math.round(h * 100) / 100 + 'px');
@@ -88,14 +88,14 @@ function glide(h1, kb) {
   // 1) the final state, measured synchronously (nothing is painted in between)
   setVars(h1, 0, kb ? 1 : 0, 0);
   let to = { h: h1, cw: from.cw, kbp: kb ? 1 : 0, kbm: 0, lw: from.lw };
-  const ls = H.laneSave && H.laneSave();
-  const m = H.measure && H.measure();
+  const ls = H.laneSave?.();
+  const m = H.measure?.();
   if (m) {
     to.cw = m.cw; to.lw = lwNow();
     // too small for a usable table (landscape phones, short screens): keep the cards, fade the table out
     if (kb && t0h && (m.tableH < 170 || m.cw < Math.max(22, (preKbCw || m.cw) * .5))) {
       to.cw = preKbCw || from.cw; to.kbm = 1; to.lw = from.lw;
-      H.laneLoad && H.laneLoad(ls);
+      H.laneLoad?.(ls);
       // scale so that the table ends just above the lane (which moves to the bottom of the table's area)
       stage()?.style.setProperty('--cw', to.cw + 'px');   // the lane's height follows the card size
       const ln = lane(), lh = ln && !ln.hidden ? ln.offsetHeight : 0;
@@ -109,7 +109,7 @@ function glide(h1, kb) {
   if (REDUCE || !from.h) { finish(to); return; }
   const t0 = performance.now();
   const step = now => {
-    const p = Math.min(1, (now - t0) / (DUR * ((import.meta.env && import.meta.env.DEV && window.__glideSlow) || 1))), e = ease(p);
+    const p = Math.min(1, (now - t0) / (DUR * ((import.meta.env?.DEV && window.__glideSlow) || 1))), e = ease(p);
     setVars(from.h + (to.h - from.h) * e, from.cw + (to.cw - from.cw) * e, from.kbp + (to.kbp - from.kbp) * e, from.kbm + (to.kbm - from.kbm) * e,
       from.lw && to.lw && from.lw[0] && to.lw[0] ? [0, 1].map(i => from.lw[i] + (to.lw[i] - from.lw[i]) * e) : null);
     if (p < 1) anim.raf = requestAnimationFrame(step);
@@ -122,7 +122,7 @@ function finish(to) {
   setVars(to.h, to.cw, to.kbp, to.kbm, to.lw);
   if (!to.kbp) document.body.classList.remove('kb');
   if (!to.kbm) document.body.classList.remove('kbmin');
-  H.done && H.done();
+  H.done?.();
 }
 
 function apply() {
@@ -139,7 +139,7 @@ function apply() {
   if (w !== baseW) { baseW = w; baseH = focused ? Math.max(r, window.innerHeight) : r; }
   if (!focused) baseH = Math.max(baseH, r);
   // the demo keyboard is up only while the input has focus, and gives way when a real keyboard turns up after all
-  if (sim.on && (!focused || (!sim.forced && baseH - r > KB_PX))) { if (focused) sim.real = true; sim.on = false; }
+  if (sim.on && (!focused || (!sim.forced && baseH - r > KB_PX))) { if (focused) { sim.real = true; } sim.on = false; }
   const h = visible(); simShow();
   const kb = focused && baseH - h > KB_PX;
   const wasKb = document.body.classList.contains('kb');
@@ -147,7 +147,7 @@ function apply() {
   // the keyboard is still on its way to where the predicted glide is heading: keep going
   if (pred && !turned && w === lastW && (pred.up ? focused && h > pred.h : !focused && h < pred.h)) return;
   if (kb && !sim.on && !turned && w === lastW) remember(baseH - h);
-  if (anim && anim.to.h === h && !!anim.to.kbp === kb) return;   // already heading there
+  if (anim?.to.h === h && !!anim.to.kbp === kb) return;   // already heading there
   if (inGame && cur.h && w === lastW && (kb || wasKb) && H.measure) {
     lastW = w;
     if (!anim && kb && wasKb && Math.abs(cur.h - h) < .5) return;   // already there

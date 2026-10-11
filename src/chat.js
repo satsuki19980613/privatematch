@@ -51,7 +51,7 @@ const BREAK = /[\s、。，．,.!?！？…・」』）)]$/u;
 export function splitChat(s, max = BUBBLE_MAX_UNITS) {
   s = String(s ?? '');
   const gs = graphemes(s), P = [0];
-  for (const g of gs) P.push(P[P.length - 1] + chatUnits(g));
+  for (const g of gs) P.push(P.at(-1) + chatUnits(g));
   const total = P[gs.length];
   if (total <= max) return [s];
   const out = [];
@@ -76,7 +76,7 @@ export function splitChat(s, max = BUBBLE_MAX_UNITS) {
 const SPACES = /[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/gu;
 // 削除するもの：制御文字・孤立サロゲート、見えない文字・ゼロ幅・方向制御（20261006000000_hardening.sql の set_nickname と同じ集合）
 // ZWJ（U+200D）だけは絵文字どうしをつなぐもの（👨‍👩‍👧 など）を残す
-const INVISIBLE = /(?<![\p{Extended_Pictographic}\uFE0F\u{1F3FB}-\u{1F3FF}])\u200D|\u200D(?!\p{Extended_Pictographic})|[\p{Cc}\p{Cs}\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u2000-\u200C\u200E\u200F\u2028-\u202F\u205F-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFC]/gu;
+const INVISIBLE = /(?<![\u{1F3FB}-\u{1F3FF}\p{Extended_Pictographic}\uFE0F])\u200D|\u200D(?!\p{Extended_Pictographic})|[\p{Cc}\p{Cs}\u034F\u17B4\u17B5\u180B-\u180F\u00AD\u061C\u115F\u1160\u2000-\u200C\u200E\u200F\u2028-\u202F\u205F-\u206F\u2800\u3164\uFEFF\uFFA0\uFFF9-\uFFFC]/gu;
 
 const BLANK = /[\p{M}\p{Cf}\p{Z}\uFE00-\uFE0F\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\u{1D173}-\u{1D17A}]/gu;
 

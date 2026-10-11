@@ -110,7 +110,7 @@ export function mergeStats(parts) {
   let hands = 0, games = 0, netBb = 0;
   const vpip = { n: 0, d: 0 }, pfr = { n: 0, d: 0 }, won = { n: 0, d: 0 };
   for (const p of parts) {
-    if (!p || !p.hands) continue;
+    if (!p?.hands) continue;
     games++; hands += p.hands; netBb += p.netBb;
     for (const [a, b] of [[vpip, p.vpip], [pfr, p.pfr], [won, p.won]]) { a.n += b.n; a.d += b.d; }
   }

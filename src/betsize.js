@@ -17,7 +17,7 @@ export const DEFAULT_SIZES = Object.freeze({
   bet: ['33%', '50%', '67%', '100%'],
   vsBet: ['2x', '2.5x', '3x', '4x'],
 });
-export const defaultSizes = () => JSON.parse(JSON.stringify(DEFAULT_SIZES));
+export const defaultSizes = () => structuredClone(DEFAULT_SIZES);
 
 /** '2.5x' → { v: 2.5, u: 'x' }（形が違えば null） */
 export function parseSize(s) {
@@ -26,7 +26,7 @@ export function parseSize(s) {
 }
 /** 数と単位から候補を作る（範囲外・単位違いは null）。bb と x は小数 2 桁、% は整数 */
 export function makeSize(scene, v, u) {
-  if (!UNITS[scene] || !UNITS[scene].includes(u)) return null;
+  if (!UNITS[scene]?.includes(u)) return null;
   const n = u === '%' ? Math.round(+v) : Math.round(+v * 100) / 100;
   if (!Number.isFinite(n) || n < LIMIT[u][0] || n > LIMIT[u][1]) return null;
   return n + u;
@@ -38,7 +38,7 @@ export function sortSizes(scene, list) {
 }
 /** 保存されていたもの（壊れていてもよい）→ 正しい設定。足りないところは既定値 */
 export function normalizeSizes(raw) {
-  const d = defaultSizes(), out = { step: STEPS.includes(raw && raw.step) ? raw.step : d.step };
+  const d = defaultSizes(), out = { step: STEPS.includes(raw?.step) ? raw.step : d.step };
   for (const sc of SCENES) {
     const src = raw && Array.isArray(raw[sc]) ? raw[sc] : d[sc], seen = new Set();
     const ok = [];

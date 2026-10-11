@@ -10,6 +10,7 @@ import { syncRoom } from '../history/sync.js';
 import * as chat from './chat.js';
 import { viewportHooks, gliding } from './viewport.js';
 import { quickSizes, stepChips } from '../betsize.js';
+import { secureRnd } from '../rnd.js';
 import { getSizes } from './settings.js';
 import { markOf, onNotes } from '../history/notes.js';
 import * as fxshow from './fxshow.js';
@@ -37,8 +38,8 @@ export function enter(id) {
   $('#table').classList.toggle('u-chip', chipUnit);
   syncHeader();
   refit();
-  poll();
-  T.tickTimer = setInterval(() => { maybeTick(); tickClock(); }, 400);
+  void poll();
+  T.tickTimer = setInterval(() => { void maybeTick(); tickClock(); }, 400);
 }
 export function leave() {
   if (!T) return;
@@ -63,19 +64,19 @@ export const currentView = () => (T ? T.v : null);
 function syncHeader() {
   const lb = $('#leaveBtn');
   // 卓に居る間は常に出す（観戦中・終局後は確かめずにメニューへ）
-  if (lb) lb.hidden = !T || !T.v || T.leaving;
+  if (lb) lb.hidden = !T?.v || T.leaving;
 }
 /** 自分はもう打っていない（飛んだ・退出した・終局した）＝観戦 */
 const watching = v => v.status === 'finished' || v.status === 'cancelled' || ['out', 'left'].includes(v.players[v.seat].status);
 export function askLeave() {
-  const t = T; if (!t || !t.v || t.leaving) return;
+  const t = T; if (!t?.v || t.leaving) return;
   const btns = '<div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn danger" id="leaveOk" type="button">Leave</button></div>';
   if (watching(t.v)) {
     // 観戦中・終局後も確かめてからメニューへ（席に残って再戦を待っているなら、その待ちから外れる）
     const v = t.v, rm = v.rematch, staying = rematchLive(v) && rm.stay.includes(v.seat);
     $('#leaveBody').innerHTML = head('LEAVE', '退出しますか？') + (staying ? '<p>再戦の待機から外れます。</p>' : '') + btns;
     openDlg('#leaveDlg');
-    $('#leaveOk').onclick = () => { if (T !== t) return; $('#leaveDlg').close(); toMenu(); };
+    $('#leaveOk').onclick = () => { if (T !== t) { return; } $('#leaveDlg').close(); toMenu(); };
     return;
   }
   $('#leaveBody').innerHTML = head('LEAVE', '退出しますか？') +
@@ -93,7 +94,7 @@ export function askLeave() {
 
 /* ===================== 同期 ===================== */
 async function poll() {
-  const t = T; if (!t) return; clearTimeout(t.timer);
+  const t = T; if (!t) { return; } clearTimeout(t.timer);
   try {
     const r = await net().rpc('room_poll', { p_room: t.id, p_ver: t.ver });
     if (t !== T) return;
@@ -106,28 +107,28 @@ async function poll() {
     if (e.code === 'not_found') { toast('卓が見つかりません'); return app.nav.toMenu(); }
   }
   if (t !== T) return;
-  maybeTick();
+  void maybeTick();
   const v = t.v;
   // 終わった：もう読まない（再戦の受付中は、残った人と再戦の開始を知るために読み続ける）
   if (v && (v.status === 'cancelled' || (v.status === 'finished' && !rematchLive(v)))) return;
-  const mine = v && v.hand && v.hand.toAct === v.seat;
-  t.timer = setTimeout(poll, document.hidden ? 4000 : v && v.status === 'finished' ? 1500 : mine ? 2500 : 1000);
+  const mine = v?.hand && v.hand.toAct === v.seat;
+  t.timer = setTimeout(poll, document.hidden ? 4000 : v?.status === 'finished' ? 1500 : mine ? 2500 : 1000);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && T) poll(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && T) void poll(); });
 
 // 期限を過ぎたものを進める（時間切れ・次のハンド・一時停止の期限）。判断はサーバー。409 not_yet は普通のこと
 async function maybeTick() {
-  const t = T, v = t && t.v; if (!v || t.tickBusy || t.busy || Date.now() < t.tickAt) return;
+  const t = T, v = t?.v; if (!v || t.tickBusy || t.busy || Date.now() < t.tickAt) return;
   if (v.status !== 'running' && v.status !== 'paused') return;
   const at = dueAt(v); if (at == null) return;
-  const grace = v.status === 'running' && v.hand && v.hand.phase === 'betting' ? GRACE_MS : 0;
+  const grace = v.status === 'running' && v.hand?.phase === 'betting' ? GRACE_MS : 0;
   if (clock.now() < at + grace) return;
   t.tickBusy = true;
   try {
     const r = await net().game({ op: 'tick', room: t.id });
     if (t === T) { clock.offset = r.now - Date.now(); receive(r.view); }
   } catch (e) {
-    if (t === T) t.tickAt = Date.now() + (e.code === 'not_yet' ? 500 + Math.random() * 500 : 1500);
+    if (t === T) t.tickAt = Date.now() + (e.code === 'not_yet' ? 500 + secureRnd() * 500 : 1500);
   } finally { t.tickBusy = false; }
 }
 
@@ -158,7 +159,7 @@ document.addEventListener('visibilitychange', () => { if (T) pump(); });
 function apply(v, instant) {
   const t = T; if (!v || v.ver <= t.ver || v.lobby) return;
   // 再戦が始まった：席に残っていれば新しい卓へ
-  if (v.rematch && v.rematch.next && v.rematch.stay.includes(v.seat)) { closeOver(); toast('REMATCH'); app.nav.enterTable(v.rematch.next.id); return; }
+  if (v.rematch?.next && v.rematch.stay.includes(v.seat)) { closeOver(); toast('REMATCH'); app.nav.enterTable(v.rematch.next.id); return; }
   const prev = t.v;
   t.v = v; t.ver = v.ver;
   const h = v.hand;
@@ -168,13 +169,13 @@ function apply(v, instant) {
   const p = !instant && t.sh.init && !document.hidden ? plan(prev, v) : null;
   if (p && p.kind !== 'init' && p.kind !== 'none') startStage(p, v);
   t.holdUntil = Date.now() + (p ? p.hold : 0);
-  if (h && h.toAct === v.seat && (!prev || !prev.hand || prev.hand.toAct !== v.seat || prev.hand.handNo !== h.handNo || prev.hand.street !== h.street))
+  if (h && h.toAct === v.seat && (!prev?.hand || prev.hand.toAct !== v.seat || prev.hand.handNo !== h.handNo || prev.hand.street !== h.street))
     t.lockUntil = Date.now() + (p ? p.turnAt : 0) + PACE.lock;
   // ベットのシートは開いたときの手番のものだけ（手番が移った・街やハンドが変わった・遷移を見せ始めた）
   if ((t.rs || sheetOpen()) && (!(h && h.toAct === v.seat && h.phase === 'betting' && v.status === 'running') || !t.rs || t.rs.handNo !== h.handNo || t.rs.street !== h.street || stage())) closeSheet();
   // 終わったハンドを端末に写す（少し待ってまとめて）
   // （演出の間はハンド履歴に結果が出ないよう、終わってから）
-  if (h && h.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (p && p.veil ? p.hold + runoutMs(h.runFrom) + (fxOf(v) != null ? FX_MS : 0) : 0)); }
+  if (h?.phase === 'settled' && h.handNo > t.synced) { t.synced = h.handNo; clearTimeout(t.syncT); t.syncT = setTimeout(() => syncRoom(t.id), 800 + (p?.veil ? p.hold + runoutMs(h.runFrom) + (fxOf(v) != null ? FX_MS : 0) : 0)); }
   chat.onView(v);
   if (privateRoom(v) && v.fx) fxshow.prepare(v.fx);   // 勝者の演出 GIF を先に読んでおく
   render();
@@ -185,11 +186,11 @@ function apply(v, instant) {
 /* ---------- 遷移を 1 拍ずつ見せる（src/pace.js の plan を時間どおりに当てる） ---------- */
 /** 見せている途中の遷移（無ければ null）。bets / shown / board は、その時点で見せるベット・アクションの数・ボードの枚数 */
 function stage() {
-  const t = T, h = t && t.v && t.v.hand;
-  return t && t.sg && !t.sg.done && h && t.sg.handNo === h.handNo ? t.sg : null;
+  const t = T, h = t?.v?.hand;
+  return t?.sg && !t.sg.done && h && t.sg.handNo === h.handNo ? t.sg : null;
 }
 /** 結果を伏せている間（ショーダウンの演出、フォールドで終わる前の一拍）なら その状態 */
-function veiled() { const sg = stage(); return runout() || (sg && sg.veil ? sg : null); }
+function veiled() { const sg = stage(); return runout() || (sg?.veil ? sg : null); }
 function startStage(p, v) {
   const t = T, h = v.hand;
   const sg = t.sg = { handNo: h.handNo, kind: p.kind, veil: p.veil, board: p.board, bets: p.bets0, shown: p.shown0, street: p.street0, adj: null,
@@ -199,12 +200,12 @@ function startStage(p, v) {
     const go = () => { Object.assign(sg, { bets: st.bets, shown: st.shown, street: st.street, adj: st.adj }); if (i) render(); };
     if (i === 0) go(); else at(st.at, go);
   });
-  if (p.gatherAt != null) at(p.gatherAt, () => { gather(); sg.bets = sg.bets && sg.bets.map(() => 0); sg.adj = null; render(); });
+  if (p.gatherAt != null) at(p.gatherAt, () => { gather(); sg.bets = sg.bets?.map(() => 0); sg.adj = null; render(); });
   if (p.revealAt != null) at(p.revealAt, () => { sg.board = null; sg.veil = false; sg.shown = null; sg.street = null; render(); });
   if (p.runoutAt != null) at(p.runoutAt, () => { finishStage(false); startRunout(v); render(); });
   else at(p.turnAt, () => finishStage(true));
 }
-function endStage() { const sg = T && T.sg; if (sg && !sg.done) { sg.done = true; sg.timers.forEach(clearTimeout); } }
+function endStage() { const sg = T?.sg; if (sg && !sg.done) { sg.done = true; sg.timers.forEach(clearTimeout); } }
 function finishStage(show) {
   endStage();
   if (show) { render(); autoPre(); checkResult(); }
@@ -239,7 +240,7 @@ function rematchLive(v) {
   const rm = v.rematch;
   return !!rm && !rm.next && clock.now() < rm.closesAt && !rm.gone.includes(v.seat);
 }
-const stayTag = (v, s) => (v.rematch && v.rematch.stay.includes(s) && !v.rematch.next ? '<span class="stay-b">STAY</span>' : '');
+const stayTag = (v, s) => (v.rematch?.stay.includes(s) && !v.rematch.next ? '<span class="stay-b">STAY</span>' : '');
 function closeOver() { const d = $('#overDlg'); if (d.open) d.close(); }
 function showResult() {
   const t = T; t.resultShown = true;
@@ -264,23 +265,23 @@ function showResult() {
   $('#overBody').onclick = e => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'watch') { dlg.close(); render(); }
-    if (b.dataset.act === 'stay') stay();
+    if (b.dataset.act === 'stay') void stay();
     if (b.dataset.act === 'menu') toMenu();
   };
   dlg.oncancel = e => e.preventDefault();
 }
 
 /* ---------- 再戦 ---------- */
-const privateRoom = v => !!(v && v.room && v.room.kind === 'private');
+const privateRoom = v => v?.room?.kind === 'private';
 // 席に残る・再戦で送る演出 GIF（試合の途中で設定を変えた分も再戦に入る。PRIVATE MATCH だけ）
-const fxBody = () => (privateRoom(T && T.v) ? { fx: getFx() } : {});
+const fxBody = () => (privateRoom(T?.v) ? { fx: getFx() } : {});
 async function stay() {
   const t = T; if (!t || t.rmBusy) return;
   t.rmBusy = true; if ($('#overDlg').open) showResult();
   try {
     const r = await net().game({ op: 'stay', room: t.id, ...fxBody() });
     if (T !== t) return;
-    t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); poll();
+    t.rmBusy = false; clock.offset = r.now - Date.now(); receive(r.view, true); closeOver(); render(); void poll();
   } catch (e) {
     if (T !== t) return;
     t.rmBusy = false; toast(e.code === 'room_closed' ? '再戦の受付は終わりました' : '通信エラー。もう一度');
@@ -298,13 +299,13 @@ async function rematch() {
     if (T !== t) return;
     t.rmBusy = false;
     toast({ not_enough: '残っている人が足りません', room_closed: '再戦の受付は終わりました', not_host: '再戦はホストが始めます', in_other_room: 'ほかの部屋に入っています' }[e.code] || '通信エラー。もう一度');
-    poll(); renderDock();
+    void poll(); renderDock();
   }
 }
 /** Menu へ。終局後・飛んだ後は再戦の対象から外れることをサーバーに伝える（返事は待たない） */
 function toMenu() {
   const t = T; if (!t) return;
-  const v = t.v, me = v && v.players[v.seat];
+  const v = t.v, me = v?.players[v.seat];
   if (v && (v.status === 'finished' || me.status === 'out')) net().game({ op: 'leave', room: t.id }).catch(() => {});
   closeOver(); app.nav.toMenu();
 }
@@ -345,7 +346,7 @@ function ensureSeats(v) {
 /* ===================== 描画 ===================== */
 const PL = { fold: 'FOLD', check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE', allin: 'ALL-IN' };
 function render() {
-  const t = T; if (!t || !t.v) return;
+  const t = T; if (!t?.v) return;
   const v = t.v, h = shownHand(), ro = runout(), sg = stage();
   syncHeader(); ensureSeats(v);
   let ch = renderInfo();
@@ -354,10 +355,10 @@ function render() {
   ch = setHTML($('#pot'), `<span>POT</span><b>${fmtBb(pot, h ? h.bb : 1)}<i>BB</i></b>${pot ? `<small>${fmt(pot)}</small>` : ''}`) || ch;
   $('#pot').classList.toggle('zero', !pot);
   // ボード：演出の間は開いた分だけ（リバーを伏せて置いている間は裏の札）
-  const board = h ? h.board : [], nb = ro ? ro.board : sg && sg.board != null ? sg.board : board.length, hits = winCards(h);
+  const board = h ? h.board : [], nb = ro ? ro.board : sg?.board != null ? sg.board : board.length, hits = winCards(h);
   ch = setHTML($('#boardC'), Array.from({ length: 5 }, (_, i) => i < nb && board[i] != null ? cardHTML(board[i], { hit: hits.has(board[i]) })
-    : ro && ro.back && i === nb ? riverHTML(board[nb]) : '<div class="slot"></div>').join('')) || ch;
-  $('#table').classList.toggle('tense', !!(ro && ro.tense));
+    : ro?.back && i === nb ? riverHTML(board[nb]) : '<div class="slot"></div>').join('')) || ch;
+  $('#table').classList.toggle('tense', !!ro?.tense);
   ch = renderDock() || ch;
   afterRender();
   tickClock();
@@ -384,9 +385,9 @@ function nextLevelText() {
 
 function clockBarHTML(s) {
   const v = T.v, h = v.hand;
-  if (!h || h.deadline == null || v.status !== 'running') return '';
+  if (h?.deadline == null || v.status !== 'running') return '';
   const key = h.deadline + ':' + s + ':' + v.ver;
-  if (!T.clockCache || T.clockCache.key !== key) {
+  if (T.clockCache?.key !== key) {
     const total = Math.max(1, h.deadline - h.turnStart), left = Math.max(0, h.deadline - clock.now());
     T.clockCache = { key, html: `<div class="clock ${s === v.seat ? 'me' : 'op'}" aria-hidden="true"><i style="--from:${Math.min(1, left / total).toFixed(4)};animation-duration:${left}ms"></i></div>` };
   }
@@ -395,16 +396,16 @@ function clockBarHTML(s) {
 
 /** その席のこのストリートの最後のアクション（遷移を見せている途中なら、見せたところまでのその街のもの） */
 function lastAction(h, s, sg) {
-  const n = sg && sg.shown != null ? sg.shown : h.actions.length, street = sg && sg.street != null ? sg.street : h.street;
-  for (let i = n - 1; i >= 0; i--) { const a = h.actions[i]; if (a.street !== street) break; if (a.seat === s) return { ...a, i }; }
+  const n = sg?.shown != null ? sg.shown : h.actions.length, street = sg?.street != null ? sg.street : h.street;
+  for (let i = n - 1; i >= 0; i--) { const a = h.actions[i]; if (a.street !== street) { break; } if (a.seat === s) return { ...a, i }; }
   return null;
 }
 /** 見せている途中で、まだ見せていないアクションにその席の kind があるか（フォールド・オールインを先に見せない） */
-const hiddenKind = (h, s, sg, kind) => !!(sg && sg.shown != null && h.actions.slice(sg.shown).some(a => a.seat === s && a.kind === kind));
+const hiddenKind = (h, s, sg, kind) => !!(sg?.shown != null && h.actions.slice(sg.shown).some(a => a.seat === s && a.kind === kind));
 function seatHTML(s) {
   const v = T.v, h = shownHand(), me = s === v.seat, p = v.players[s], bb = v.hand ? v.hand.bb : 200, ro = runout(), sg = stage(), vl = veiled();
   // settled = 結果を見せてよい（ショーダウンの演出・フォールドで終わる前の一拍の間は、まだ賭けの直後のように見せる）
-  const done = h && h.phase === 'settled', settled = done && !vl, inHand = h && h.startStacks[s] > 0;
+  const done = h?.phase === 'settled', settled = done && !vl, inHand = h && h.startStacks[s] > 0;
   const out = p.status === 'out' && !(done && h.eliminated.some(e => e.seat === s));
   const folded = h && inHand && h.folded[s] && !hiddenKind(h, s, sg, 'fold');
   const allIn = h && inHand && h.allIn[s] && !hiddenKind(h, s, sg, 'allin');
@@ -418,16 +419,16 @@ function seatHTML(s) {
   if (h && inHand && !out) {
     const hole = h.hole[s];
     // 相手の表になった札は、演出で返すまで裏（ランアウトが始まる前の一拍＝結果を伏せている間も。ここで表を描くと一瞬見えてしまっていた）
-    if (hole && (me || !vl || (ro && ro.reveal))) cards = hole.map(c => cardHTML(c, { dim: folded && !settled, hit: hits.has(c) })).join('');
+    if (hole && (me || !vl || ro?.reveal)) cards = hole.map(c => cardHTML(c, { dim: folded && !settled, hit: hits.has(c) })).join('');
     else if (!folded && !settled) cards = cardHTML(null) + cardHTML(null);
   }
-  if (ro && ro.eq && h.shown && h.shown[s]) cards += eqHTML(ro, s);
+  if (ro?.eq && h.shown?.[s]) cards += eqHTML(ro, s);
   // 札の下の 1 行：結果 > 最後のアクション > 状態
   let note = '';
   const la = h && (!done || sg) ? lastAction(h, s, sg) : null;
   if (ro && inHand && !out) note = folded ? 'FOLD' : allIn ? '<span class="ai">ALL-IN</span>' : '';
-  else if (winner) note = `${h.won[s] > h.commits[s] ? `<span class="w up">+${fmtBb(h.won[s] - h.commits[s], bb)} BB</span>` : '<span class="w up">CHOP</span>'}${h.names && h.names[s] ? `<span class="hn">${esc(h.names[s])}</span>` : ''}`;
-  else if (settled && h.names && h.names[s]) note = `<span class="hn">${esc(h.names[s])}</span>`;
+  else if (winner) note = `${h.won[s] > h.commits[s] ? `<span class="w up">+${fmtBb(h.won[s] - h.commits[s], bb)} BB</span>` : '<span class="w up">CHOP</span>'}${h.names?.[s] ? `<span class="hn">${esc(h.names[s])}</span>` : ''}`;
+  else if (settled && h.names?.[s]) note = `<span class="hn">${esc(h.names[s])}</span>`;
   else if (T.cleared && p.place) note = ordinal(p.place).toUpperCase();   // 終局して片付けた卓：順位
   else if (p.status === 'out' && !(vl && h.eliminated.some(e => e.seat === s))) note = p.place ? ordinal(p.place).toUpperCase() : 'OUT';   // このハンドで飛んだ順位は演出の後
   else if (p.status === 'left') note = 'LEFT';
@@ -441,7 +442,7 @@ function seatHTML(s) {
   const clk = acting ? clockBarHTML(s) : '';
   const bets = shownBets(), bet = bets && bets[s] > 0 ? `<div class="bchip"><i></i><b>${fmtBb(bets[s], bb)}<small>BB</small></b></div>` : '';
   // 結果を伏せている間は配る前、遷移の途中はまだ見せていないベットを足したスタック
-  const stack = p.stack - (vl && h.won ? h.won[s] : 0) + (sg && sg.adj ? sg.adj[s] : 0);
+  const stack = p.stack - (vl && h.won ? h.won[s] : 0) + (sg?.adj ? sg.adj[s] : 0);
   // スタックは BB かチップ数のどちらか（#table.u-chip。スタックを押すと切り替わり、ふわっと入れ替わる）
   return `<div class="hole">${cards}</div><div class="${cls}"><div class="sp-hd"><i class="gem"></i><span class="nm">${name}</span></div>
     <div class="stk" data-stk="${s}"><span class="su bb"><b>${fmtBb(stack, bb)}</b><small>BB</small></span><span class="su ch"><b>${fmt(stack)}</b></span></div><div class="note">${stayTag(v, s)}${note}</div>${clk}${dbtn}</div>${bet}`;
@@ -450,7 +451,7 @@ function seatHTML(s) {
 function shownBets() {
   const h = shownHand(), sg = stage();
   if (!h) return null;
-  if (sg && sg.bets) return sg.bets;
+  if (sg?.bets) return sg.bets;
   return h.phase === 'settled' ? null : h.streetBet;
 }
 /** 勝率の札（演出の間だけ。数字は ro.eqShow を数えながら動かす） */
@@ -461,7 +462,7 @@ function eqHTML(ro, s) {
 /** ショーダウンで勝った役の札（勝った席の 5 枚。結果を見せてよいときだけ） */
 const NONE = new Set();
 function winCards(h) {
-  if (!h || h.phase !== 'settled' || !h.shown || h.board.length < 5 || veiled()) return NONE;
+  if (h?.phase !== 'settled' || !h.shown || h.board.length < 5 || veiled()) return NONE;
   if (T.winC && T.winC.handNo === h.handNo) return T.winC.set;
   const set = new Set();
   for (const pot of h.pots) if (pot.eligible.length > 1) for (const s of pot.winners) for (const c of bestFive([...h.shown[s], ...h.board])) set.add(c);
@@ -470,7 +471,7 @@ function winCards(h) {
 }
 /** そのハンドでポットを勝ち取った席か（ショーダウンで返ってきただけのコールされなかった分は除く） */
 function isWinner(h, s) {
-  if (!h || h.phase !== 'settled') return false;
+  if (h?.phase !== 'settled') return false;
   if (!h.shown) return h.won[s] > 0;
   return h.pots.some(p => p.eligible.length > 1 && p.winners.includes(s));
 }
@@ -479,11 +480,11 @@ function isWinner(h, s) {
 function afterRender() {
   const t = T, v = t.v, h = shownHand(), sh = t.sh, ro = runout(), sg = stage();
   if (!h) return;
-  const board = ro ? ro.board : sg && sg.board != null ? sg.board : h.board.length, settled = h.phase === 'settled' && !veiled();
+  const board = ro ? ro.board : sg?.board != null ? sg.board : h.board.length, settled = h.phase === 'settled' && !veiled();
   const bets = shownBets() || [];
   const keepNotes = () => { sh.la = [...document.querySelectorAll('#seats .note .pl[data-i]')].map(e => e.dataset.i); };
   if (REDUCE) { sh.init = true; sh.handNo = h.handNo; sh.board = board; sh.bet = bets.slice(); sh.settled = settled ? h.handNo : sh.settled; keepNotes(); return; }
-  const flip = (el, delay, ms = PACE.flip + 120) => el && el.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: ms, delay, easing: EASE, fill: 'backwards' });
+  const flip = (el, delay, ms = PACE.flip + 120) => el?.animate([{ transform: 'perspective(600px) rotateY(90deg)' }, { transform: 'none' }], { duration: ms, delay, easing: EASE, fill: 'backwards' });
   const cards = [...document.querySelectorAll('#boardC .card')];
   const fo = flipOf(sh.board);   // 街が進んだとき：フロップは 1.8 倍ゆっくり
   if (sh.init && sh.handNo === h.handNo && board > sh.board) cards.slice(Math.max(0, sh.board), board).forEach((c, i) => flip(c, i * (ro ? ro.stagger : fo.stagger), ro ? ro.flipMs : fo.ms));
@@ -534,8 +535,8 @@ function afterRender() {
 const fxOf = v => (privateRoom(v) ? fxSeat(v.hand, v.fx) : null);
 /** 演出中なら その状態、そうでなければ null */
 function runout() {
-  const t = T, h = t && t.v && t.v.hand;
-  return t && t.ro && !t.ro.done && h && t.ro.handNo === h.handNo ? t.ro : null;
+  const t = T, h = t?.v?.hand;
+  return t?.ro && !t.ro.done && h && t.ro.handNo === h.handNo ? t.ro : null;
 }
 function startRunout(v) {
   const t = T, h = v.hand, from = Math.min(h.runFrom, h.board.length), R = RUNOUT;
@@ -590,7 +591,7 @@ function startRunout(v) {
   }
 }
 function endRunout(show) {
-  const t = T, ro = t && t.ro; if (!ro || ro.done) return;
+  const t = T, ro = t?.ro; if (!ro || ro.done) return;
   ro.done = true; ro.timers.forEach(clearTimeout);
   fxshow.hide(show ? FX.out : 0);
   $('#table').classList.remove('tense');
@@ -658,10 +659,10 @@ function riverTurn(done) {
 
 /* ---------- 400 ms ごとの時計 ---------- */
 function tickClock() {
-  const t = T; if (!t || !t.v) return;
-  const nx = $('#nxv'); if (nx) { const x = nextLevelText(); if (nx.textContent !== x.t) nx.textContent = x.t; $('#nx').classList.toggle('soon', x.soon); }
+  const t = T; if (!t?.v) return;
+  const nx = $('#nxv'); if (nx) { const x = nextLevelText(); if (nx.textContent !== x.t) { nx.textContent = x.t; } $('#nx').classList.toggle('soon', x.soon); }
   const secs = $('#secs'), h = t.v.hand;
-  if (secs && h && h.deadline != null) {
+  if (secs && h?.deadline != null) {
     // 15 秒の持ち時間を数え、使い切ったらタイムバンクの残りを（色を変えて）数える
     const now = clock.now(), bank = now - h.turnStart > ACTION_MS;
     const l = Math.max(0, bank ? h.deadline - now : h.turnStart + ACTION_MS - now), s = String(Math.ceil(l / 1000));
@@ -681,7 +682,7 @@ function autoPre() {
   if (t.pre !== autoPreKey()) { t.pre = null; return; }
   t.pre = null;
   const l = legalActions(v, v.seat); if (!l) return;
-  setTimeout(() => { if (T === t && t.v.ver === v.ver) submit({ type: l.canCheck ? 'check' : 'fold' }); }, 250);
+  setTimeout(() => { if (T === t && t.v.ver === v.ver) void submit({ type: l.canCheck ? 'check' : 'fold' }); }, 250);
 }
 function renderDock() {
   const t = T, v = t.v, h = v.hand, me = v.seat, p = v.players[me], dock = $('#dock'), el = $('#dockMain');
@@ -691,7 +692,7 @@ function renderDock() {
   let html = '', mode = 'idle';   // 'turn'（自分の番の操作）| 'wait'（ハンドに参加して待っている。turn と同じ 2 段の形）| 'idle'（1 段）
   const ro = runout(), rm = v.rematch;
   // ハンドに参加していて、まだ動ける（降りていない・オールインでない）。待っている間は相手が動いても・遷移の途中でも形を変えない
-  const inHand = h && h.phase === 'betting' && v.status === 'running' && p.status === 'active' && h.startStacks[me] > 0 && !h.folded[me] && !h.allIn[me];
+  const inHand = h?.phase === 'betting' && v.status === 'running' && p.status === 'active' && h.startStacks[me] > 0 && !h.folded[me] && !h.allIn[me];
   if (ro) {
     const street = ro.back || ro.board === 5 ? 'RIVER' : ro.board === 4 ? 'TURN' : ro.board === 3 ? 'FLOP' : '';
     html = `<span class="eyebrow">${ro.from < 5 || h.allIn.some(Boolean) ? 'ALL-IN' : 'SHOWDOWN'}</span><span class="dk-title">${street}</span><span class="dots"><i></i><i></i><i></i></span>`;
@@ -719,11 +720,11 @@ function renderDock() {
     html = `<span class="eyebrow">WATCHING</span><span class="dk-title">${p.place ? ordinal(p.place) : 'OUT'}</span><button class="btn primary dk-res" data-act="result" type="button">Result</button>`;
   } else if (p.status === 'sitout' || v.status === 'paused') {
     html = `<span class="eyebrow">${v.status === 'paused' ? 'PAUSED' : 'SITTING OUT'}</span><span class="dk-title">${v.status === 'paused' ? '<b class="secs" id="pauseLeft"></b>' : ''}</span>${p.status === 'sitout' ? '<button class="btn accent" data-act="sitin" type="button" style="flex:0 0 36%">I\'m back</button>' : ''}`;
-  } else if (h && h.phase === 'settled') {
+  } else if (h?.phase === 'settled') {
     const ws = h.won.map((_, s) => s).filter(s => isWinner(h, s));
     const w = ws.length === 1 ? ws[0] : null;
     const who = w === null ? (ws.length ? 'SPLIT POT' : 'HAND OVER') : w === me ? 'YOU WIN' : esc(v.names[w]) + ' WINS';
-    html = `<span class="dk-title ${w === me ? 'y' : w === null ? '' : 'c'}">${who}</span><span class="dk-stats">${w !== null ? `<b>+${fmtBb(Math.max(0, h.won[w] - h.commits[w]), h.bb)}<i>BB</i></b>${h.names && h.names[w] ? esc(h.names[w]) : ''}` : ''}</span>`;
+    html = `<span class="dk-title ${w === me ? 'y' : w === null ? '' : 'c'}">${who}</span><span class="dk-stats">${w !== null ? `<b>+${fmtBb(Math.max(0, h.won[w] - h.commits[w]), h.bb)}<i>BB</i></b>${h.names?.[w] ? esc(h.names[w]) : ''}` : ''}</span>`;
   } else if (l) {
     mode = 'turn';
     const pot = l.pot, facing = l.canFold, bb = h.bb, B = x => `${fmtBb(x, bb)}<i>BB</i>`;
@@ -738,7 +739,7 @@ function renderDock() {
   } else {
     // 降りた・オールイン・参加していないハンド：1 段（このハンドの間は形が変わらない）
     const a = h ? h.toAct : null, who = a != null ? esc(v.names[a]) : '';
-    html = `${h && h.folded[me] ? '<span class="eyebrow">FOLDED</span>' : h && h.allIn[me] ? '<span class="eyebrow">ALL-IN</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
+    html = `${h?.folded[me] ? '<span class="eyebrow">FOLDED</span>' : h?.allIn[me] ? '<span class="eyebrow">ALL-IN</span>' : ''}<span class="dk-title">${who}</span><span class="dots" style="margin-left:0"><i></i><i></i><i></i></span>
       <button class="pre away-btn" data-act="sitout" type="button">離席</button>`;
   }
   // 中身が変わるときは、前の表示を上に重ねて溶かし、新しい表示を浮かび上がらせる（Check/Fold の予約の切り替えはそのまま）
@@ -770,7 +771,7 @@ function dockGhost(dock) {
 }
 
 $('#dock').addEventListener('click', e => {
-  const t = T; if (!t || !t.v) return;
+  const t = T; if (!t?.v) return;
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, v = t.v;
   if (act === 'result') return showResult();
@@ -792,8 +793,8 @@ $('#dock').addEventListener('click', e => {
 async function seatOp(op) {
   const t = T; if (!t || t.busy) return;
   t.busy = true;
-  try { const r = await net().game({ op, room: t.id }); if (t !== T) return; t.busy = false; clock.offset = r.now - Date.now(); receive(r.view); }
-  catch (e) { if (t !== T) return; t.busy = false; poll(); }
+  try { const r = await net().game({ op, room: t.id }); if (t !== T) { return; } t.busy = false; clock.offset = r.now - Date.now(); receive(r.view); }
+  catch { if (t !== T) { return; } t.busy = false; void poll(); }
 }
 async function submit(move) {
   const t = T; if (!t || t.busy) return;
@@ -806,7 +807,7 @@ async function submit(move) {
   } catch (e) {
     if (t !== T) return;
     t.busy = false;
-    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) poll();
+    if (['stale', 'not_your_turn', 'game_over'].includes(e.code)) void poll();
     else toast(e.code === 'illegal' ? 'その操作はできません' : '通信エラー。もう一度');
     renderDock();
   }
@@ -816,7 +817,7 @@ async function submit(move) {
 // BB の候補は額そのものなので見出しを付けない（2.5BB / 2.5BB と 2 回出さない）
 const qLabel = k => k.endsWith('bb') ? '' : k;
 function openSheet() {
-  const t = T, v = t.v, l = legalActions(v, v.seat); if (!l || l.minTo == null) return;
+  const t = T, v = t.v, l = legalActions(v, v.seat); if (l?.minTo == null) return;
   closeSheet(true);
   const lo = l.minTo, hi = l.maxTo, unit = stepChips(getSizes(), v.hand.bb), q = quickSizes(l, v.hand, getSizes());
   const vals = [lo]; for (let x = (Math.floor(lo / unit) + 1) * unit; x < hi; x += unit) vals.push(x);
@@ -857,7 +858,7 @@ function openSheet() {
   sync(); edges(); r.focus({ preventScroll: true });
 }
 /** ベットサイズの設定が変わった：開いているシートを作り直す */
-export function sizesChanged() { if (T && T.v && T.rs && sheetOpen()) openSheet(); }
+export function sizesChanged() { if (T?.v && T.rs && sheetOpen()) openSheet(); }
 /** 開いているベットのシートがあるか（閉じかけのものは数えない） */
 const sheetOpen = () => !!document.querySelector('.rsheet:not(.closing)');
 /** シートを閉じる。開いているものは全部（何枚あっても）。now = アニメ無しで今すぐ消す */
@@ -873,7 +874,7 @@ function closeSheet(now) {
 }
 
 /* ===================== 配置：全部が収まる最大のカードの大きさ ===================== */
-const rectOf = e => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null; };
+const rectOf = e => { if (!e) { return null; } const r = e.getBoundingClientRect(); return r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null; };
 const hit = (a, b, m = 3) => a.l < b.r + m && b.l < a.r + m && a.t < b.b + m && b.t < a.b + m;
 function fits() {
   const st = $('#stage'), tb = $('#table');
@@ -897,19 +898,19 @@ function largest(lo, hi, set) {
 }
 let fitKey = '', fitWait = false;
 export function fitTable(force, glide) {
-  const b = document.body; if (b.dataset.screen !== 'game' || !T || !T.v) return;
+  const b = document.body; if (b.dataset.screen !== 'game' || !T?.v) return;
   if (gliding() && !glide) { fitWait = true; return; }   // キーボードでの縮小・復帰の途中：終わってから
   if (b.classList.contains('kbmin') && !glide) return;     // キーボードで卓を薄くしている間は大きさを変えない
-  if (document.activeElement && document.activeElement.id === 'pdMemo') return;   // プレイヤーのメモを書く間（モーダルの裏の卓は動かさない。閉じたキーボードの resize で合わせ直す）
+  if (document.activeElement?.id === 'pdMemo') return;   // プレイヤーのメモを書く間（モーダルの裏の卓は動かさない。閉じたキーボードの resize で合わせ直す）
   const app_ = $('.app'), st = $('#stage'), vw = app_.clientWidth, vh = app_.clientHeight, key = vw + 'x' + vh + ':' + T.v.n;
-  if (!force && key === fitKey) return; fitKey = key;
+  if (!force && key === fitKey) { return; } fitKey = key;
   if (!b.classList.contains('kb')) b.classList.toggle('land', vw > vh * 1.25 && vh < 600);   // キーボードの間は向きの判定を変えない
   const c = chat.fitLane(key + (b.classList.contains('land') ? 'L' : ''), () => largest(14, b.classList.contains('land') ? 50 : 80, x => st.style.setProperty('--cw', x + 'px')));
   st.style.setProperty('--cw', c + 'px');
   chat.afterFit();
 }
 viewportHooks({
-  measure: () => { if (document.body.dataset.screen !== 'game' || !T || !T.v) return null; fitTable(true, true); return { cw: parseFloat($('#stage').style.getPropertyValue('--cw')), tableH: $('#table').clientHeight }; },
+  measure: () => { if (document.body.dataset.screen !== 'game' || !T?.v) { return null; } fitTable(true, true); return { cw: Number.parseFloat($('#stage').style.getPropertyValue('--cw')), tableH: $('#table').clientHeight }; },
   focused: () => document.activeElement === $('#chatIn'),
   done: () => { if (fitWait) { fitWait = false; fitTable(true); } },
 });
@@ -919,10 +920,10 @@ addEventListener('resize', refit);
 addEventListener('orientationchange', refit);
 if (window.ResizeObserver) new ResizeObserver(refit).observe(document.querySelector('.app'));
 if (window.visualViewport) visualViewport.addEventListener('resize', refit);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
+document.fonts?.ready.then(refit, () => {});
 
 
 // メモの印が変わったら席を描き直す
-onNotes(() => { if (T && T.v) render(); });
+onNotes(() => { if (T?.v) render(); });
 
-if (import.meta.env && import.meta.env.DEV) window.__table = { get T() { return T; }, render };
+if (import.meta.env?.DEV) window.__table = { get T() { return T; }, render };

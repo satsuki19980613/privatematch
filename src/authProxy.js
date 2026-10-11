@@ -12,7 +12,11 @@ export const PROXIED_PATHS=['sign-in/social','get-session','token','sign-out','o
 export const NEON_AUTH_COOKIE=/^(__Secure-|__Host-)?neon-?auth\./;
 export const AUTH_PROXY_PREFIX='/api/auth';
 
-export function isProxiedPath(path){return PROXIED_PATHS.includes(path.replace(/^\/+|\/+$/g,''))}
+/** strip leading / trailing slashes */
+const noLead=s=>{let i=0;while(s[i]==='/')i++;return s.slice(i)};
+export const noTrail=s=>{let n=s.length;while(s[n-1]==='/')n--;return s.slice(0,n)};
+
+export function isProxiedPath(path){return PROXIED_PATHS.includes(noTrail(noLead(path)))}
 
 /** Neon Auth Set-Cookie → first-party cookie: drop Domain and Partitioned, SameSite=None → Lax; keep the rest */
 export function firstPartyCookie(setCookie){
@@ -36,7 +40,7 @@ const DROP_REQUEST=new Set(['host','cookie','content-length','connection','cf-co
 
 export async function toUpstream(req,upstream,path){
   const url=new URL(req.url);
-  const target=`${upstream.replace(/\/+$/,'')}/${path.replace(/^\/+/,'')}${url.search}`;
+  const target=`${noTrail(upstream)}/${noLead(path)}${url.search}`;
   const headers=new Headers();
   req.headers.forEach((v,k)=>{if(!DROP_REQUEST.has(k.toLowerCase()))headers.set(k,v)});
   const cookie=authCookies(req.headers.get('cookie'));if(cookie)headers.set('cookie',cookie);
@@ -46,7 +50,7 @@ export async function toUpstream(req,upstream,path){
 
 export function fromUpstream(res){
   const headers=new Headers();
-  res.headers.forEach((v,k)=>{const key=k.toLowerCase();if(key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length')return;headers.set(k,v)});
+  res.headers.forEach((v,k)=>{const key=k.toLowerCase();if(key==='set-cookie'||key.startsWith('access-control-')||key==='content-encoding'||key==='content-length'){return}headers.set(k,v)});
   for(const c of res.headers.getSetCookie())headers.append('set-cookie',firstPartyCookie(c));
   headers.set('cache-control','no-store');headers.set('x-content-type-options','nosniff');
   return new Response(res.body,{status:res.status,statusText:res.statusText,headers});

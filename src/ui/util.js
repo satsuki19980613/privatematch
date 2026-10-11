@@ -11,7 +11,7 @@ export const head = (eye, title, cls = '') => `<div class="eyebrow">${eye}</div>
 // アプリの状態。net は起動時に決まる（net.js か ?fake）。nav.* は main.js が入れる
 export const app = {
   net: null, user: null, prof: null, booting: false,
-  nav: { toMenu() {}, enterRoom() {}, refreshMe: async () => null, logout() {} },
+  nav: { toMenu() {}, enterRoom() {}, refreshMe: async () => null, logout: async () => {} },
 };
 
 export function toast(t) {
@@ -53,8 +53,8 @@ export function fmtPt(v) {
 export const fmtBb = (chips, bb) => { const v = Math.round((chips / (bb || 1)) * 10) / 10; return (v % 1 === 0 ? String(v) : v.toFixed(1)); };
 
 // 2 つの要素の間をチップの数字が飛ぶ演出
-export function fly(fromEl, toEl, label, cls, delay = 0, done, D = 650) {
-  if (REDUCE || !fromEl || !toEl || document.hidden) { done && done(); return; }
+export function fly(fromEl, toEl, label, cls, delay = 0, done = null, D = 650) {
+  if (REDUCE || !fromEl || !toEl || document.hidden) { done?.(); return; }
   const ra = fromEl.getBoundingClientRect(), rb = toEl.getBoundingClientRect();
   const el = document.createElement('div'); el.className = 'fly ' + cls; el.textContent = label; document.body.appendChild(el);
   const w = el.offsetWidth, h = el.offsetHeight, x0 = ra.left + ra.width / 2 - w / 2, y0 = ra.top + ra.height / 2 - h / 2,
@@ -65,7 +65,7 @@ export function fly(fromEl, toEl, label, cls, delay = 0, done, D = 650) {
     { transform: `translate(${x1}px,${y1}px) scale(1)`, opacity: 1, offset: .85 },
     { transform: `translate(${x1}px,${y1}px) scale(.7)`, opacity: 0 }], { duration: D, delay, easing: 'cubic-bezier(.3,.7,.2,1)', fill: 'both' });
   let ended = false;
-  const end = () => { if (ended) return; ended = true; el.remove(); done && done(); };
+  const end = () => { if (ended) { return; } ended = true; el.remove(); done?.(); };
   an.onfinish = end; setTimeout(end, D + delay + 150);
 }
 
@@ -75,14 +75,15 @@ export const inviteUrl = code => `${location.origin}/?room=${code}`;
 export async function shareInvite(code, kind) {
   const url = inviteUrl(code);
   const text = `PrivateMatch の${kind === 'free' ? '' : 'プライベート'}部屋に招待します（部屋番号 ${code}）`;
-  if (navigator.share) { try { await navigator.share({ title: 'PrivateMatch', text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+  if (navigator.share) { try { await navigator.share({ title: 'PrivateMatch', text, url }); return; } catch (e) { if (e?.name === 'AbortError') return; } }
   await copyText(url);
 }
 export async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast('コピーしました'); }
-  catch (e) {
+  catch {
+    // クリップボードの API が使えない（権限・古いブラウザ）：選択してコピーする昔のやり方で
     const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast('コピーしました'); } catch (e2) { toast('コピーできませんでした'); }
+    try { document.execCommand('copy'); toast('コピーしました'); } catch { toast('コピーできませんでした'); }
     ta.remove();
   }
 }

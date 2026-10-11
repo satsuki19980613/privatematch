@@ -10,10 +10,10 @@ export function isKlipyUrl(u) {
 }
 
 const SIZES_FULL =['md', 'hd', 'sm', 'xs'], SIZES_THUMB = ['sm', 'xs', 'md', 'hd'];
-const VIDEO = ['mp4', 'webm'], IMAGE = ['webp', 'gif'];
+const VIDEO = new Set(['mp4', 'webm']), IMAGE = ['webp', 'gif'];
 const mediaOf = (x, fmt) => {
-  if (typeof x === 'string' && x) return { url: x, video: VIDEO.includes(fmt), w: 0, h: 0 };
-  if (x && typeof x.url === 'string' && x.url) return { url: x.url, video: VIDEO.includes(fmt), w: +x.width || 0, h: +x.height || 0 };
+  if (typeof x === 'string' && x) return { url: x, video: VIDEO.has(fmt), w: 0, h: 0 };
+  if (x && typeof x.url === 'string' && x.url) return { url: x.url, video: VIDEO.has(fmt), w: +x.width || 0, h: +x.height || 0 };
   return null;
 };
 /**
@@ -25,7 +25,7 @@ const mediaOf = (x, fmt) => {
 export function pickMedia(file, use = 'full') {
   if (!file || typeof file !== 'object') return null;
   const fmts = [...IMAGE, ...VIDEO];
-  for (const f of fmts) for (const sz of use === 'full' ? SIZES_FULL : SIZES_THUMB) { const m = mediaOf(file[sz] && file[sz][f], f); if (m) return m; }
+  for (const f of fmts) for (const sz of use === 'full' ? SIZES_FULL : SIZES_THUMB) { const m = mediaOf(file[sz]?.[f], f); if (m) return m; }
   for (const f of fmts) { const m = mediaOf(file[f], f); if (m) return m; }
   return null;
 }

@@ -67,8 +67,8 @@ function engineCall(fn) {
 // エンジンを 1 手進めた結果を部屋に戻す。ハンドが終わっていれば記録を返す
 function stepped(room, st) {
   const r = { ...room, state: st, status: st.status, ver: room.ver + 1 };
-  const before = room.state && room.state.hand, after = st.hand;
-  const done = after && after.phase === 'settled' && !(before && before.handNo === after.handNo && before.phase === 'settled');
+  const before = room.state?.hand, after = st.hand;
+  const done = after?.phase === 'settled' && !(before && before.handNo === after.handNo && before.phase === 'settled');
   return { room: r, record: done ? handRecord(st) : null };
 }
 

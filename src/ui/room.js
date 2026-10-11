@@ -4,17 +4,17 @@ import { $, app, esc, head, openDlg, toast, clock, inviteUrl, shareInvite, copyT
 import { paint, setPane } from './menu.js';
 
 const POLL_MS = 1500;
-let R = null;   // { id, ver, v, timer, ui, gen }
+let R = null;   // { id, ver, v, timer, ui }
 
 export function enter(id, first) {
   stop();
-  R = { id, ver: -1, v: null, timer: 0, ui: 0, gen: Math.random() };
-  if (first && first.view) apply(first.view, first.now);
+  R = { id, ver: -1, v: null, timer: 0, ui: 0 };
+  if (first?.view) apply(first.view, first.now);
   setPane('room');
-  poll();
-  R.ui = setInterval(() => { if (R && R.v) render($('#menuIn')); }, 1000);
+  void poll();
+  R.ui = setInterval(() => { if (R?.v) render($('#menuIn')); }, 1000);
 }
-export function stop() { if (!R) return; clearTimeout(R.timer); clearInterval(R.ui); R = null; }
+export function stop() { if (!R) { return; } clearTimeout(R.timer); clearInterval(R.ui); R = null; }
 export const activeId = () => (R ? R.id : null);
 
 function apply(v, now) {
@@ -36,15 +36,15 @@ async function poll() {
   }
   const v = r0.v;
   if (v && !v.lobby) { stop(); app.nav.enterTable(r0.id); return; }
-  if (v && v.status === 'cancelled') { stop(); toast('部屋は閉じられました'); app.nav.toMenu(); return; }
+  if (v?.status === 'cancelled') { stop(); toast('部屋は閉じられました'); app.nav.toMenu(); return; }
   render($('#menuIn'));
   r0.timer = setTimeout(poll, document.hidden ? POLL_MS * 3 : POLL_MS);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && R) poll(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && R) void poll(); });
 
 export function render(el) {
-  if (!R || !R.v) return paint(el, '<div class="qbox"><span class="dots" style="justify-content:center;margin:0"><i></i><i></i><i></i></span></div>');
-  const v = R.v, rm = v.room, n = rm.config.players, me = app.prof && app.prof.nickname;
+  if (!R?.v) return paint(el, '<div class="qbox"><span class="dots" style="justify-content:center;margin:0"><i></i><i></i><i></i></span></div>');
+  const v = R.v, rm = v.room, n = rm.config.players, me = app.prof?.nickname;
   const left = Math.max(0, Math.ceil((v.expiresAt - clock.now()) / 1000));
   const slots = Array.from({ length: n }, (_, i) => {
     const name = v.members[i];
@@ -68,7 +68,7 @@ function bind(el) {
   const v = R.v;
   el.querySelector('#copyUrl').onclick = () => copyText(inviteUrl(v.room.code));
   el.querySelector('#shareUrl').onclick = () => shareInvite(v.room.code, v.room.kind);
-  el.querySelector('#roomLeave').onclick = () => askLeave(v.members[0] === (app.prof && app.prof.nickname));
+  el.querySelector('#roomLeave').onclick = () => askLeave(v.members[0] === app.prof?.nickname);
 }
 function askLeave(isHost) {
   const r0 = R; if (!r0) return;

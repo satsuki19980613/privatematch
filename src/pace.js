@@ -41,7 +41,7 @@ export function closingBets(a, b) {
  *   / action（同じ街でアクションが増えた）/ street（街が進んだ）/ win（フォールドで終わった）/ showdown（ショーダウン）
  */
 export function transition(prev, v) {
-  const a = prev && prev.hand, b = v && v.hand;
+  const a = prev?.hand, b = v?.hand;
   if (!a || !b || prev.seat !== v.seat) return { kind: 'init' };
   if (b.handNo !== a.handNo) return { kind: 'deal' };
   if (a.phase === 'settled') return { kind: 'none' };

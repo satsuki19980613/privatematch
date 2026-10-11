@@ -37,25 +37,26 @@ const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 
 const me = { nickname: 'Satsuki' };
 const rooms = new Map();          // id → { room, hands: [{rec, holes}], botAt, nextJoin, bots: Set, chat: [{seq, seat, text, at}], chatLast: [席ごとの最後の発言時刻], talk }
 let botSeq = 2;
-// 部屋番号と席・山札のシャッフルに使う乱数は本物のサーバーと同じもの（src/rnd.js）
+// 乱数は本物のサーバーと同じもの（src/rnd.js）。部屋番号と席・山札のシャッフルのほか、Bot の動きや待ち時間にも使う
 const rnd = secureRnd;
-const lag = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 80 + Math.random() * 100));
+const lag = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 80 + rnd() * 100));
 const botUid = () => `00000000-0000-4000-8000-${String(botSeq++).padStart(12, '0')}`;
 const pickName = used => NAMES.find(n => !used.includes(n)) || 'Bot' + botSeq;
 const fail = code => { const e = new Error(code); e.code = code; e.status = code === 'too_fast' ? 429 : 409; return e; };
-const between = ([a, b]) => a + Math.random() * (b - a);
+const between = ([a, b]) => a + rnd() * (b - a);
 const pickOf = a => a[Math.floor(rnd() * a.length)];
 // PRIVATE MATCH の Bot の演出 GIF（4 人に 3 人。all なら全員。見本の slug。src/fxDemo.js）
-const botFx = (room, all) => (room.kind === 'private' && (all || Math.random() < 0.75) ? pickOf(DEMO_SLUGS) : null);
+const botFx = (room, all) => (room.kind === 'private' && (all || rnd() < 0.75) ? pickOf(DEMO_SLUGS) : null);
 // 配りを選び直す演出の確認（river / fx）
 const rigged = show => show === 'river' || show === 'fx';
 const newRoom = (room, show = null) => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null, show, wait: show ? 250 : WAIT });
 // &short（と演出の確認の rematch）：開始直後のスタックを 2〜4 BB に削る
 function shorten(room, on = SHORT) {
-  if (!on || !room.started) return room;
-  const st = room.state, h = st.hand;
-  st.players.forEach((p, s) => { if (p.stack > 0 && !h.allIn[s]) p.stack = Math.min(p.stack, h.bb * (2 + Math.floor(Math.random() * 3))); });
-  h.startStacks = st.players.map((p, s) => p.stack + h.commits[s]);
+  if (on && room.started) {
+    const st = room.state, h = st.hand;
+    st.players.forEach((p, s) => { if (p.stack > 0 && !h.allIn[s]) p.stack = Math.min(p.stack, h.bb * (2 + Math.floor(rnd() * 3))); });
+    h.startStacks = st.players.map((p, s) => p.stack + h.commits[s]);
+  }
   return room;
 }
 
@@ -106,17 +107,17 @@ function talkers(R, except = []) {
   const fresh = all.filter(s => s !== T.last);
   return fresh.length ? fresh : all;
 }
-const shuffled = a => a.map(x => [Math.random(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+const shuffled = a => a.map(x => [rnd(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
 function say(R, seat, text, at) { talkState(R).queue.push({ seat, text, at }); }
 function bigPot(R, rec) {
   if (R.room.kind !== 'private' || !R.bots.size) return;
   const pot = rec.won.reduce((a, b) => a + b, 0);
-  if (pot < (CHATTY ? 10 : 30) * rec.bb || Math.random() > (CHATTY ? 0.9 : 0.4)) return;
+  if (pot < (CHATTY ? 10 : 30) * rec.bb || rnd() > (CHATTY ? 0.9 : 0.4)) return;
   const winners = rec.won.map((w, s) => (w > 0 ? s : -1)).filter(s => s >= 0);
   const now = Date.now(), [who] = shuffled(talkers(R, winners));
   if (who != null) say(R, who, pickOf(SAY.nice), now + between([1200, 3000]));
   const w = winners.find(s => R.bots.has(R.room.members[s]));
-  if (w != null && Math.random() < 0.3) say(R, w, pickOf(SAY.thanks), now + between([3500, 5500]));
+  if (w != null && rnd() < 0.3) say(R, w, pickOf(SAY.thanks), now + between([3500, 5500]));
 }
 function botTalk(R, now) {
   const room = R.room;
@@ -124,15 +125,15 @@ function botTalk(R, now) {
   const T = talkState(R);
   if (!T.hello) {
     T.hello = true;
-    shuffled(talkers(R)).slice(0, CHATTY ? 9 : 1 + Math.floor(Math.random() * 2)).forEach((s, i) => say(R, s, pickOf(SAY.hello), now + 1000 + i * 1500 + Math.random() * 1500));
+    shuffled(talkers(R)).slice(0, CHATTY ? 9 : 1 + Math.floor(rnd() * 2)).forEach((s, i) => say(R, s, pickOf(SAY.hello), now + 1000 + i * 1500 + rnd() * 1500));
   }
   if (room.status === 'finished' && !T.bye) {
     T.bye = true;
-    shuffled(talkers(R)).slice(0, 1 + Math.floor(Math.random() * 2)).forEach((s, i) => say(R, s, pickOf(SAY.bye), now + 1500 + i * 1800 + Math.random() * 1000));
+    shuffled(talkers(R)).slice(0, 1 + Math.floor(rnd() * 2)).forEach((s, i) => say(R, s, pickOf(SAY.bye), now + 1500 + i * 1800 + rnd() * 1000));
   }
   if (['running', 'paused'].includes(room.status) && now >= T.at && !T.queue.length) {
     const [s] = shuffled(talkers(R));
-    if (s != null) say(R, s, CHATTY && Math.random() < 0.4 ? pickOf(SAY.long) : pickOf(SAY.idle), now);
+    if (s != null) say(R, s, CHATTY && rnd() < 0.4 ? pickOf(SAY.long) : pickOf(SAY.idle), now);
     T.at = now + between(TALK);
   }
   T.queue.sort((a, b) => a.at - b.at);
@@ -144,13 +145,13 @@ function botTalk(R, now) {
 }
 // Bot：だいたいチェック/コール、ときどきレイズ、強く張られたら降りる
 function botMove(view, seat, show) {
-  const L = legalActions(view, seat), x = Math.random(), stack = view.players[seat].stack;
+  const L = legalActions(view, seat), x = rnd(), stack = view.players[seat].stack;
   if (!L) return null;
   if (rigged(show)) return riverMove(view, seat, L);
   if (show === 'rematch') return L.maxTo != null && x > 0.4 ? { type: 'allin' } : L.canCheck ? { type: 'check' } : { type: 'call' };   // 早く終わるように
   if (L.canFold && L.callPut > stack * 0.35 && x < 0.55) return { type: 'fold' };
   if (L.canFold && x < 0.12) return { type: 'fold' };
-  if (L.minTo != null && x > 0.82) return { type: 'raise', to: Math.min(L.maxTo, L.minTo + Math.floor(Math.random() * 2) * view.hand.bb) };
+  if (L.minTo != null && x > 0.82) return { type: 'raise', to: Math.min(L.maxTo, L.minTo + Math.floor(rnd() * 2) * view.hand.bb) };
   if (L.minTo != null && x > (ALLIN ? 0.5 : 0.985)) return { type: 'allin' };
   if (ALLIN && L.canFold) return { type: 'call' };
   return L.canCheck ? { type: 'check' } : { type: 'call' };
@@ -175,9 +176,9 @@ function advanceGame(R) {
   if (!room.started || !['running', 'paused'].includes(room.status)) return;
   for (let guard = 0; guard < 20; guard++) {
     const st = R.room.state, h = st.hand;
-    if (st.status === 'running' && h && h.phase === 'betting' && R.bots.has(R.room.members[h.toAct]) && !IDLE && st.players[h.toAct].status === 'active') {
+    if (st.status === 'running' && h?.phase === 'betting' && R.bots.has(R.room.members[h.toAct]) && !IDLE && st.players[h.toAct].status === 'active') {
       const think = rigged(R.show) || R.show === 'rematch' ? [400, 1000] : THINK;   // 演出の確認は待たせない
-      if (!R.botAt) R.botAt = now + think[0] + Math.random() * (think[1] - think[0]);
+      if (!R.botAt) R.botAt = now + think[0] + rnd() * (think[1] - think[0]);
       if (now < R.botAt) return;
       R.botAt = 0;
       const seat = h.toAct, view = viewsOf(R.room)[seat], mv = botMove(view, seat, R.show);
@@ -186,8 +187,8 @@ function advanceGame(R) {
       continue;
     }
     const at = dueAt(st);
-    if (at == null || now < at + (h && h.phase === 'betting' ? 1500 : 0)) return;
-    if (rigged(R.show) && h && h.phase === 'settled') rigNext(R.room.state, now);
+    if (at == null || now < at + (h?.phase === 'betting' ? 1500 : 0)) return;
+    if (rigged(R.show) && h?.phase === 'settled') rigNext(R.room.state, now);
     try { save(R, tickRoom(R.room, R.room.members.find(u => R.bots.has(u)) ?? ME, now)); } catch (e) { return; }
   }
 }
@@ -203,7 +204,7 @@ function riverMove(view, seat, L) {
 // 配った直後の st を、Bot は riverMove・自分はコールで打ち切ったとき、ターンで 2 人以上に勝ちの目が残るか（flip なら、ターンで先行していた方がリバーで負ける）
 function playOut(st, now, meSeat) {
   const c = structuredClone(st);
-  for (let g = 0; g < 40 && c.status === 'running' && c.hand && c.hand.phase === 'betting'; g++) {
+  for (let g = 0; g < 40 && c.status === 'running' && c.hand?.phase === 'betting'; g++) {
     const s = c.hand.toAct, L = legalActions(c, s);
     act(c, s, s === meSeat ? (L.canCheck ? { type: 'check' } : { type: 'call' }) : riverMove(c, s, L), now);
   }
@@ -211,7 +212,7 @@ function playOut(st, now, meSeat) {
 }
 function tenseRunout(st, now, meSeat, flip) {
   const c = playOut(st, now, meSeat), h = c.hand;
-  if (!h || !h.shown || h.runFrom !== 0 || !h.shown[meSeat]) return false;
+  if (!h?.shown || h.runFrom !== 0 || !h.shown[meSeat]) return false;
   const pre = equities(h.shown, h.board.slice(0, 4)), alive = pre.filter(e => e > 0);
   if (alive.length < 2 || alive.every(e => Math.abs(e - alive[0]) < 1e-9)) return false;
   if (!flip) return true;
@@ -221,17 +222,17 @@ function tenseRunout(st, now, meSeat, flip) {
 // 演出 GIF の確認（R.show = 'fx'）：同じ打ち方で、自分も入ったショーダウンになり勝者の GIF が出るか（wantMe：true = 自分が勝つ / false = Bot / null = どちらでも）
 function fxRunout(st, now, meSeat, wantMe) {
   const h = playOut(st, now, meSeat).hand;
-  if (!h || h.phase !== 'settled' || !h.shown || !h.shown[meSeat]) return false;
+  if (h?.phase !== 'settled' || !h.shown?.[meSeat]) return false;
   const fs = fxSeat(h, st.fx);
   return fs != null && (wantMe == null || (fs === meSeat) === wantMe);
 }
 // 選び直す配りの条件（i = 何回目か。300 回で見つからなければ条件をゆるめる）
 function rigCheck(R, meSeat) {
   if (R.show === 'fx') {
-    const mine = !!(R.room.state.fx && R.room.state.fx[meSeat]), wantMe = mine && Math.random() < 0.7;
+    const mine = !!R.room.state.fx?.[meSeat], wantMe = mine && rnd() < 0.7;
     return (c, now, i) => fxRunout(c, now, meSeat, i < 300 ? wantMe : null);
   }
-  const flip = Math.random() < 0.5;
+  const flip = rnd() < 0.5;
   return (c, now, i) => tenseRunout(c, now, meSeat, flip && i < 300);
 }
 // 自分 100BB・Bot 15BB にして、最初のハンドを勝負が残る（fx なら勝者の GIF が出る）配りにする
@@ -262,7 +263,7 @@ function botsAfterGame(R, now) {
   room.members.forEach((u, s) => {
     if (R.stayAt[s] == null || now < R.stayAt[s]) return;
     R.stayAt[s] = null;
-    try { save(R, Math.random() < (R.show ? 1 : 0.7) ? stayRoom(R.room, u, now) : leaveRoom(R.room, u, now)); } catch (e) { /* 受付終了 */ }
+    try { save(R, rnd() < (R.show ? 1 : 0.7) ? stayRoom(R.room, u, now) : leaveRoom(R.room, u, now)); } catch (e) { /* 受付終了 */ }
   });
   const rm = viewsOf(R.room)[0].rematch, lead = rematchLeader(rm, R.room.state.endedAt, now), meSeat = R.room.members.indexOf(ME);
   if (lead == null || !R.bots.has(R.room.members[lead]) || !rm.stay.includes(meSeat) || !rm.stay.includes(lead)) return;
@@ -285,8 +286,8 @@ const replyOf = R => { const pos = R.room.members.indexOf(ME); const vs = viewsO
 export const online = true;
 export const onSessionLost = () => {};
 export async function currentUser() { return { id: ME }; }
-export async function signIn() {}
-export async function signOut() {}
+export async function signIn() { /* デモにログインは無い */ }
+export async function signOut() { /* デモにログインは無い */ }
 
 export async function rpc(name, args = {}) {
   for (const R of rooms.values()) advance(R);
@@ -302,12 +303,12 @@ export async function rpc(name, args = {}) {
       me.nickname = v; return lag({ nickname: v });
     }
     case 'room_poll': {
-      const R = rooms.get(args.p_room); if (!R || !R.room.members.includes(ME)) throw fail('not_found');
+      const R = rooms.get(args.p_room); if (!R?.room.members.includes(ME)) throw fail('not_found');
       const r = replyOf(R);
       return lag({ ver: r.ver, now: r.now, view: r.ver > (args.p_ver ?? -1) ? { ...r.view, status: R.room.status } : null, chat: R.chat.length });
     }
     case 'room_chat': {
-      const R = rooms.get(args.p_room); if (!R || !R.room.members.includes(ME)) throw fail('not_found');
+      const R = rooms.get(args.p_room); if (!R?.room.members.includes(ME)) throw fail('not_found');
       if (R.room.kind !== 'private') return lag([]);
       return lag(R.chat.filter(m => m.seq > (args.p_after || 0)).slice(-200));
     }
@@ -321,7 +322,7 @@ export async function rpc(name, args = {}) {
       return lag([...rooms.values()].filter(R => R.room.kind === 'free' && R.room.status === 'waiting' && !R.room.members.includes(ME))
         .map(R => ({ id: R.room.id, code: R.room.code, host: R.room.names[0], seated: R.room.members.length, config: R.room.config, createdAt: R.room.createdAt })));
     case 'room_hands': {
-      const R = rooms.get(args.p_room); if (!R || !R.room.started) throw fail('not_found');
+      const R = rooms.get(args.p_room); if (!R?.room.started) throw fail('not_found');
       const seat = R.room.members.indexOf(ME);
       return lag(R.hands.filter(h => h.rec.handNo > (args.p_after || 0)).slice(0, 200).map(h => ({ ...h.rec, hole: h.holes[seat] })));
     }
@@ -357,9 +358,9 @@ export async function game(body) {
         }
         return lag(replyOf(R));
       }
-      case 'leave': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, leaveRoom(R.room, ME, now)); return lag(replyOf(R)); }
-      case 'fx': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, setRoomFx(R.room, ME, body.fx ?? null)); return lag(replyOf(R)); }
-      case 'stay': { const R = rooms.get(body.room); if (!R) throw new MoveError('not_found'); save(R, stayRoom(R.room, ME, now, body.fx)); return lag(replyOf(R)); }
+      case 'leave': { const R = rooms.get(body.room); if (!R) { throw new MoveError('not_found'); } save(R, leaveRoom(R.room, ME, now)); return lag(replyOf(R)); }
+      case 'fx': { const R = rooms.get(body.room); if (!R) { throw new MoveError('not_found'); } save(R, setRoomFx(R.room, ME, body.fx ?? null)); return lag(replyOf(R)); }
+      case 'stay': { const R = rooms.get(body.room); if (!R) { throw new MoveError('not_found'); } save(R, stayRoom(R.room, ME, now, body.fx)); return lag(replyOf(R)); }
       case 'rematch': {
         const R = rooms.get(body.room); if (!R) throw new MoveError('not_found');
         return lag(replyOf(startRematch(R, ME, now, body.fx)));
@@ -384,7 +385,7 @@ export async function game(body) {
       default: throw new MoveError('malformed');
     }
   } catch (e) {
-    if (e instanceof MoveError) { const x = fail(e.code); x.data = { error: e.code, ...(e.extra || {}) }; throw x; }
+    if (e instanceof MoveError) { const x = fail(e.code); x.data = { error: e.code, ...e.extra }; throw x; }
     throw e;
   }
 }

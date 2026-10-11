@@ -5,7 +5,7 @@
 //   3. Data API を有効にする（認証は Neon Auth）
 //   4. ログインの戻り先として APP_ORIGIN を信頼するドメインに足す（開発ブランチは localhost も許可）
 //   5. Neon Auth と Data API の URL を表示し、GitHub Actions ならステップ出力 auth_url / data_url に書く
-import { branchArg, neon, output, pickUrl } from './neon.mjs';
+import { branchArg, neon, noTrail, output, pickUrl } from './neon.mjs';
 
 let branch = branchArg(); const DB = 'neondb';
 const tryNeon = async (...a) => { try { return await neon(...a); } catch (e) { return null; } };
@@ -58,7 +58,7 @@ if (!api || !/apirest/.test(api)) {
 
 // 4. ログインの戻り先
 if (process.env.APP_ORIGIN) {
-  const host = process.env.APP_ORIGIN.replace(/\/+$/, '');
+  const host = noTrail(process.env.APP_ORIGIN);
   const domains = (await tryNeon('neon-auth', 'domain', 'list', '--branch', branch, '--output', 'json')) || '';
   if (!domains.includes(host.replace(/^https?:\/\//, ''))) { console.log(`信頼するドメインに ${host} を足します`); await neon('neon-auth', 'domain', 'add', host, '--branch', branch); }
 }

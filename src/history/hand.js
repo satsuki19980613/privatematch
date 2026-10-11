@@ -2,7 +2,7 @@
 
 /** アンティ・ブラインドの拠出（席順）。記録には拠出額そのものは無いので、開始スタックとブラインドから復元する */
 export function forcedOf(rec) {
-  const n = rec.startStacks.length, out = Array(n).fill(0);
+  const n = rec.startStacks.length, out = new Array(n).fill(0);
   const live = s => rec.startStacks[s] > 0;
   if (rec.ante > 0) for (let s = 0; s < n; s++) if (live(s)) out[s] += Math.min(rec.startStacks[s], rec.ante);
   if (rec.sbSeat != null) out[rec.sbSeat] += Math.min(rec.startStacks[rec.sbSeat] - out[rec.sbSeat], rec.sb);
@@ -34,7 +34,7 @@ export function positionsOf(rec) {
   const k = live.indexOf(rec.bbSeat);
   const order = k < 0 ? live : [...live.slice(k + 1), ...live.slice(0, k + 1)];
   const names = rec.sbSeat == null && live.length > 2 ? POS[live.length + 1].filter(p => p !== 'SB') : POS[live.length].slice();
-  const out = Array(n).fill(null);
+  const out = new Array(n).fill(null);
   order.forEach((s, i) => { out[s] = names[i] ?? null; });
   return out;
 }

@@ -56,7 +56,7 @@ function paintBet() {
       <div class="seg" id="szStep">${STEPS.map(s => `<button type="button" data-s="${s}" aria-pressed="${sizes.step === s}">${s}</button>`).join('')}</div></section>
     ${SCENES.map(sceneHTML).join('')}
     <div class="btns"><button class="btn ghost" id="szReset" type="button">デフォルトに戻す</button></div>`;
-  $('#szStep').onclick = e => { const b = e.target.closest('[data-s]'); if (!b) return; sizes.step = +b.dataset.s; save(); repaint(); };
+  $('#szStep').onclick = e => { const b = e.target.closest('[data-s]'); if (!b) { return; } sizes.step = +b.dataset.s; save(); repaint(); };
   $('#szReset').onclick = () => { sizes = normalizeSizes(defaultSizes()); unit.vsRaise = unit.vsBet = 'x'; save(); repaint(); };
   body.querySelectorAll('section.sz[data-sc]').forEach(bind);
 }

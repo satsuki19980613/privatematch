@@ -17,16 +17,16 @@ const PAGE = 30;
 let shown = PAGE;
 
 async function load() {
-  if (loading) return; loading = true;
+  if (loading) { return; } loading = true;
   try {
     games = await store.allGames();
     // まだ「途中」の試合（退出した・飛んだあと閉じた）は、サーバーに残っている間に結果を取りに行く
-    const open = app.user ? games.filter(g => g.status === 'running' && (g.startedAt ?? 0) > Date.now() - 3 * 86400_000) : [];
+    const open = app.user ? games.filter(g => g.status === 'running' && (g.startedAt ?? 0) > Date.now() - 3 * 86_400_000) : [];
     if (open.length && (await Promise.all(open.map(g => syncRoom(g.roomId)))).some(Boolean)) games = await store.allGames();
     const hands = await store.handsByRoom();
     mine = new Map(games.map(g => [g.roomId, gameHandStats(hands.get(g.roomId), g.seat)]));
   }
-  catch (e) { games = games || []; toast('この端末では記録を読み書きできません'); }
+  catch { games = games || []; toast('この端末では記録を読み書きできません'); }
   // 選んだモード（選んだことが無ければ最後に終わった試合のモード。知らない値は使わない）
   const m = localGet(MODE_KEY);
   mode = MODE_IDS.includes(m) ? m : latestMode(games, MODE_IDS);
@@ -40,7 +40,7 @@ export function invalidate() { games = null; mine = new Map(); handsCache.clear(
 
 export function render(el, pane, fromLoad) {
   pane0 = pane;
-  if (games === null) { if (!fromLoad) load(); return paint(el, '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>'); }
+  if (games === null) { if (!fromLoad) { void load(); } return paint(el, '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>'); }
   if (pane === 'history') return paint(el, historyHTML(), bindHistory);
   paint(el, statsHTML(), bindStats);
 }
@@ -99,7 +99,7 @@ function geo(points) {
   const n = points.length;
   let min = 0, max = 0; for (const p of points) { min = Math.min(min, p.y); max = Math.max(max, p.y); }
   if (max - min < 2) { max += 1; min -= 1; }
-  const ticks = niceTicks(min, max), lo = Math.min(min, ticks[0] ?? min), hi = Math.max(max, ticks[ticks.length - 1] ?? max);
+  const ticks = niceTicks(min, max), lo = Math.min(min, ticks[0] ?? min), hi = Math.max(max, ticks.at(-1) ?? max);
   const x = i => CPL + (n <= 1 ? CPW / 2 : (i / (n - 1)) * CPW), y = v => CPT + ((hi - v) / (hi - lo || 1)) * CPH;
   return { n, ticks, x, y };
 }
@@ -140,7 +140,7 @@ function bindStats(el) {
       const data = { ...(await store.exportAll()), notes: allNotes() };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
       a.download = `privatematch-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    } catch (e) { toast('書き出せませんでした'); }
+    } catch { toast('書き出せませんでした'); }
   };
   el.querySelector('#impIn').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -149,7 +149,7 @@ function bindStats(el) {
       if (data.notes) importNotes(data.notes);
       toast(`${n} 試合を読み込みました`); invalidate(); render(el, 'stats');
     }
-    catch (err) { toast('読み込めませんでした'); }
+    catch { toast('読み込めませんでした'); }
   };
 }
 
@@ -226,7 +226,7 @@ export function openHand(g, h) {
       ${board ? `<div class="hd-board">${board}</div>` : ''}
       <ul class="hd-acts">${posts}${acts.map(a => `<li><span class="nm2">${name(a.seat)}</span><span class="pl k-${esc(a.kind)}">${esc(actionText(a))}</span>${a.auto ? '<small>auto</small>' : ''}</li>`).join('')}</ul></div>`);
   }
-  const res = h.pots.map((p, i) => `<li>${p.eligible && p.eligible.length === 1 && i > 0 ? 'Uncalled ' : h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && !(p.eligible && p.eligible.length === 1 && i > 0) && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
+  const res = h.pots.map((p, i) => `<li>${p.eligible?.length === 1 && i > 0 ? 'Uncalled ' : h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && !(p.eligible?.length === 1 && i > 0) && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
   $('#handBody').innerHTML = head(`HAND #${fmt(h.handNo)} ・ LV ${fmt(h.level)} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}`) +
     `<table class="tbl hd-tbl"><thead><tr><th>POS</th><th>NAME</th><th>STACK</th><th>CARDS</th><th>NET</th></tr></thead><tbody>${players}</tbody></table>
     ${streets.join('')}

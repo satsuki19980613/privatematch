@@ -36,7 +36,7 @@ function marksHTML(mark) {
 
 /** 自分の手番か（開いている間に回ってきたら知らせる。持ち時間は止まらない） */
 function myTurn() {
-  const v = table.currentView(), h = v && v.hand;
+  const v = table.currentView(), h = v?.hand;
   return !!(h && v.status === 'running' && h.phase === 'betting' && h.toAct === v.seat);
 }
 /** 席 s のプレイヤーを開く */
@@ -72,7 +72,7 @@ export function openPlayer(s) {
   const d = dlg(); d.classList.remove('pd-kb'); d.style.marginTop = '';   // 前にキーボードで上へ寄せたまま閉じていた
   openDlg('#playerDlg');
   $('#pdScroll').focus({ preventScroll: true });
-  load(P);
+  void load(P);
 }
 function save(p) {
   clearTimeout(p.saveT);
@@ -119,7 +119,7 @@ function place() {
   if (on) $('#pdMemo').scrollIntoView({ block: 'nearest' });
 }
 
-export function close() { const d = dlg(); if (d && d.open) d.close(); }
+export function close() { const d = dlg(); if (d?.open) d.close(); }
 
 export function init() {
   // 席を押す（チャットの入力欄が開いていたら、その一押しは入力欄を閉じるだけ）
@@ -139,6 +139,6 @@ export function init() {
     e.preventDefault(); openPlayer(+s.dataset.seat);
   });
   // 閉じる動きの途中で位置を戻すと跳ねるので、margin は次に開くときに戻す
-  dlg().addEventListener('close', () => { flush(); if (P) clearInterval(P.timer); P = null; });
+  dlg().addEventListener('close', () => { flush(); if (P) { clearInterval(P.timer); } P = null; });
   if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
 }

@@ -57,18 +57,18 @@ export async function search(q, page = 1) {
   const d = await get(q ? 'gifs/search' : 'gifs/trending', q ? { ...common, q } : common);
   const items = (d && Array.isArray(d.data) ? d.data : []).map(itemOf).filter(Boolean);
   items.forEach(it => cache.set(it.slug, it));
-  return { items, next: !!(d && d.has_next) };
+  return { items, next: !!d?.has_next };
 }
 
 /** slug の GIF をまとめて引く（卓に入ったときに全席分を 1 回で）。=> Map slug → item（見つからない slug は入らない） */
 export async function lookup(slugs) {
   const want = [...new Set(slugs.filter(Boolean))], out = new Map();
-  const miss = want.filter(s => { const c = cache.get(s); if (c) out.set(s, c); return !c; });
+  const miss = want.filter(s => { const c = cache.get(s); if (c) { out.set(s, c); } return !c; });
   const keep = it => { cache.set(it.slug, it); if (miss.includes(it.slug)) out.set(it.slug, it); };
   if (demo) demo.lookup(miss).forEach(keep);   // 見本（Bot の GIF）
   const rest = miss.filter(s => !out.has(s));
   if (!rest.length || !KEY) return out;
-  const got = ((await get('gifs/items', { slugs: rest.join(',') })) || {}).data || [];
+  const got = (await get('gifs/items', { slugs: rest.join(',') }))?.data || [];
   for (const x of got) { const it = itemOf(x); if (it) keep(it); }
   return out;
 }
