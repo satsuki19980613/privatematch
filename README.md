@@ -3,6 +3,7 @@
 [![CI](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml)
 [![Live](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml)
 [![CodeQL](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml)
+[![Secrets](https://github.com/satsuki19980613/privatematch/actions/workflows/secrets.yml/badge.svg)](https://github.com/satsuki19980613/privatematch/actions/workflows/secrets.yml)
 
 知人同士で No-Limit Hold'em の SIT & GO を遊ぶ Web アプリ。
 
@@ -91,6 +92,7 @@
 | [CI](https://github.com/satsuki19980613/privatematch/actions/workflows/ci.yml) | テスト（データベースを使うものを含む）とビルド | コード変更時 |
 | [Live](https://github.com/satsuki19980613/privatematch/actions/workflows/live.yml) | 本番のサイトとサーバーの疎通、本番のデータベースに個人情報が残っていないこと。開発環境では、実際の通信による 1 試合とレート制限 | 毎週・サーバー変更時 |
 | [CodeQL](https://github.com/satsuki19980613/privatematch/actions/workflows/codeql.yml) | GitHub CodeQL による静的解析 | コード変更時・毎週 |
+| [Secrets](https://github.com/satsuki19980613/privatematch/actions/workflows/secrets.yml) | gitleaks による秘密情報（API キー・トークン・パスワード・秘密鍵など）の検査。全ブランチの全履歴が対象 | コード変更時・毎週 |
 | [Mozilla HTTP Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=privatematch.pages.dev) | 公開サイトのセキュリティヘッダー。**A+**（125 点、12 項目すべて合格。2026-10-10 測定） | リンク先で随時再測定できる |
 
 このほか、依存パッケージの脆弱性を Dependabot で通知している。
