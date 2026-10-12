@@ -1,13 +1,20 @@
 // ルールのモーダル：進行・持ち時間・ブラインド構造（3 種）・ゲームモードの pt。説明は画面に出さずここに集める。
-import { BLIND_TABLES, SPEED_LABEL, SPEEDS, GAME_MODES, MODE_IDS, modeLabel, PLAYER_COUNTS, START_BBS, BASE_BB, LEVEL_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../structure.js';
-import { $, head, openDlg, fmt } from './util.js';
+import { BLIND_TABLES, SPEED_LABEL, SPEEDS, MODE_IDS, modeLabel, payoutsFor, PLAYER_COUNTS, START_BBS, BASE_BB, LEVEL_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../structure.js';
+import { $, head, openDlg, fmt, fmtPt } from './util.js';
 
-let tab = 'normal';
+let tab = 'normal', seats = 6;
+const segBtn = (attr, v, on, label) => '<button type="button" data-' + attr + '="' + v + '" aria-pressed="' + on + '">' + label + '</button>';
 export function openRules() { paint(); openDlg('#rulesDlg'); }
+// 選び直したときは、読んでいた位置を保って描き直す
+function repaint() {
+  const box = $('#rulesBody'), at = box.scrollTop;
+  paint(); box.scrollTop = at;
+}
 function paint() {
   const t = BLIND_TABLES[tab];
   const blinds = t.map(([bb, ante], i) => `<span><i>${i + 1}</i>${fmt(bb / 2)}/${fmt(bb)} (${fmt(ante)})</span>`).join('');
-  const modes = MODE_IDS.map(m => `<tr><td>${modeLabel(m)}</td>${GAME_MODES[m].payouts.map(v => `<td>${v > 0 ? '+' : ''}${v}</td>`).join('')}</tr>`).join('');
+  const places = Array.from({ length: seats }, (_, i) => i + 1);
+  const modes = MODE_IDS.map(m => '<tr><td>' + modeLabel(m) + '</td>' + payoutsFor({ mode: m, players: seats }).map(v => '<td>' + fmtPt(v) + '</td>').join('') + '</tr>').join('');
   $('#rulesBody').innerHTML = head('RULES', 'ルール') + `
     <h3>進行 <span>NO-LIMIT HOLD'EM ・ SIT &amp; GO</span></h3>
     <dl class="spec">
@@ -28,13 +35,18 @@ function paint() {
       <dt>スタッツ</dt><dd>STATS はゲームモードを選んで、そのモードの試合だけで数えます（累計 pt も生存ターンもモードをまたいで混ぜません）。VPIP はプリフロップで自分からチップを入れた（Call / Bet / Raise）ハンドの割合、PFR はプリフロップでレイズしたハンドの割合。生存ターン = ハンド数 ÷ VPIP(%) × 100 ÷ 試合数。</dd>
       <dt>プレイヤー</dt><dd>卓で席（スタック以外）を押すと、その人のその卓のモードでのスタッツ（この端末に残っている、一緒に打って終わった試合から数えます）と、この試合の分が出ます。相手にはメモと色の印を付けられ、印の色は席のプレートに出ます。名前ごとにこの端末に保存し、EXPORT に含みます。</dd>
       <dt>FRIEND MATCH</dt><dd>はじめに Discord でメンバーの確認をします（30 日ごと）。Discord から受け取るのは、専用のサーバーのメンバーかどうかだけです。Discord の ID や名前は保存せず、同じアカウントを見分けるための照合用の値（元に戻せないハッシュ）だけを残します。部屋は PRIVATE MATCH と同じで、部屋番号か招待 URL で集まり、チャットと演出 GIF も使えます。試合が終わると、順位・pt とハンドの集計（ハンド数・VPIP・PFR の回数）がサーバーに残り、メンバー全員の STATS と RANKING に出ます。</dd>
-      <dt>FRIEND STATS</dt><dd>ゲームモードごとに数えます（モードをまたいで混ぜません）。シーズンは日本時間の暦月で、通算も選べます。平均 = 合計 pt ÷ 参加数、加点率 = pt が + になった試合の割合、1位率 = 1 位の割合、平均順位 = 順位の平均、生存T = 生存ターン（ハンド数 ÷ VPIP(%) × 100 ÷ 参加数）。グラフの色の線は強調した人（下のチップで 6 人まで。色は人ごとに決まり、選び直しても変わりません）、破線はメンバー平均です。表の見出しを押すと並べ替え、行を押すとその人の詳細が開きます。RANKING は合計 pt の多い順（同じなら平均順位の良い方、次に参加の多い方）です。</dd>
+      <dt>FRIEND STATS</dt><dd>ゲームモードごとに数えます（モードをまたいで混ぜません）。シーズンは日本時間の暦月で、通算も選べます。平均 = 合計 pt ÷ 参加数、加点率 = pt が + になった試合の割合、1位率 = 1 位の割合、平均順位 = 順位の平均、生存T = 生存ターン（ハンド数 ÷ VPIP(%) × 100 ÷ 参加数）。グラフの色の線は強調した人（下のチップで 6 人まで。色は人ごとに決まり、選び直しても変わりません）、破線はメンバー平均です。表の見出しを押すと並べ替え、行を押すとその人の詳細が開きます。RANKING は合計 pt の多い順（同じなら平均 pt の高い方、次に参加の多い方）です。</dd>
       <dt>ハンド履歴</dt><dd>STACK・NET・POT の単位は BB。Bet / Raise / All-in の数字はそのストリートの合計額、Call は払った額（チップ）。Uncalled はコールされずに戻ったチップです。</dd>
     </dl>
-    <h3>ゲームモード <span>順位 → PT（人数ぶんの先頭を使う）</span></h3>
-    <table class="tbl"><thead><tr><th>MODE</th>${[1, 2, 3, 4, 5, 6].map(i => `<th>${i}位</th>`).join('')}</tr></thead><tbody>${modes}</tbody></table>
+    <h3>ゲームモード <span>順位 → PT</span></h3>
+    <dl class="spec">
+      <dt>人数と PT</dt><dd>6 人卓の表がもとです。少ない人数の卓は、その表を人数ぶんに等分して、順位ごとにその範囲の平均を使います（2 人なら 1 位は 6 人卓の 1〜3 位の平均、2 位は 4〜6 位の平均）。どの人数で打っても 1 人あたりの平均 PT は同じです。</dd>
+    </dl>
+    <div class="seg" id="rulesSeats">${PLAYER_COUNTS.map(n => segBtn('n', n, seats === n, n + '人')).join('')}</div>
+    <table class="tbl"><thead><tr><th>MODE</th>${places.map(i => '<th>' + i + '位</th>').join('')}</tr></thead><tbody>${modes}</tbody></table>
     <h3>ブラインド構造 <span>SB/BB (ANTE)</span></h3>
-    <div class="seg" id="rulesSeg">${SPEEDS.map(s => `<button type="button" data-s="${s}" aria-pressed="${tab === s}">${SPEED_LABEL[s]}</button>`).join('')}</div>
+    <div class="seg" id="rulesSeg">${SPEEDS.map(s => segBtn('s', s, tab === s, SPEED_LABEL[s])).join('')}</div>
     <div class="blinds">${blinds}</div>`;
-  $('#rulesSeg').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { tab = b.dataset.s; paint(); } };
+  $('#rulesSeg').onclick = e => { const b = e.target.closest('[data-s]'); if (b) { tab = b.dataset.s; repaint(); } };
+  $('#rulesSeats').onclick = e => { const b = e.target.closest('[data-n]'); if (b) { seats = +b.dataset.n; repaint(); } };
 }

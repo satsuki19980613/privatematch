@@ -92,9 +92,19 @@ export function modeLabel(mode) {
   if (s.kind === 'legend') return `レジェンドマッチ（${s.variant}）`;
   return 'クラブマッチ';
 }
-/** その部屋の順位 → pt（残り n 人では先頭 n 個） */
+const TABLE_SEATS = 6;   // payouts は 6 人卓の表
+/**
+ * その部屋の順位 → pt。6 人卓の表を人数ぶんに等分し、順位ごとにその範囲の平均を取る
+ * （2 人なら 1 位 = 6 人卓の 1〜3 位の平均、2 位 = 4〜6 位の平均。6 人なら表のまま）。
+ * どの人数でも 1 人あたりの平均 pt が同じになる（少ない人数の卓ほど pt を稼げる、にならない）。小数は 2 桁まで
+ */
 export function payoutsFor(config) {
-  return (GAME_MODES[config.mode] || GAME_MODES.club).payouts.slice(0, config.players);
+  const base = (GAME_MODES[config.mode] || GAME_MODES.club).payouts, n = config.players;
+  return Array.from({ length: n }, (_, p) => {
+    // 1/n 位を単位に数える：この部屋の p 位は [6p, 6(p+1))、表の j 位は [nj, n(j+1))。重なった幅で重み付けする
+    const sum = base.reduce((acc, v, j) => acc + v * Math.max(0, Math.min(TABLE_SEATS * (p + 1), n * (j + 1)) - Math.max(TABLE_SEATS * p, n * j)), 0);
+    return Math.round(sum / TABLE_SEATS * 100) / 100;
+  });
 }
 
 export const DEFAULT_CONFIG = { players: 6, startBb: 100, speed: 'normal', mode: 'club' };

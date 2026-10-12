@@ -2,9 +2,9 @@
 // 参加前の確認、プロフィール。待機室は room.js、成績・履歴は stats.js、FRIEND MATCH（入口・スタッツ・ランキング）は friend.js が同じ #menuIn に描く。
 import {
   PLAYER_COUNTS, START_BBS, SPEEDS, SPEED_LABEL, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES,
-  DEFAULT_CONFIG, normalizeConfig, configSummary, modeLabel, chipsLabel,
+  DEFAULT_CONFIG, normalizeConfig, configSummary, modeLabel, chipsLabel, payoutsFor,
 } from '../structure.js';
-import { $, app, esc, head, openDlg, toast, localGet, localSet, kindLabel } from './util.js';
+import { $, app, esc, head, openDlg, toast, localGet, localSet, kindLabel, fmtPt } from './util.js';
 import * as room from './room.js';
 import * as stats from './stats.js';
 import * as friend from './friend.js';
@@ -156,7 +156,7 @@ function createHTML() {
   const kind = GAME_MODES[cfg.mode].kind, variants = MODES_BY_KIND[kind];
   const kindSeg = `<div class="seg form-seg" data-key="kind">${GAME_KINDS.map(k => `<button type="button" data-v="${k}" aria-pressed="${kind === k}">${GAME_KIND_LABELS[k]}</button>`).join('')}</div>`;
   const varSeg = variants.length > 1 ? `<div class="seg form-seg" data-key="mode">${variants.map(m => `<button type="button" data-v="${m}" aria-pressed="${cfg.mode === m}">${kind === 'rank' ? 'STAGE ' + GAME_MODES[m].variant : GAME_MODES[m].variant}</button>`).join('')}</div>` : '';
-  const pay = GAME_MODES[cfg.mode].payouts.slice(0, cfg.players).map((v, i) => `<span><i>${i + 1}位</i>${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v)}</span>`).join('');
+  const pay = payoutsFor(cfg).map((v, i) => `<span><i>${i + 1}位</i>${fmtPt(v)}</span>`).join('');
   return `${back(createKind)}<div class="pane-h"><span class="eyebrow">${kindLabel(createKind)}</span><b>部屋を作る</b></div>
     <div class="form">
       <span class="lbl">人数</span>${seg('players', PLAYER_COUNTS, v => v + '人')}
