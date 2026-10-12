@@ -2,7 +2,7 @@
 import './ui/viewport.js';
 import * as realNet from './net.js';
 import { app, $, toast, closeAllDlg, localSet, REDUCE, INVITE_KEY } from './ui/util.js';
-import { renderMenu, setPane, openJoin } from './ui/menu.js';
+import { renderMenu, setPane, openJoin, currentPane } from './ui/menu.js';
 import * as room from './ui/room.js';
 import * as table from './ui/table.js';
 import * as stats from './ui/stats.js';
@@ -13,6 +13,7 @@ import { openSettings, onSizesChange } from './ui/settings.js';
 import { onFxChange } from './ui/gif.js';
 import { syncRecent } from './history/sync.js';
 import { useDemo } from './klipy.js';
+import * as update from './ui/update.js';
 
 app.net = realNet; // http://localhost:<port>/?fake では src/fakeNet.js に差し替える（開発のみ）
 
@@ -27,6 +28,7 @@ function toMenu() {
   ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate(); friend.invalidate();
   showScreen('menu'); setPane('main');
   if (app.user) void refreshMe();
+  void update.check();   // 試合の間に新しい版が出ていたら、ここで読み込み直す
 }
 function enterRoom(id, first) {
   if (table.activeId() === id) return;
@@ -126,6 +128,10 @@ async function afterLogin(discord) {
   // 確認できたら FRIEND MATCH の入口へ（部屋に戻った・招待 URL の確認が開いたときはそちらを優先）
   if (friend.isFriend() && !app.prof?.room && !$('#joinDlg').open) setPane('friend');
 }
+// 自動更新（src/ui/update.js）：読み込み直してよいのは、メニューに居て（待機室・卓ではない）、ダイアログも入力の途中も無いとき
+const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+update.init(() => !app.booting && document.body.dataset.screen === 'menu' && currentPane() !== 'room' && !document.querySelector('dialog[open]') && !typing());
 // アプリとしてインストールできるように（キャッシュはしない。public/sw.js）
 if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 await boot();
+update.announce();   // 新しい版で起動したら知らせる

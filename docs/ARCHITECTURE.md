@@ -141,6 +141,7 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 - プレイヤーのメモ（`src/history/notes.js`）：localStorage `pm-notes`（デモは `pm-notes-demo`）に `{ [nameKey]: { name, mark: 0..6, text（200 文字まで）, at } }`（プロトタイプの無い入れ物。名前が `constructor` などでもよい）。印もメモも空なら消す。中身が変わらない書き込みは何もしない（`at` も変えない）。ほかのタブの書き換え（`storage`）で読み直す。IMPORT は壊れた行を捨て、`at` を今より先にせず、同じ人は `at` の新しい方を残し、3000 人まで。
 
 ## 8. 画面
+- 自動更新（`src/update.js`・`src/ui/update.js`）：配信中の `index.html`（`fetch('/', { cache: 'no-store' })`）が読み込む入口のスクリプト（`/assets/index-<ハッシュ>.js`）が、いま動いているものと違えば新しい版。確かめるのは、アプリを前に出したとき（`visibilitychange`）・開いたまま 10 分ごと・メニューに戻ったとき（`toMenu`）。読み込み直す（`location.reload()`）のは、メニューに居て（待機室・卓ではない）、ダイアログも入力の途中も無いときだけ。それ以外で見つけたら覚えておき、次の機会に読み込み直す。後から読み込む部品が取れなかったとき（`vite:preloadError`）も新しい版が出たものとして扱う。読み込み直しは 5 分に 1 回まで（sessionStorage `pm-updated` に時刻だけを置く）。新しい版で起動したら「バージョンを更新しました」とトーストで知らせる（`announce`：前に起動したときの入口を localStorage `pm-version` に置き、違っていれば知らせる。自動で読み込み直したときも、自分で開き直したときも出る。この端末で初めて開いたときは出ない）。開発サーバーでは働かない（入口が `/src/main.js`）。サービスワーカー（`public/sw.js`）は何もキャッシュしない。
 - メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、FRIEND MATCH、STATS、SETTINGS。
 - FRIEND MATCH（`src/ui/friend.js`）：メニューのボタンは、`me().friend.ok` なら入口へ、そうでなければ Discord での確認のダイアログ（`#gateDlg`）を出す。
   - 確認の往復：`discord_start` の URL で Discord へ移動 → 戻ってきた URL の `code` / `state` を起動時に受け取って URL から消し（`takeReturn`）、`discord_link` → `me()` を読み直して入口へ。まだログインしていないブラウザに戻ってきたときは、sessionStorage `pm-discord` に印だけを預け（戻りの値は預けない）、ログインのあとで確認のダイアログをもう一度出す（許可済みなので、同意の画面を挟まずに戻ってくる）。招待 URL から来た friend の部屋は、確認のあと参加の確認に戻る（部屋番号を sessionStorage `pm-invite` に預ける）。
