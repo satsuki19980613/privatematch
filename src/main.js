@@ -134,3 +134,4 @@ update.init(() => !app.booting && document.body.dataset.screen === 'menu' && cur
 // アプリとしてインストールできるように（キャッシュはしない。public/sw.js）
 if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 await boot();
+update.announce();   // 新しい版で起動したら知らせる

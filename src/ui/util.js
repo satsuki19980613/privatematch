@@ -14,9 +14,9 @@ export const app = {
   nav: { toMenu() {}, enterRoom() {}, refreshMe: async () => null, logout: async () => {} },
 };
 
-export function toast(t) {
+export function toast(t, ms = 2200) {
   const el = $('#toast'); el.textContent = t; el.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), ms);
 }
 export function openDlg(id) { const d = $(id); if (!d.open) d.showModal(); }
 export function closeAllDlg() { document.querySelectorAll('dialog[open]').forEach(d => d.close()); }
