@@ -113,13 +113,18 @@ async function boot() {
   if (app.net === realNet) realNet.onSessionLost(() => { table.leave(); room.stop(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください'); });
   try { app.user = await app.net.currentUser(); } catch (e) { app.user = null; }
   app.booting = false;
-  // まだログインしていないブラウザに戻ってきた（Discord のアプリ内ブラウザから始めたときなど）：ログインのあとで確かめる
-  if (!app.user) { if (discord) { friend.keepReturn(discord); } return renderMenu(); }
+  // まだログインしていないブラウザに戻ってきた（Discord のアプリ内ブラウザから始めたときなど）：ログインのあとで、もう一度確認してもらう
+  if (!app.user) { friend.deferReturn(discord); return renderMenu(); }
   stashInvite();
+  await afterLogin(discord);
+}
+// ログイン済みの起動：Discord の戻り（あれば）を確かめてから、プロフィールと居る部屋を読む
+async function afterLogin(discord) {
   const linked = discord ? await friend.finishReturn(discord) : false;
   await refreshMe();
+  if (!linked) return friend.resumeGate();
   // 確認できたら FRIEND MATCH の入口へ（部屋に戻った・招待 URL の確認が開いたときはそちらを優先）
-  if (linked && friend.isFriend() && !app.prof?.room && !$('#joinDlg').open) setPane('friend');
+  if (friend.isFriend() && !app.prof?.room && !$('#joinDlg').open) setPane('friend');
 }
 // アプリとしてインストールできるように（キャッシュはしない。public/sw.js）
 if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

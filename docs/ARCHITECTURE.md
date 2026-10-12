@@ -143,7 +143,7 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 ## 8. 画面
 - メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、FRIEND MATCH、STATS、SETTINGS。
 - FRIEND MATCH（`src/ui/friend.js`）：メニューのボタンは、`me().friend.ok` なら入口へ、そうでなければ Discord での確認のダイアログ（`#gateDlg`）を出す。
-  - 確認の往復：`discord_start` の URL で Discord へ移動 → 戻ってきた URL の `code` / `state` を起動時に受け取って URL から消し（`takeReturn`）、`discord_link` → `me()` を読み直して入口へ。まだログインしていないブラウザに戻ってきたときは、ログインの往復の間だけ sessionStorage `pm-discord` に預け、ログインのあとで確かめる。招待 URL から来た friend の部屋は、確認のあと参加の確認に戻る（部屋番号を sessionStorage `pm-invite` に預ける）。
+  - 確認の往復：`discord_start` の URL で Discord へ移動 → 戻ってきた URL の `code` / `state` を起動時に受け取って URL から消し（`takeReturn`）、`discord_link` → `me()` を読み直して入口へ。まだログインしていないブラウザに戻ってきたときは、sessionStorage `pm-discord` に印だけを預け（戻りの値は預けない）、ログインのあとで確認のダイアログをもう一度出す（許可済みなので、同意の画面を挟まずに戻ってくる）。招待 URL から来た friend の部屋は、確認のあと参加の確認に戻る（部屋番号を sessionStorage `pm-invite` に預ける）。
   - 入口：フレンドマッチを開始（PRIVATE MATCH と同じ部屋の作成。部屋番号と招待 URL を Discord で共有する）・部屋番号で入る・STATS・RANKING。
   - STATS：ゲームモード（種類 → 段階。localStorage `pm-friend-mode`）ごと。「シーズン内」は、シーズン（日本時間の暦月。通算も選べる）の自分の順位・合計・平均と加点率・平均順位、ランキングの上位 5 人（＋自分）、累積ポイント推移のグラフ（強調した人の線とメンバー平均の破線。通算はシーズンごとに足し上げる）、メンバー別の表（合計・平均・加点率・1 位率・平均順位・参加・生存 T。見出しで並べ替え、いちばん上はメンバー平均）。「シーズン推移」は、選んだ指標（合計・平均・加点率・1 位率・平均順位・生存ターン）のシーズンごとのグラフと表（新しいシーズンが左）。行を押すとその人の詳細（`#memberDlg`：通算・VPIP・PFR・順位の分布・シーズン別・最近の記録）。
   - RANKING：ゲームモードとシーズン（通算も）ごと。合計 pt の多い順 → 平均順位の良い順 → 参加の多い順（すべて同じなら同じ順位）。自分の行は YOU の色。

@@ -13,7 +13,7 @@ import {
   cumulative, cumulativeSeasons, trend, toggleFocus, slotOf, parseFocus, fmtRate, fmtNum, dayOf,
 } from '../friend.js';
 
-const MODE_KEY = 'pm-friend-mode', FOCUS_KEY = 'pm-friend-focus', RETURN_KEY = 'pm-discord';
+const MODE_KEY = 'pm-friend-mode', FOCUS_KEY = 'pm-friend-focus', RETRY_KEY = 'pm-discord';
 const FRESH_MS = 30_000;   // 同じモード・シーズンを読み直すまでの間
 const TOP = 5;             // スタッツの画面に出すランキングの人数
 const DOTS = '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>';
@@ -61,28 +61,29 @@ async function startDiscord(invite) {
 }
 // Discord の戻りの形（code は 1 回限りの値、state はサーバーが出した '期限.署名'）
 const RETURN_SHAPE = { code: /^[\w-]{8,128}$/, state: /^\d{10,16}\.[\w-]{20,64}$/ };
-function parseKept(raw) {
-  let v = null;
-  try { v = JSON.parse(raw); } catch { /* 壊れていれば無い扱い */ }
-  return RETURN_SHAPE.code.test(v?.code) && RETURN_SHAPE.state.test(v?.state) ? { code: v.code, state: v.state } : null;
-}
 /**
  * 起動時：Discord から戻ってきた URL（?code=…&state=… / ?error=…&state=…）なら、その値を受け取って URL から消す。
- * URL に無ければ、ログインの前に預けた戻り（keepReturn）を受け取る。=> { code, state } | { error } | null
+ * => { code, state } | { error } | null
  */
 export function takeReturn() {
   const u = new URL(location.href), state = u.searchParams.get('state');
-  const kept = parseKept(sessionTake(RETURN_KEY));
-  if (!state) return kept;
+  if (!state) return null;
   const code = u.searchParams.get('code'), error = u.searchParams.get('error');
   for (const k of ['code', 'state', 'error', 'error_description']) u.searchParams.delete(k);
   history.replaceState(null, '', u.pathname + u.search + u.hash);
-  if (!RETURN_SHAPE.state.test(state)) return kept;
+  if (!RETURN_SHAPE.state.test(state)) return null;
   if (code && RETURN_SHAPE.code.test(code)) return { code, state };
-  return error ? { error } : kept;
+  return error ? { error } : null;
 }
-/** まだログインしていないブラウザに戻ってきた：ログインの往復の間だけ預ける（code の期限が切れていれば、もう一度確認してもらう） */
-export function keepReturn(ret) { if (ret.code) sessionSet(RETURN_KEY, JSON.stringify(ret)); }
+/**
+ * まだログインしていないブラウザに Discord から戻ってきた（Discord のアプリ内ブラウザから始めたときなど）：
+ * ログインのあとで、このブラウザからもう一度確認してもらう。預けるのは印だけ（戻りの値は預けない）
+ */
+export function deferReturn(ret) { if (ret?.code) sessionSet(RETRY_KEY, '1'); }
+/** ログインのあと：deferReturn の印があれば、確認のダイアログを出す（部屋に居る・もう確認済みなら出さない） */
+export function resumeGate() {
+  if (sessionTake(RETRY_KEY) === '1' && app.prof && !app.prof.room && !isFriend()) openGate();
+}
 /** takeReturn の値をサーバーで確かめる（ログイン済みのとき）。=> 確認できたか */
 export async function finishReturn(ret) {
   if (!ret.code) { toast('Discord の確認を中止しました'); return false; }
