@@ -2,7 +2,7 @@
  * Neon Function "game"（PrivateMatch）。配備: npm run deploy:game -- --branch <branch>（GitHub Actions の Deploy から）
  * DATABASE_URL（データベースの所有者）、NEON_AUTH_JWKS_URL、NEON_AUTH_BASE_URL は Neon が入れる。ALLOWED_ORIGINS は --env で渡す。
  * FRIEND MATCH のメンバー確認に使う DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET / DISCORD_GUILD_ID（任意で DISCORD_ROLE_ID）も --env で渡す
- * （無ければ FRIEND MATCH だけが friend_off になる。docs/SETUP.md）。
+ * （無ければ FRIEND MATCH だけが friend_off になる。docs/SETUP.md）。DISCORD_PUBLIC_KEY があれば、番号での確認（Discord のサーバーで /link 番号）も使える。
  */
 import { attachDatabasePool } from '@neon/functions';
 import { createRemoteJWKSet, errors, jwtVerify } from 'jose';
@@ -18,7 +18,7 @@ const pool = new pg.Pool({ connectionString: env('DATABASE_URL'), max: 3 });
 attachDatabasePool(pool);
 const jwks = createRemoteJWKSet(new URL(env('NEON_AUTH_JWKS_URL')));
 const issuer = new URL(env('NEON_AUTH_BASE_URL')).origin;
-const discord = makeDiscord({ clientId: process.env.DISCORD_CLIENT_ID, clientSecret: process.env.DISCORD_CLIENT_SECRET, guildId: process.env.DISCORD_GUILD_ID, roleId: process.env.DISCORD_ROLE_ID || null });
+const discord = makeDiscord({ clientId: process.env.DISCORD_CLIENT_ID, clientSecret: process.env.DISCORD_CLIENT_SECRET, guildId: process.env.DISCORD_GUILD_ID, roleId: process.env.DISCORD_ROLE_ID || null, publicKey: process.env.DISCORD_PUBLIC_KEY || null });
 const db = makeDb(pool, { discord });
 
 const handler = createHandler({

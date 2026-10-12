@@ -53,10 +53,16 @@ FRIEND MATCH は、専用の Discord サーバーのメンバーだけが遊べ�
 | Variable | `DISCORD_ROLE_ID` | ロール ID（任意。入れると、そのロールを持つ人だけ） |
 
 5. Actions → **Deploy** → Run workflow → `production`（または `main` に push）。Function `game` に設定が渡る（`scripts/deploy-game.mjs`）。
+6. 番号での確認（Discord のアプリだけで済む確認。iPhone の Discord アプリは OAuth2 の同意の画面を受け取らないので、iPhone の人はこちらを使う）を使えるようにする。
+   1. 5 の配備が済んでから、Developer Portal のアプリ → **General Information** → **Interactions Endpoint URL** に、Function `game` の URL（`.env.production` の `VITE_GAME_URL`。Deploy のまとめにも出る）を入れて保存する。保存のときに Discord がこの URL を呼んで確かめる（配備の前だと保存できない）。
+   2. アプリを専用のサーバーに入れる：`https://discord.com/oauth2/authorize?client_id=<Client ID>&scope=applications.commands` を開き、専用のサーバーを選んで認証する（サーバーの管理の権限が要る。Bot は入らず、`/link` コマンドだけが使えるようになる）。
+   - アプリの公開鍵と `/link` コマンドの登録は、配備のときに自動で行う（`scripts/discord.mjs`。アプリ自身として Discord に入る）。配備のログに「公開鍵を読めませんでした」と出たときだけ、General Information の **Public Key** を Variable `DISCORD_PUBLIC_KEY` に入れて配備し直す。
+   - Function の URL が変わったら（Neon のブランチを作り直したときなど）、Interactions Endpoint URL も入れ直す。
 
 - 利用者に求める権限は `identify` と `guilds.members.read`（そのサーバーでの本人のメンバー情報だけ）。受け取ったトークンはその場で失効させ、保存しない。Discord の ID も保存せず、Client Secret を鍵にしたハッシュだけを残す（`server/game/discord.js`）。
   Client Secret を作り直すとハッシュが変わる。成績は Google のログインに付いているので消えないが、前の確認が切れるまで（最長 30 日）は、同じ Discord アカウントを 2 人が使っても見分けられない。
 - 確認は 30 日で切れ、もう一度 Discord を経由する（許可済みなら同意の画面は出ない）。サーバーを抜けた人は、次の確認で入れなくなる。
+- 番号での確認：アプリが 6 桁の番号（10 分・1 回限り）を出し、本人が専用のサーバーの中で `/link` に入れて送る。Discord が Function を呼び（署名付き）、Function は署名とサーバーを確かめて、その番号を出した人をメンバーにする。サーバーの中でコマンドを打てること自体がメンバーの証明になる。残すものは OAuth2 と同じハッシュだけ。
 - 開発：`?fake` / `?demo` は確認済みとして動き、スタッツとランキングには見本（`src/friendDemo.js`）が出る。`?fake&nofriend` で確認の往復を確かめられる。開発用ブランチ `dev` には Discord の設定を渡さない（Live は「確認していない人は入れない」ことだけを確かめる）。
 
 ### 演出 GIF（KLIPY。任意）

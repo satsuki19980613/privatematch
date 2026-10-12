@@ -3,6 +3,8 @@ import { MoveError, KINDS } from './rules.js';
 import { normalizeFx } from '../../src/fx.js';
 
 export const MAX_BODY = 4096;
+// Discord からの呼び出し（番号での確認のコマンド）の本文の上限。サーバーやチャンネルの情報が付くので大きい
+export const MAX_INTERACTION = 64 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^\d{6}$/;
 // Discord の確認の往復で使う値（state はサーバーが出した '期限.署名'、code は Discord が返す 1 回限りの値）
@@ -25,12 +27,33 @@ export function createHandler(deps) {
     if (!deps.flood) return true;
     try { return await deps.flood(uid); } catch (e) { log('game: flood', e); return true; }
   }
+  // 署名が合わなければ 401（Discord は登録のときに、わざと合わない署名でも呼んで確かめる）
+  async function interaction(req, signature, reply) {
+    const denied = () => reply(401, { error: 'invalid_signature' });
+    if (!deps.discordInteract || Number(req.headers.get('Content-Length')) > MAX_INTERACTION) return denied();
+    let raw;
+    try {
+      const buf = new Uint8Array(await req.arrayBuffer());
+      if (buf.length > MAX_INTERACTION) return denied();
+      raw = new TextDecoder().decode(buf);
+    } catch { return denied(); }
+    try {
+      const out = await deps.discordInteract(raw, signature, req.headers.get('X-Signature-Timestamp'));
+      return out ? reply(200, out) : denied();
+    } catch (e) {
+      log('game: discord interaction', e);
+      return reply(500, { error: 'internal' });
+    }
+  }
   return async req => {
     const origin = req.headers.get('Origin');
     const cors = { Vary: 'Origin' }; if (origin && allowed.has(origin)) cors['Access-Control-Allow-Origin'] = origin;
     const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...cors, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
     if (req.method !== 'POST') return reply(405, { error: 'method_not_allowed' });
+    // Discord からの呼び出し（番号での確認）：ログインのトークンではなく、Discord の署名で確かめる
+    const signature = req.headers.get('X-Signature-Ed25519');
+    if (signature !== null) return interaction(req, signature, reply);
     const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '');
     let uid = null; if (m) try { uid = await deps.verifyToken(m[1]); } catch (e) { if (e?.unavailable) { return reply(503, { error: 'unavailable' }); } uid = null; }
     if (!uid) return reply(401, { error: 'not_authenticated' });
@@ -84,6 +107,8 @@ export function createHandler(deps) {
         case 'discord_start':
           if (!site) return reply(422, { error: 'malformed' });
           return reply(200, await deps.discordStart(uid, site));
+        case 'discord_code':
+          return reply(200, await deps.discordCode(uid));
         case 'discord_link':
           if (!site || typeof body.code !== 'string' || !DISCORD_CODE.test(body.code) || typeof body.state !== 'string' || !DISCORD_STATE.test(body.state)) return reply(422, { error: 'malformed' });
           return reply(200, await deps.discordLink(uid, { code: body.code, state: body.state }, site));
