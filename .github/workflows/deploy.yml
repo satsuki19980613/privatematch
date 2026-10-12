@@ -7,6 +7,7 @@
 #   Neon の GitHub 連携が入れるもの: Secret NEON_API_KEY, Variable NEON_PROJECT_ID
 #   任意: Variables APP_ORIGIN（既定 https://<CF_PAGES_PROJECT>.pages.dev）, CF_PAGES_PROJECT（既定 privatematch）, NEON_PROD_BRANCH（既定 production。無ければ Neon の既定のブランチ）
 #         Secrets GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET（自前の Google OAuth クライアント）
+#   FRIEND MATCH（Discord のメンバー確認）: Secret DISCORD_CLIENT_SECRET, Variables DISCORD_CLIENT_ID / DISCORD_GUILD_ID（任意で DISCORD_ROLE_ID）。無ければ FRIEND MATCH だけが使えない
 name: Deploy
 
 on:
@@ -86,6 +87,10 @@ jobs:
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NB: ${{ steps.neon.outputs.branch }}
+          DISCORD_CLIENT_ID: ${{ vars.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_ROLE_ID: ${{ vars.DISCORD_ROLE_ID }}
         run: npm run deploy:game -- --branch "$NB"
 
       - name: 本番の住所をコミット（Cloudflare Pages がこれを見てサイトを作り直す）

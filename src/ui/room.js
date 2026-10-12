@@ -1,6 +1,6 @@
 // 待機室：部屋番号・招待 URL・参加者。満席になったら卓へ。room_poll を 1.5 秒ごとに読む。
 import { configSummary } from '../structure.js';
-import { $, app, esc, head, openDlg, toast, clock, inviteUrl, shareInvite, copyText } from './util.js';
+import { $, app, esc, head, openDlg, toast, clock, inviteUrl, shareInvite, copyText, kindLabel } from './util.js';
 import { paint, setPane } from './menu.js';
 
 const POLL_MS = 1500;
@@ -53,7 +53,7 @@ export function render(el) {
   const isHost = v.members[0] === me;
   const url = inviteUrl(rm.code);
   paint(el, `<div class="qbox room-box">
-      <div class="q-stake">${rm.kind === 'free' ? 'FREE MATCH' : 'PRIVATE MATCH'}</div>
+      <div class="q-stake">${kindLabel(rm.kind)}</div>
       <div class="code-big" aria-label="部屋番号"><small>ROOM</small>${esc(rm.code).replace(/(\d{3})(\d{3})/, '$1 $2')}</div>
       <div class="invite"><span class="inv-url">${esc(url)}</span>
         <button class="btn ghost" id="copyUrl" type="button">Copy</button><button class="btn accent" id="shareUrl" type="button">招待</button></div>

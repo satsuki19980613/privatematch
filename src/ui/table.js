@@ -272,8 +272,9 @@ function showResult() {
 }
 
 /* ---------- 再戦 ---------- */
-const privateRoom = v => v?.room?.kind === 'private';
-// 席に残る・再戦で送る演出 GIF（試合の途中で設定を変えた分も再戦に入る。PRIVATE MATCH だけ）
+// チャットと演出 GIF がある部屋（PRIVATE MATCH と FRIEND MATCH。server/game/rules.js の social と同じ）
+const privateRoom = v => ['private', 'friend'].includes(v?.room?.kind);
+// 席に残る・再戦で送る演出 GIF（試合の途中で設定を変えた分も再戦に入る。FREE MATCH には送らない）
 const fxBody = () => (privateRoom(T?.v) ? { fx: getFx() } : {});
 async function stay() {
   const t = T; if (!t || t.rmBusy) return;

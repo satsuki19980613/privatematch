@@ -1,4 +1,4 @@
-// 卓のチャット（PRIVATE MATCH だけ）の文字の決まり。サーバー（server/game/rules.js の postChat）とブラウザ（入力欄）の両方が使う。
+// 卓のチャット（PRIVATE MATCH と FRIEND MATCH）の文字の決まり。サーバー（server/game/rules.js の postChat）とブラウザ（入力欄）の両方が使う。
 // 幅の単位：全角（East Asian Width の W / F 相当・絵文字）= 2、それ以外 = 1。コードポイント単位で数える。
 export const CHAT_MAX_UNITS = 80;          // 全角 40 文字 / 半角 80 文字（20 文字では足りないという声で 2 倍にした）
 export const BUBBLE_MAX_UNITS = 40;        // 吹き出し 1 つ（全角 20 文字）。長い発言は splitChat で分けて順に出す

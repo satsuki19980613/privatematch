@@ -119,7 +119,7 @@ const bump = st => { st.ver++; return st; };
 
 /* ---------------- 作成 ---------------- */
 // opts: { config, names: [n 人], now, rnd?: () => [0,1)（シード用。無ければ crypto）, button?: 初回のボタン席（テスト用）,
-//         stacks?: 開始スタック（テスト用。省略時は全員 startBb × BASE_BB）, fx?: [n 人]（席ごとの演出 GIF の slug か null。PRIVATE MATCH だけ） }
+//         stacks?: 開始スタック（テスト用。省略時は全員 startBb × BASE_BB）, fx?: [n 人]（席ごとの演出 GIF の slug か null。PRIVATE MATCH と FRIEND MATCH だけ） }
 export function newTable({ config, names, now, rnd, button, stacks, fx }) {
   const cfg = normalizeConfig(config);
   if (!cfg) throw new Error('newTable: bad config');

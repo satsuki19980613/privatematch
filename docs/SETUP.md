@@ -37,6 +37,28 @@ Neon Auth・Google ログイン・Data API・開発用ブランチ `dev` は、�
 | Variable | `NEON_PROD_BRANCH` | 本番に使う Neon のブランチ名（既定 `production`。その名前が無ければプロジェクトの既定のブランチを使う） |
 | Secret | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | 自前の Google OAuth クライアント（無ければ Neon の共有アプリ。同意画面に Neon の表示が出る） |
 
+### FRIEND MATCH（Discord のメンバー確認。任意）
+FRIEND MATCH は、専用の Discord サーバーのメンバーだけが遊べる。設定が無ければ FRIEND MATCH だけが使えず（「準備中」と出る）、ほかは今までどおり動く。
+1. https://discord.com/developers/applications で **New Application** を作る（Bot は要らない）。
+2. **OAuth2** を開き、**Client ID** と **Client Secret**（Reset Secret で表示）を控える。**Redirects** に、サイトの URL の末尾に `/` を付けたものを足す（例 `https://privatematch.pages.dev/`。この文字列と完全に一致している必要がある）。
+3. Discord の設定 → 詳細設定 → **開発者モード** をオンにし、専用のサーバーのアイコンを右クリック → **サーバー ID をコピー**。
+   サーバーの中の特定のチャンネルを見られる人だけに絞りたいときは、そのチャンネルを見られるロールを作り、サーバー設定 → ロール → 右クリック → **ロール ID をコピー**。
+4. GitHub の Settings → Secrets and variables → Actions に入れる。
+
+| 種類 | 名前 | 値 |
+|---|---|---|
+| Secret | `DISCORD_CLIENT_SECRET` | Client Secret |
+| Variable | `DISCORD_CLIENT_ID` | Client ID |
+| Variable | `DISCORD_GUILD_ID` | サーバー ID |
+| Variable | `DISCORD_ROLE_ID` | ロール ID（任意。入れると、そのロールを持つ人だけ） |
+
+5. Actions → **Deploy** → Run workflow → `production`（または `main` に push）。Function `game` に設定が渡る（`scripts/deploy-game.mjs`）。
+
+- 利用者に求める権限は `identify` と `guilds.members.read`（そのサーバーでの本人のメンバー情報だけ）。受け取ったトークンはその場で失効させ、保存しない。Discord の ID も保存せず、Client Secret を鍵にしたハッシュだけを残す（`server/game/discord.js`）。
+  Client Secret を作り直すとハッシュが変わる。成績は Google のログインに付いているので消えないが、前の確認が切れるまで（最長 30 日）は、同じ Discord アカウントを 2 人が使っても見分けられない。
+- 確認は 30 日で切れ、もう一度 Discord を経由する（許可済みなら同意の画面は出ない）。サーバーを抜けた人は、次の確認で入れなくなる。
+- 開発：`?fake` / `?demo` は確認済みとして動き、スタッツとランキングには見本（`src/friendDemo.js`）が出る。`?fake&nofriend` で確認の往復を確かめられる。開発用ブランチ `dev` には Discord の設定を渡さない（Live は「確認していない人は入れない」ことだけを確かめる）。
+
 ### 演出 GIF（KLIPY。任意）
 PRIVATE MATCH の勝者の演出 GIF は KLIPY の API を使う。キーが無ければ設定に「演出 GIF」が出ず、ほかは今までどおり動く。
 1. https://partner.klipy.com で登録し、**API Keys** でアプリ（Web）を作ってキーを得る。登録時の API 利用規約は保存しておく。
@@ -46,7 +68,7 @@ PRIVATE MATCH の勝者の演出 GIF は KLIPY の API を使う。キーが無�
 4. Partner Panel の **Content filtering** で、ブロックする語を必要に応じて足す（アプリ側は `content_filter=high` で呼ぶ。結果の並べ替え・間引きは規約で禁止）。
 - 開発：`.env.development.local` に `VITE_KLIPY_KEY` を書く。キー無しでも `?fake` / `?demo` は手元の見本（`src/fxDemo.js`）で全部確かめられる。
 
-秘密の値（API キー・DB の接続文字列）はリポジトリに書かない。コミットされるのは公開の住所（Neon Auth・Data API・Function の URL）だけ。
+秘密の値（API キー・DB の接続文字列・Discord の Client Secret）はリポジトリに書かない。コミットされるのは公開の住所（Neon Auth・Data API・Function の URL）だけ。
 
 ## 2. デプロイ
 - 自動：`main` に push する。

@@ -1,11 +1,12 @@
 // PrivateMatch — 入口：起動、画面の切り替え、アカウント、招待 URL。各画面は src/ui/*。
 import './ui/viewport.js';
 import * as realNet from './net.js';
-import { app, $, toast, closeAllDlg, localSet, REDUCE } from './ui/util.js';
+import { app, $, toast, closeAllDlg, localSet, REDUCE, INVITE_KEY } from './ui/util.js';
 import { renderMenu, setPane, openJoin } from './ui/menu.js';
 import * as room from './ui/room.js';
 import * as table from './ui/table.js';
 import * as stats from './ui/stats.js';
+import * as friend from './ui/friend.js';
 import * as ingame from './ui/ingame.js';
 import { openRules } from './ui/rules.js';
 import { openSettings, onSizesChange } from './ui/settings.js';
@@ -15,7 +16,6 @@ import { useDemo } from './klipy.js';
 
 app.net = realNet; // http://localhost:<port>/?fake では src/fakeNet.js に差し替える（開発のみ）
 
-const INVITE_KEY = 'pm-invite';
 const CODE = /^\d{6}$/;
 
 /* ---------- 画面 ---------- */
@@ -24,7 +24,7 @@ function showScreen(n) {
   if (n !== 'game') document.body.classList.remove('land');
 }
 function toMenu() {
-  ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate();
+  ingame.closeAll(); table.leave(); room.stop(); closeAllDlg(); stats.invalidate(); friend.invalidate();
   showScreen('menu'); setPane('main');
   if (app.user) void refreshMe();
 }
@@ -79,7 +79,7 @@ function takeInvite() {
 $('#rulesBtn').addEventListener('click', openRules);
 $('#setBtn').addEventListener('click', openSettings);
 onSizesChange(table.sizesChanged);
-// 部屋に入った後に演出 GIF を変えたら、すぐ部屋にも反映する（PRIVATE MATCH だけ。サーバーが FREE MATCH は無視する）
+// 部屋に入った後に演出 GIF を変えたら、すぐ部屋にも反映する（PRIVATE MATCH と FRIEND MATCH。サーバーが FREE MATCH は無視する）
 onFxChange(fx => {
   const id = table.activeId() || room.activeId();
   if (id) app.net.game({ op: 'fx', room: id, fx }).catch(() => {});
@@ -105,15 +105,26 @@ async function boot() {
     if (q.has('demo')) { document.body.classList.add('demo'); try { await (await import('./demo.js')).seed(); } catch (e) { /* IndexedDB が使えない */ } }
   }
   app.booting = app.net.online;
+  // Discord の確認（FRIEND MATCH）から戻ってきた URL なら、その値を受け取っておく（ログインの確認が URL の error を消す前に）
+  const discord = friend.takeReturn();
   stashInvite();
   showScreen('menu'); renderMenu();
   if (!app.net.online) return;
   if (app.net === realNet) realNet.onSessionLost(() => { table.leave(); room.stop(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください'); });
   try { app.user = await app.net.currentUser(); } catch (e) { app.user = null; }
   app.booting = false;
-  if (!app.user) return renderMenu();
+  // まだログインしていないブラウザに戻ってきた（Discord のアプリ内ブラウザから始めたときなど）：ログインのあとで、もう一度確認してもらう
+  if (!app.user) { friend.deferReturn(discord); return renderMenu(); }
   stashInvite();
+  await afterLogin(discord);
+}
+// ログイン済みの起動：Discord の戻り（あれば）を確かめてから、プロフィールと居る部屋を読む
+async function afterLogin(discord) {
+  const linked = discord ? await friend.finishReturn(discord) : false;
   await refreshMe();
+  if (!linked) return friend.resumeGate();
+  // 確認できたら FRIEND MATCH の入口へ（部屋に戻った・招待 URL の確認が開いたときはそちらを優先）
+  if (friend.isFriend() && !app.prof?.room && !$('#joinDlg').open) setPane('friend');
 }
 // アプリとしてインストールできるように（キャッシュはしない。public/sw.js）
 if ('serviceWorker' in navigator && !import.meta.env.DEV) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

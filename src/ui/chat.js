@@ -64,7 +64,7 @@ export function onPoll(seq) {
 export function onView(v) {
   if (!S.room || !v) return;
   S.v = v;
-  const on = v.room?.kind === 'private';
+  const on = ['private', 'friend'].includes(v.room?.kind);
   if (on !== S.on) { setOn(on); notify(); }
   if (on && !S.loaded && !S.loading) void pull(true);
   syncTurn();

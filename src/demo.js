@@ -4,16 +4,13 @@
 import { newTable, legalActions, act, tick, dueAt, handRecord } from './engine.js';
 import { PLAYER_COUNTS, START_BBS, SPEEDS, MODE_IDS, payoutsFor } from './structure.js';
 import * as store from './history/store.js';
+import { seeded } from './rnd.js';
 
 const GAMES = 120;
 const ME = 'Satsuki';
 const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 'Taro', 'Nana'];
 const pick = (a, r) => a[Math.floor(r() * a.length)];
 
-// 種から決まる乱数（作り直しても同じサンプルになる）
-function mulberry(seed) {
-  return () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
 function move(st, seat, r, style) {
   const L = legalActions(st, seat), x = r(), stack = st.players[seat].stack;
   if (L.canFold && L.callPut > stack * 0.4 && x < 0.6) return { type: 'fold' };
@@ -48,7 +45,7 @@ function playGame(i, startAt, r) {
   }
   const me = st.players[seat];
   const game = {
-    roomId, code: String(100000 + Math.floor(r() * 900000)), kind: r() < 0.6 ? 'private' : 'free', config, seat, names,
+    roomId, code: String(100000 + Math.floor(r() * 900000)), kind: pick(['private', 'private', 'free', 'friend'], r), config, seat, names,
     players: st.players.map((p, s) => ({ name: names[s], place: p.place, pt: p.pt })),
     place: me.place, pt: me.pt ?? payoutsFor(config)[me.place - 1] ?? 0, status: st.status, startedAt: startAt, endedAt: st.endedAt ?? now, hands: hands.length,
   };
@@ -60,7 +57,8 @@ export async function seed() {
   const reset = new URLSearchParams(location.search).get('demo') === 'reset';
   if (!reset && (await store.allGames()).length) return;
   if (reset) await store.clearAll();
-  const r = mulberry(20261005);
+  // 種から決まる乱数（作り直しても同じサンプルになる）
+  const r = seeded(20261005);
   let t = Date.now() - 90 * 86_400_000;
   for (let i = 0; i < GAMES; i++) {
     const { game, hands, endedAt } = playGame(i, t, r);

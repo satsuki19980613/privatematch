@@ -103,7 +103,7 @@ async function prod() {
   check('Data API はトークン無しを断る（4xx）', d0.status >= 400 && d0.status < 500, `${d0.status} ${d0.body.slice(0, 160)}`);
   const d1 = await timed('data api', DATA + '/rpc/me', { method: 'POST', headers: { Origin: SITE, 'Content-Type': 'application/json', Authorization: 'Bearer eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.AAAA' }, body: '{}' });
   check('Data API は偽のトークンを断る（4xx）', d1.status >= 400 && d1.status < 500, `${d1.status} ${d1.body.slice(0, 160)}`);
-  for (const t of ['profiles', 'rooms', 'room_hands']) {
+  for (const t of ['profiles', 'rooms', 'room_hands', 'friend_members', 'friend_results']) {
     const r = await timed('data api', `${DATA}/${t}?select=*&limit=1`, { headers: { Origin: SITE } });
     check(`Data API で表 ${t} を直接読めない`, r.status >= 400, `${r.status} ${r.body.slice(0, 100)}`);
   }
@@ -154,6 +154,17 @@ async function e2e() {
   check('同じニックネーム（大文字小文字違い）は nickname_taken', dup.code === 'nickname_taken', `${dup.status} ${dup.code}`);
   const anon = await rpc(null, 'me');
   check('トークン無しの me は断られる', anon.status >= 400, `${anon.status} ${anon.body.slice(0, 120)}`);
+
+  // FRIEND MATCH：Discord で確認していない人は部屋を作れず、スタッツも読めない（db/migrations/20261012000000_friend.sql）
+  const fm = await game(users[0], { op: 'create', kind: 'friend', config: { players: 2, startBb: 75, speed: 'normal', mode: 'club' } });
+  check('FRIEND MATCH の部屋は Discord で確認していない人には作れない（not_friend）', fm.status === 403 && fm.code === 'not_friend', `${fm.status} ${fm.code}`);
+  const fst = await rpc(users[0], 'friend_stats', { p_mode: 'club', p_season: null });
+  check('friend_stats も確認していない人は読めない', fst.status >= 400 && /not_friend/.test(fst.body), `${fst.status} ${fst.body.slice(0, 80)}`);
+  // Discord の設定（DISCORD_*）が Function に無ければ friend_off、あれば Discord の同意の画面の URL
+  const ds = await game(users[0], { op: 'discord_start' });
+  check('Discord の確認の開始は friend_off か Discord の URL', (ds.status === 503 && ds.code === 'friend_off') || (ds.status === 200 && String(ds.json?.url).startsWith('https://discord.com/')), `${ds.status} ${ds.code || ''}`);
+  const dl = await game(users[0], { op: 'discord_link', code: 'live-check-code', state: 'not-a-state' });
+  check('形の正しくない state は malformed', dl.status === 422 && dl.code === 'malformed', `${dl.status} ${dl.code}`);
 
   // FreeMatch：作る → 一覧に出る → 作成者が抜けると消える
   const fr = await game(users[0], { op: 'create', kind: 'free', config: { players: 2, startBb: 75, speed: 'normal', levelMin: 3, mode: 'club' } });

@@ -1,6 +1,6 @@
 // 卓の中のヘッダのボタンと、中央に開くすりガラスのモーダル 2 つ：チャット履歴（#chatDlg）と この試合のハンド履歴（#handsDlg）。
 // チャットのデータは ui/chat.js、ハンドは端末の IndexedDB（history/store.js）。ハンドの詳細は STATS と同じ #handDlg（stats.openHand）を上に重ねる。
-import { $, esc, fmt, head, openDlg, cardText, fmtBb, REDUCE, EASE } from './util.js';
+import { $, esc, fmt, head, openDlg, cardText, fmtBb, REDUCE, EASE, kindShort } from './util.js';
 import * as chat from './chat.js';
 import * as table from './table.js';
 import * as store from '../history/store.js';
@@ -96,7 +96,7 @@ async function openHandLog() {
   if (H) clearInterval(H.timer);
   H = { id, g: null, hands: null, last: 0, timer: 0 };
   const h = H;
-  $('#handsBody').innerHTML = `<div class="gd-head">${head('HAND HISTORY', v ? `${v.room.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(v.room.code)}` : '')}<div class="gd-sum" id="handsSum"></div></div>
+  $('#handsBody').innerHTML = `<div class="gd-head">${head('HAND HISTORY', v ? `${kindShort(v.room.kind)} #${esc(v.room.code)}` : '')}<div class="gd-sum" id="handsSum"></div></div>
     <div class="gd-scroll" id="handsScroll" tabindex="-1">${DOTS}</div>`;
   $('#handsScroll').onclick = e => {
     const b = e.target.closest('[data-hand]'); if (!b || !H?.g) return;

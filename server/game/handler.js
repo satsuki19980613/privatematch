@@ -5,11 +5,15 @@ import { normalizeFx } from '../../src/fx.js';
 export const MAX_BODY = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^\d{6}$/;
+// Discord の確認の往復で使う値（state はサーバーが出した '期限.署名'、code は Discord が返す 1 回限りの値）
+const DISCORD_STATE = /^\d{10,16}\.[A-Za-z0-9_-]{20,64}$/;
+const DISCORD_CODE = /^[A-Za-z0-9_-]{8,128}$/;
 // MoveError の code → HTTP ステータス（それ以外は 422）
 export const STATUS = {
   not_found: 404, no_profile: 403, stale: 409, not_yet: 409, game_over: 409, not_your_turn: 409, busy: 409, not_started: 409,
   room_closed: 409, room_full: 409, in_other_room: 409, illegal: 422, malformed: 422,
   chat_closed: 409, too_fast: 429, chat_full: 409, not_host: 409, not_enough: 409, too_many: 429,
+  not_friend: 403, not_member: 403, friend_off: 503, discord_failed: 502,
 };
 
 export function createHandler(deps) {
@@ -42,6 +46,8 @@ export function createHandler(deps) {
     const room = typeof body.room === 'string' && UUID.test(body.room) ? body.room : null;
     // 演出 GIF（create / join / stay / rematch に任意で付く。正しくない slug は「なし」として扱い、参加は止めない）
     const fx = body.fx === undefined ? undefined : normalizeFx(body.fx);
+    // Discord の確認の戻り先（このサイトの入口。許可した Origin から来たリクエストのときだけ）
+    const site = origin && allowed.has(origin) ? origin + '/' : null;
     try {
       switch (body.op) {
         case 'create':
@@ -74,6 +80,13 @@ export function createHandler(deps) {
         case 'chat':
           if (!room || typeof body.text !== 'string') return reply(422, { error: 'malformed' });
           return reply(200, await deps.chat(uid, room, body.text));
+        // FRIEND MATCH のメンバー確認（Discord）。戻り先はこのサイトの入口（許可した Origin + '/'）に限る
+        case 'discord_start':
+          if (!site) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.discordStart(uid, site));
+        case 'discord_link':
+          if (!site || typeof body.code !== 'string' || !DISCORD_CODE.test(body.code) || typeof body.state !== 'string' || !DISCORD_STATE.test(body.state)) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.discordLink(uid, { code: body.code, state: body.state }, site));
         default:
           return reply(422, { error: 'malformed' });
       }
