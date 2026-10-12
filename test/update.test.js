@@ -28,7 +28,7 @@ test('新しい版：入口が違うときだけ。どちらかが分からな�
 
 test('読み込み直しは 5 分に 1 回まで（前の時刻が無い・壊れている・時計が戻ったときは止めない）', () => {
   const now = 1_800_000_000_000;
-  for (const none of [null, undefined, 0, Number.NaN, -1]) assert.equal(mayReload(none, now), true, String(none));
+  for (const none of [null, undefined, 0, Number.NaN, -1, 'x', Infinity]) assert.equal(mayReload(none, now), true, String(none));
   assert.equal(mayReload(now - 1000, now), false);
   assert.equal(mayReload(now - RELOAD_GAP_MS + 1, now), false);
   assert.equal(mayReload(now - RELOAD_GAP_MS, now), true);

@@ -13,4 +13,9 @@ export const entryOf = text => ENTRY.exec(typeof text === 'string' ? text : '')?
 /** 新しい版が出ているか（どちらかが分からなければ false：分からないときは読み込み直さない） */
 export const isStale = (current, latest) => !!current && !!latest && current !== latest;
 /** 前に読み込み直した時刻（無ければ null や NaN）から、いま読み込み直してよいか */
-export const mayReload = (lastAt, now) => !(lastAt > 0) || now - lastAt >= RELOAD_GAP_MS || now < lastAt;
+export function mayReload(lastAt, now) {
+  const last = Number(lastAt);
+  // 記録が無い・壊れている・時計が戻った：止めない
+  if (!Number.isFinite(last) || last <= 0 || now < last) return true;
+  return now - last >= RELOAD_GAP_MS;
+}
