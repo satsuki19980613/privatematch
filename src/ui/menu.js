@@ -79,7 +79,7 @@ function mainHTML() {
     ${r ? `<button class="mbtn back-room" id="backRoom" type="button"><span>参加中の部屋へ戻る<small>部屋番号 ${esc(r.code)}</small></span><span class="rt">→</span></button>` : ''}
     <button class="mbtn" id="pmBtn" type="button"><span>PRIVATE MATCH<small>部屋番号・招待 URL で知り合いと</small></span></button>
     <button class="mbtn" id="fmBtn" type="button"><span>FREE MATCH<small>公開の部屋で誰とでも</small></span></button>
-    <button class="mbtn" id="frBtn" type="button"><span>FRIEND MATCH<small>Discord のメンバーと ・ スタッツとランキング</small></span></button>
+    <button class="mbtn" id="frBtn" type="button"><span>FRIEND MATCH<small>Discord サーバー クロワザードのメンバー限定フレンドマッチ</small></span></button>
     <button class="mbtn" id="stBtn" type="button"><span>STATS<small>成績とハンド履歴</small></span></button>
     <button class="mbtn" id="setMBtn" type="button"><span>SETTINGS<small>${fxAvailable() ? 'ベットサイズ・演出 GIF' : 'ベットサイズ'}</small></span></button>
     ${showcase() ? `<div class="list-h"><span class="eyebrow">SHOWCASE</span></div>
