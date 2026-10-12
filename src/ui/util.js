@@ -50,7 +50,11 @@ export function fmtPt(v) {
   return `${v > 0 ? '+' : '−'}${s}`;
 }
 /** 数字のタイル（STATS と FRIEND MATCH のスタッツ）。値が無い（–）ときは単位を付けない */
-export const statTile = (label, value, unit = '', sub = '', tone = '') => `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unit && value !== '–' ? `<span class="hs-unit">${unit}</span>` : ''}</b>${sub ? `<span class="hs-sub">${sub}</span>` : ''}</div>`;
+export function statTile(label, value, unit = '', sub = '', tone = '') {
+  const unitHTML = unit && value !== '–' ? '<span class="hs-unit">' + unit + '</span>' : '';
+  const subHTML = sub ? '<span class="hs-sub">' + sub + '</span>' : '';
+  return `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unitHTML}</b>${subHTML}</div>`;
+}
 /** bb の表示（小数第 1 位まで） */
 export const fmtBb = (chips, bb) => { const v = Math.round((chips / (bb || 1)) * 10) / 10; return (v % 1 === 0 ? String(v) : v.toFixed(1)); };
 

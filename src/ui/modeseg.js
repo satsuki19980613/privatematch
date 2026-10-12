@@ -3,10 +3,13 @@ import { GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES } from '../stru
 
 const variantLabel = m => (GAME_MODES[m].kind === 'rank' ? 'STAGE ' + GAME_MODES[m].variant : GAME_MODES[m].variant);
 
+const btnHTML = (value, label, on) => `<button type="button" data-v="${value}" aria-pressed="${on}">${label}</button>`;
+
 export function modeSegHTML(mode) {
   const kind = GAME_MODES[mode].kind, variants = MODES_BY_KIND[kind];
-  return `<div class="seg hs-mode" data-key="kind">${GAME_KINDS.map(k => `<button type="button" data-v="${k}" aria-pressed="${kind === k}">${GAME_KIND_LABELS[k]}</button>`).join('')}</div>
-    ${variants.length > 1 ? `<div class="seg hs-mode hs-var" data-key="mode">${variants.map(m => `<button type="button" data-v="${m}" aria-pressed="${mode === m}">${variantLabel(m)}</button>`).join('')}</div>` : ''}`;
+  const kinds = '<div class="seg hs-mode" data-key="kind">' + GAME_KINDS.map(k => btnHTML(k, GAME_KIND_LABELS[k], kind === k)).join('') + '</div>';
+  if (variants.length <= 1) return kinds;
+  return kinds + '<div class="seg hs-mode hs-var" data-key="mode">' + variants.map(m => btnHTML(m, variantLabel(m), mode === m)).join('') + '</div>';
 }
 /** 選択のボタンを押したら onPick(新しいモード)。種類を変えたらその先頭の段階、同じ種類ならそのまま */
 export function bindModeSeg(el, getMode, onPick) {

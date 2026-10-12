@@ -20,7 +20,7 @@ const FREE_POLL_MS = 5000;
 let pane = 'main';
 let createKind = 'private';
 let joinFrom = 'private';   // 「部屋番号で入る」を開いた元（BACK で戻る先）
-const FRIEND_PANES = ['friend', 'fstats', 'frank'];
+const FRIEND_PANES = new Set(['friend', 'fstats', 'frank']);
 let freeList = null, freeTimer = 0, freeGen = 0;
 const root = () => $('#menuIn');
 
@@ -44,7 +44,7 @@ export function renderMenu() {
   if (!app.user) return paint(el, loginHTML(true), bindLogin);
   if (pane === 'room') return room.render(el);
   if (pane === 'stats' || pane === 'history') return stats.render(el, pane);
-  if (FRIEND_PANES.includes(pane)) return friend.render(el, pane);
+  if (FRIEND_PANES.has(pane)) return friend.render(el, pane);
   if (pane === 'private') return paint(el, privateHTML(), bindPrivate);
   if (pane === 'free') return paint(el, freeHTML(), bindFree);
   if (pane === 'create') return paint(el, createHTML(), bindCreate);

@@ -157,10 +157,26 @@ export function render(el, pane) {
   paint(el, statsPaneHTML(), bindStatsPane);
 }
 
+/* ---------- HTML の部品 ---------- */
+const cls = (...names) => names.filter(Boolean).join(' ');
+const slotCls = slot => (slot == null ? '' : 's' + (slot + 1));
+const td = html => '<td>' + html + '</td>';
+const th = html => '<th>' + html + '</th>';
+const optionHTML = (value, label, picked) => `<option value="${esc(value)}"${picked ? ' selected' : ''}>${esc(label)}</option>`;
+const selectHTML = (id, label, options, enabled = true) => `<select class="tin fr-sel" id="${id}" aria-label="${label}"${enabled ? '' : ' disabled'}>${options}</select>`;
+const nameCell = (name, slot) => `<span class="${cls('nmcell', slotCls(slot))}"><i class="key"></i>${esc(name)}</span>`;
+const AVG_CELL = '<td><span class="nmcell legend-avg"><i class="key"></i>メンバー平均</span></td>';
+// 表の 1 行（押すとその人の詳細）。cells = 名前の後ろの列
+const memberTr = (m, me, slot, cells) => `<tr class="${cls('clk', me && 'me-row')}" data-member="${esc(m.k)}"><td>${nameCell(m.name, slot)}</td>${cells}</tr>`;
+// 指標の列（メンバー別の表と、詳細のシーズン別で同じ並び。COLUMNS の順）
+const metricCells = r => `<td class="${toneOf(r.pt)}">${fmtPt(r.pt)}</td>` +
+  [fmtNum(r.avg), fmtRate(r.plusRate), fmtRate(r.firstRate), fmtNum(r.avgPlace), String(r.n), fmtNum(r.survival, 1)].map(td).join('');
+const tableWrap = (headCells, bodyRows) => `<div class="tbl-scroll"><table class="tbl fr-tbl"><thead><tr>${headCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+
 function seasonSelHTML(d) {
-  const picked = d ? seasonOf(d) : S.season ?? '', seasons = [...(d?.seasons ?? [])].reverse();
-  const opt = s => `<option value="${esc(s)}"${s === picked ? ' selected' : ''}>${esc(seasonLabel(s))}</option>`;
-  return `<select class="tin fr-sel" id="seasonSel" aria-label="シーズン"${d ? '' : ' disabled'}>${seasons.map(opt).join('')}${opt(ALL)}</select>`;
+  // 新しいシーズンが上、通算はいちばん下
+  const picked = d ? seasonOf(d) : S.season ?? '', ordered = [...(d?.seasons ?? [])].reverse().concat(ALL);
+  return selectHTML('seasonSel', 'シーズン', ordered.map(s => optionHTML(s, seasonLabel(s), s === picked)).join(''), !!d);
 }
 function bindCommon(el) {
   bindBack(el);
@@ -172,12 +188,13 @@ function bindCommon(el) {
 const bodyWait = () => (S.failed ? '<div class="empty-note">読み込めませんでした。</div>' : DOTS);
 
 /* ---------- ランキング ---------- */
+const rankRowHTML = r => `<li><button class="${cls('rk-row', r.me && 'me-row', r.rank <= 3 && 'top')}" type="button" data-member="${esc(r.k)}">
+    <span class="rk-no">${r.rank}</span><span class="rk-name">${esc(r.name)}${r.me ? ' <em>YOU</em>' : ''}</span>
+    <b class="rk-pt ${toneOf(r.pt)}">${fmtPt(r.pt)}<small>pt</small></b>
+    <span class="rk-meta">${r.n}戦 ・ 平均 ${fmtNum(r.avg)} ・ 1位 ${fmtRate(r.firstRate)} ・ 順位 ${fmtNum(r.avgPlace)}</span></button></li>`;
 function rankListHTML(list) {
   if (!list.length) return EMPTY;
-  return `<ol class="rk">${list.map(r => `<li><button class="rk-row${r.me ? ' me-row' : ''}${r.rank <= 3 ? ' top' : ''}" type="button" data-member="${esc(r.k)}">
-      <span class="rk-no">${r.rank}</span><span class="rk-name">${esc(r.name)}${r.me ? ' <em>YOU</em>' : ''}</span>
-      <b class="rk-pt ${toneOf(r.pt)}">${fmtPt(r.pt)}<small>pt</small></b>
-      <span class="rk-sub">${r.n}戦 ・ 平均 ${fmtNum(r.avg)} ・ 1位 ${fmtRate(r.firstRate)} ・ 順位 ${fmtNum(r.avgPlace)}</span></button></li>`).join('')}</ol>`;
+  return '<ol class="rk">' + list.map(rankRowHTML).join('') + '</ol>';
 }
 function rankPaneHTML() {
   const d = S.data;
@@ -193,29 +210,30 @@ function bindRankPane(el) { bindCommon(el); }
 
 /* ---------- スタッツ ---------- */
 const VIEWS = [['season', 'シーズン内'], ['trend', 'シーズン推移']];
+const viewBtnHTML = ([v, label]) => `<button type="button" data-view="${v}" aria-pressed="${S.view === v}">${label}</button>`;
+const metricSelHTML = () => selectHTML('metricSel', '指標', TREND_METRICS.map(m => optionHTML(m.key, m.label, m.key === S.metric)).join(''));
+function statsBodyHTML(d) {
+  if (!d) return bodyWait();
+  return S.view === 'season' ? seasonViewHTML(d) : trendViewHTML(d);
+}
 function statsPaneHTML() {
   const d = S.data;
-  const pick = S.view === 'season' ? seasonSelHTML(d)
-    : `<select class="tin fr-sel" id="metricSel" aria-label="指標">${TREND_METRICS.map(m => `<option value="${m.key}"${m.key === S.metric ? ' selected' : ''}>${m.label}</option>`).join('')}</select>`;
-  let body = bodyWait();
-  if (d) body = S.view === 'season' ? seasonViewHTML(d) : trendViewHTML(d);
   return `${backBtn('friend')}
     <div class="panel hs-panel fr-panel">
       <div class="hs-head"><span class="hs-title">FRIEND STATS</span><span class="hs-total">${esc(modeLabel(S.mode))}</span></div>
       <div class="hs-modes">${modeSegHTML(S.mode)}</div>
-      <div class="seg fr-view">${VIEWS.map(([v, label]) => `<button type="button" data-view="${v}" aria-pressed="${S.view === v}">${label}</button>`).join('')}</div>
-      ${pick}
-    </div>${body}`;
+      <div class="seg fr-view">${VIEWS.map(viewBtnHTML).join('')}</div>
+      ${S.view === 'season' ? seasonSelHTML(d) : metricSelHTML()}
+    </div>${statsBodyHTML(d)}`;
 }
 
 // グラフの下のチップ（強調する人を選ぶ。グラフの凡例を兼ねる）
+function chipHTML(m, fc) {
+  const slot = slotOf(fc, m.k), off = slot == null && fc.length >= MAX_FOCUS;
+  return `<button type="button" class="${cls('chip', slot != null && 'on', slotCls(slot))}" data-chip="${esc(m.k)}" aria-pressed="${slot != null}"${off ? ' disabled' : ''}><i class="key"></i>${esc(m.name)}</button>`;
+}
 function chipsHTML(members, fc) {
-  const full = fc.length >= MAX_FOCUS;
-  const chip = m => {
-    const slot = slotOf(fc, m.k);
-    return `<button type="button" class="chip${slot == null ? '' : ` on s${slot + 1}`}" data-chip="${esc(m.k)}" aria-pressed="${slot != null}"${slot == null && full ? ' disabled' : ''}><i class="key"></i>${esc(m.name)}</button>`;
-  };
-  return `<div class="chips" role="group" aria-label="グラフで強調するメンバー"><span class="chip legend-avg"><i class="key"></i>平均</span>${members.map(chip).join('')}</div>
+  return `<div class="chips" role="group" aria-label="グラフで強調するメンバー"><span class="chip legend-avg"><i class="key"></i>平均</span>${members.map(m => chipHTML(m, fc)).join('')}</div>
     <div class="chips-foot"><span>強調 ${fc.length} / ${MAX_FOCUS}</span>${fc.length ? '<button type="button" class="back" id="chipClear">すべて解除</button>' : ''}</div>`;
 }
 // 強調した人の線（そのグラフに値のある人だけ）
@@ -229,22 +247,21 @@ function seasonChart(d) {
   const season = seasonOf(d), fc = getFocus(d), ptFmt = v => fmtPt(Math.round(v * 10) / 10);
   const c = season === ALL ? cumulativeSeasons(d) : cumulative(d.games);
   const labels = season === ALL ? c.seasons.map(seasonShort) : c.days.map(dayShort);
-  return { labels, series: focusSeries(d, fc, c.series), avg: c.series.size ? c.avg : null, fmt: ptFmt, zero: true, aria: `${seasonLabel(season)}の累積ポイント推移` };
+  return { labels, series: focusSeries(d, fc, c.series), avg: c.series.size ? c.avg : null, fmt: ptFmt, zero: true, aria: seasonLabel(season) + 'の累積ポイント推移' };
+}
+// 見出し（押すと並べ替え。並べ替え中の列に ▼▲）
+function sortThHTML(key, label) {
+  const on = S.sort.key === key;
+  let aria = '', mark = '';
+  if (on) { aria = S.sort.desc ? ' aria-sort="descending"' : ' aria-sort="ascending"'; mark = S.sort.desc ? ' ▼' : ' ▲'; }
+  return `<th${aria}><button type="button" class="${cls('th-btn', on && 'on')}" data-sort="${key}">${label}${mark}</button></th>`;
 }
 function tableHTML(rows, fc) {
   const total = totalOf(rows), per = total.players || 1;
-  const mark = key => { if (S.sort.key !== key) { return ''; } return S.sort.desc ? ' ▼' : ' ▲'; };
-  const th = (key, label) => `<th${S.sort.key === key ? ` aria-sort="${S.sort.desc ? 'descending' : 'ascending'}"` : ''}><button type="button" class="th-btn${S.sort.key === key ? ' on' : ''}" data-sort="${key}">${label}${mark(key)}</button></th>`;
-  const cells = r => `<td class="${toneOf(r.pt)}">${fmtPt(r.pt)}</td><td>${fmtNum(r.avg)}</td><td>${fmtRate(r.plusRate)}</td><td>${fmtRate(r.firstRate)}</td><td>${fmtNum(r.avgPlace)}</td><td>${r.n}</td><td>${fmtNum(r.survival, 1)}</td>`;
-  const row = r => {
-    const slot = slotOf(fc, r.k);
-    return `<tr class="clk${r.me ? ' me-row' : ''}" data-member="${esc(r.k)}"><td><span class="nmcell${slot == null ? '' : ` s${slot + 1}`}"><i class="key"></i>${esc(r.name)}</span></td>${cells(r)}</tr>`;
-  };
-  return `<div class="tbl-scroll"><table class="tbl fr-tbl">
-      <thead><tr>${th('name', '名前')}${COLUMNS.map(c => th(c.key, c.label)).join('')}</tr></thead>
-      <tbody><tr class="avg-row"><td><span class="nmcell legend-avg"><i class="key"></i>メンバー平均</span></td>
-        <td>${fmtNum(total.pt / per, 1)}</td><td>${fmtNum(total.avg)}</td><td>${fmtRate(total.plusRate)}</td><td>${fmtRate(total.firstRate)}</td><td>${fmtNum(total.avgPlace)}</td><td>${fmtNum(total.n / per, 1)}</td><td>${fmtNum(total.survival, 1)}</td></tr>
-      ${sortRows(rows, S.sort.key, S.sort.desc).map(row).join('')}</tbody></table></div>`;
+  const avgRow = '<tr class="avg-row">' + AVG_CELL + [fmtNum(total.pt / per, 1), fmtNum(total.avg), fmtRate(total.plusRate), fmtRate(total.firstRate),
+    fmtNum(total.avgPlace), fmtNum(total.n / per, 1), fmtNum(total.survival, 1)].map(td).join('') + '</tr>';
+  const body = sortRows(rows, S.sort.key, S.sort.desc).map(r => memberTr(r, r.me, slotOf(fc, r.k), metricCells(r))).join('');
+  return tableWrap(sortThHTML('name', '名前') + COLUMNS.map(c => sortThHTML(c.key, c.label)).join(''), avgRow + body);
 }
 function seasonViewHTML(d) {
   const season = seasonOf(d), rows = memberRows(d, season), ranked = ranking(rows), fc = getFocus(d), mine = ranked.find(r => r.me);
@@ -252,10 +269,10 @@ function seasonViewHTML(d) {
   return `<div class="panel hs-panel fr-panel">
       <div class="hs-head"><span class="hs-title">YOU</span><span class="hs-total">メンバー <b>${rows.length}</b></span></div>
       <div class="hs-grid4">
-        ${statTile('順位', mine ? mine.rank : '–', `/ ${ranked.length}`)}
+        ${statTile('順位', mine ? mine.rank : '–', '/ ' + ranked.length)}
         ${statTile('合計', mine ? fmtPt(mine.pt) : '–', 'pt', '', mine ? toneOf(mine.pt) : '')}
-        ${statTile('平均 ・ 加点率', fmtNum(mine?.avg ?? null), '', mine ? `加点率 ${fmtRate(mine.plusRate)}` : '')}
-        ${statTile('平均順位', fmtNum(mine?.avgPlace ?? null), '位', mine ? `1位率 ${fmtRate(mine.firstRate)}` : '')}
+        ${statTile('平均 ・ 加点率', fmtNum(mine?.avg ?? null), '', mine ? '加点率 ' + fmtRate(mine.plusRate) : '')}
+        ${statTile('平均順位', fmtNum(mine?.avgPlace ?? null), '位', mine ? '1位率 ' + fmtRate(mine.firstRate) : '')}
       </div>
     </div>
     <div class="panel hs-panel fr-panel">
@@ -270,33 +287,34 @@ function seasonViewHTML(d) {
 
 // シーズン推移：選んだ指標のシーズンごとの線と表（新しいシーズンが左）
 const metricOf = () => TREND_METRICS.find(m => m.key === S.metric) ?? TREND_METRICS[0];
+const isPct = key => key === 'plusRate' || key === 'firstRate';
 function metricFmt(key, v) {
   if (key === 'pt') return fmtPt(Math.round(v * 10) / 10);
-  if (key === 'plusRate' || key === 'firstRate') return `${v.toFixed(1)}%`;
+  if (isPct(key)) return v.toFixed(1) + '%';
   return v.toFixed(key === 'survival' ? 1 : 2);
 }
-const metricTick = (key, v) => (key === 'pt' ? fmtPt(Math.round(v)) : String(Number(v.toFixed(1))) + (key === 'plusRate' || key === 'firstRate' ? '%' : ''));
+function metricTick(key, v) {
+  if (key === 'pt') return fmtPt(Math.round(v));
+  const s = String(Number(v.toFixed(1)));
+  return isPct(key) ? s + '%' : s;
+}
 function trendChart(d, t) {
   const m = metricOf();
   return {
     labels: t.seasons.map(seasonShort), series: focusSeries(d, getFocus(d), t.series), avg: t.avg, fmt: v => metricFmt(m.key, v), tick: v => metricTick(m.key, v),
-    zero: m.key === 'pt' || m.key === 'avg', aria: `${m.label}のシーズン推移`,
+    zero: m.key === 'pt' || m.key === 'avg', aria: m.label + 'のシーズン推移',
   };
 }
+// そのシーズン推移に値のある人
+const trendMembers = (d, t) => d.members.filter(x => t.series.get(x.k)?.some(v => v != null));
 function trendTableHTML(d, t, fc) {
-  const m = metricOf(), order = t.seasons.map((_, i) => i).reverse(), cell = v => (v == null ? '–' : metricFmt(m.key, v));
-  const members = d.members.filter(x => t.series.get(x.k)?.some(v => v != null));
-  const row = x => {
-    const slot = slotOf(fc, x.k);
-    return `<tr class="clk${x.k === d.me ? ' me-row' : ''}" data-member="${esc(x.k)}"><td><span class="nmcell${slot == null ? '' : ` s${slot + 1}`}"><i class="key"></i>${esc(x.name)}</span></td>${order.map(i => `<td>${cell(t.series.get(x.k)[i])}</td>`).join('')}</tr>`;
-  };
-  return `<div class="tbl-scroll"><table class="tbl fr-tbl">
-      <thead><tr><th>名前</th>${order.map(i => `<th>${esc(seasonShort(t.seasons[i]))}</th>`).join('')}</tr></thead>
-      <tbody><tr class="avg-row"><td><span class="nmcell legend-avg"><i class="key"></i>メンバー平均</span></td>${order.map(i => `<td>${cell(t.avg[i])}</td>`).join('')}</tr>
-      ${members.map(row).join('')}</tbody></table></div>`;
+  const m = metricOf(), order = t.seasons.map((_, i) => i).reverse();
+  const cells = values => order.map(i => td(values[i] == null ? '–' : metricFmt(m.key, values[i]))).join('');
+  const body = trendMembers(d, t).map(x => memberTr(x, x.k === d.me, slotOf(fc, x.k), cells(t.series.get(x.k)))).join('');
+  return tableWrap(th('名前') + order.map(i => th(esc(seasonShort(t.seasons[i])))).join(''), '<tr class="avg-row">' + AVG_CELL + cells(t.avg) + '</tr>' + body);
 }
 function trendViewHTML(d) {
-  const m = metricOf(), t = trend(d, m.key), fc = getFocus(d), members = d.members.filter(x => t.series.get(x.k)?.some(v => v != null));
+  const m = metricOf(), t = trend(d, m.key), fc = getFocus(d), members = trendMembers(d, t);
   return `<div class="panel hs-panel fr-panel"><span class="hs-title">${m.label}の推移</span>
       ${lineChartHTML(trendChart(d, t))}${chipsHTML(members, fc)}
     </div>
@@ -327,26 +345,34 @@ function bindStatsPane(el) {
 }
 
 /* ===================== メンバーの詳細（通算・順位の分布・シーズン別・最近の記録） ===================== */
+// 順位の分布の 1 行（count 回・全体の何 %）
+function distRowHTML(count, i, max, n) {
+  return `<div class="spd-row fr-dist"><span class="spd-label">${i + 1}位</span><span class="spd-bar"><span class="${cls('spd-fill', i === 0 && 'first')}" style="width:${(count / max) * 100}%"></span></span>
+    <span class="spd-count">${count}<small> ・ ${Math.round((count / n) * 100)}%</small></span></div>`;
+}
+const recentRowHTML = g => `<li><span>${esc(dayShort(dayOf(g.at)))}</span><b>${+g.place}位</b><span class="${toneOf(g.pt)}">${fmtPt(g.pt)}pt</span></li>`;
+function recentHTML(d, k) {
+  const recent = d.games.filter(g => g.k === k).slice(-10).reverse();
+  if (!recent.length) return '';
+  return `<h3>最近の記録 <span>${esc(seasonLabel(d.season))}</span></h3><ul class="fr-recs">` + recent.map(recentRowHTML).join('') + '</ul>';
+}
 function openMember(k) {
   const d = S.data, who = d?.members.find(m => m.k === k);
   if (!who) return;
   const all = memberRows(d, ALL).find(r => r.k === k), max = Math.max(1, ...all.dist);
-  const dist = all.dist.map((c, i) => `<div class="spd-row fr-dist"><span class="spd-label">${i + 1}位</span><span class="spd-bar"><span class="spd-fill${i === 0 ? ' first' : ''}" style="width:${(c / max) * 100}%"></span></span><span class="spd-count">${c}<small> ・ ${Math.round((c / all.n) * 100)}%</small></span></div>`).join('');
   const seasons = [...d.seasons].reverse().map(s => [s, memberRows(d, s).find(r => r.k === k)]).filter(([, r]) => r);
-  const recent = d.games.filter(g => g.k === k).slice(-10).reverse();
   $('#memberBody').innerHTML = head('MEMBER', esc(who.name)) + `<p class="hint">${esc(modeLabel(S.mode))}</p>
     <div class="hs-grid fr-grid">
-      ${statTile('通算', fmtPt(all.pt), 'pt', `${all.n} 戦`, toneOf(all.pt))}
-      ${statTile('平均 ・ 加点率', fmtNum(all.avg), '', `加点率 ${fmtRate(all.plusRate)}`)}
-      ${statTile('1位率 ・ 平均順位', fmtRate(all.firstRate), '', `平均 ${fmtNum(all.avgPlace)} 位`)}
-      ${statTile('VPIP', fmtRate(all.vpipRate), '', `${all.hands.toLocaleString()} HANDS`)}
+      ${statTile('通算', fmtPt(all.pt), 'pt', all.n + ' 戦', toneOf(all.pt))}
+      ${statTile('平均 ・ 加点率', fmtNum(all.avg), '', '加点率 ' + fmtRate(all.plusRate))}
+      ${statTile('1位率 ・ 平均順位', fmtRate(all.firstRate), '', '平均 ' + fmtNum(all.avgPlace) + ' 位')}
+      ${statTile('VPIP', fmtRate(all.vpipRate), '', all.hands.toLocaleString() + ' HANDS')}
       ${statTile('PFR', fmtRate(all.pfrRate))}
       ${statTile('生存ターン', fmtNum(all.survival, 1))}
     </div>
-    <h3>順位の分布</h3><div class="spd">${dist}</div>
+    <h3>順位の分布</h3><div class="spd">${all.dist.map((c, i) => distRowHTML(c, i, max, all.n)).join('')}</div>
     <h3>シーズン別</h3>
-    <div class="tbl-scroll"><table class="tbl fr-tbl"><thead><tr><th>シーズン</th>${COLUMNS.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>
-      <tbody>${seasons.map(([s, r]) => `<tr><td>${esc(seasonShort(s))}</td><td class="${toneOf(r.pt)}">${fmtPt(r.pt)}</td><td>${fmtNum(r.avg)}</td><td>${fmtRate(r.plusRate)}</td><td>${fmtRate(r.firstRate)}</td><td>${fmtNum(r.avgPlace)}</td><td>${r.n}</td><td>${fmtNum(r.survival, 1)}</td></tr>`).join('')}</tbody></table></div>
-    ${recent.length ? `<h3>最近の記録 <span>${esc(seasonLabel(d.season))}</span></h3><ul class="fr-recs">${recent.map(g => `<li><span>${esc(dayShort(dayOf(g.at)))}</span><b>${+g.place}位</b><span class="${toneOf(g.pt)}">${fmtPt(g.pt)}pt</span></li>`).join('')}</ul>` : ''}`;
+    ${tableWrap(th('シーズン') + COLUMNS.map(c => th(c.label)).join(''), seasons.map(([s, r]) => '<tr>' + td(esc(seasonShort(s))) + metricCells(r) + '</tr>').join(''))}
+    ${recentHTML(d, k)}`;
   openDlg('#memberDlg');
 }

@@ -16,6 +16,7 @@
   --smoke:rgba(255,255,255,.34);--smoke-edge:rgba(13,15,19,.07);--smoke-shadow:0 10px 28px -18px rgba(22,26,44,.45);
   --f-ui:"Zen Kaku Gothic New","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif;
   --f-num:"Inter Tight","Inter","Helvetica Neue",Arial,sans-serif;
+  --fs1:#2a78d6;--fs2:#eb6834;--fs3:#1baf7a;--fs4:#eda100;--fs5:#e87ba4;--fs6:#008300;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){
@@ -31,6 +32,7 @@
     --pop-bg:rgba(22,24,30,.92);
     --p1:transparent; --p2:transparent; --p3:transparent; --p4:transparent;
     --smoke:rgba(255,255,255,.035);--smoke-edge:rgba(255,255,255,.07);--smoke-shadow:0 14px 32px -20px rgba(0,0,0,.9);
+    --fs1:#3987e5;--fs2:#d95926;--fs3:#199e70;--fs4:#c98500;--fs5:#d55181;--fs6:#008300;
     color-scheme:dark;
   }
 }
@@ -46,6 +48,7 @@
   --pop-bg:rgba(22,24,30,.92);
   --p1:transparent; --p2:transparent; --p3:transparent; --p4:transparent;
   --smoke:rgba(255,255,255,.035);--smoke-edge:rgba(255,255,255,.07);--smoke-shadow:0 14px 32px -20px rgba(0,0,0,.9);
+  --fs1:#3987e5;--fs2:#d95926;--fs3:#199e70;--fs4:#c98500;--fs5:#d55181;--fs6:#008300;
   color-scheme:dark;
 }
 
@@ -1063,9 +1066,7 @@ dialog.glass-dlg.pd-kb{margin-bottom:auto}
 
 /* ===== FRIEND MATCH : stats / ranking (src/ui/friend.js・src/ui/linechart.js) ===== */
 /* グラフの系列の色（強調した人。色は人に付き、順位では塗り替えない）。ライトとダークで別の段を選んである（色覚の違いでも隣どうしが見分けられる並び） */
-:root{--fs1:#2a78d6;--fs2:#eb6834;--fs3:#1baf7a;--fs4:#eda100;--fs5:#e87ba4;--fs6:#008300}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){--fs1:#3987e5;--fs2:#d95926;--fs3:#199e70;--fs4:#c98500;--fs5:#d55181;--fs6:#008300} }
-:root[data-theme="dark"]{--fs1:#3987e5;--fs2:#d95926;--fs3:#199e70;--fs4:#c98500;--fs5:#d55181;--fs6:#008300}
+/* 色そのもの（--fs1〜--fs6）は先頭の tokens にある */
 .s1{--sc:var(--fs1)}.s2{--sc:var(--fs2)}.s3{--sc:var(--fs3)}.s4{--sc:var(--fs4)}.s5{--sc:var(--fs5)}.s6{--sc:var(--fs6)}
 .menu-in:has(.fr-panel){width:min(560px,100%)}
 .fr-panel{grid-column:1/-1;min-width:0}
@@ -1085,7 +1086,7 @@ dialog.glass-dlg.pd-kb{margin-bottom:auto}
 .rk-name em{font-style:normal;font-family:var(--f-num);font-size:10px;letter-spacing:.1em;color:var(--you-text);margin-left:4px}
 .rk-pt{font-family:var(--f-num);font-weight:600;font-size:18px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
 .rk-pt small{font-size:10px;font-weight:600;color:var(--muted);margin-left:2px;letter-spacing:0}
-.rk-sub{grid-column:2/4;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rk-meta{grid-column:2/4;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 折れ線グラフ */
 .lc-read{min-height:18px;display:flex;flex-wrap:wrap;gap:2px 12px;font-family:var(--f-num);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .lc-read b{color:var(--ink);font-weight:600}

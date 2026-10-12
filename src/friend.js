@@ -81,7 +81,7 @@ export const COLUMNS = [
 ];
 /** 並べ替え（key = 'name' か COLUMNS のキー。desc = 良い順。値の無い人は最後） */
 export function sortRows(rows, key, desc = true) {
-  if (key === 'name') return [...rows].sort((a, b) => (desc ? byName(a, b) : byName(b, a)));
+  if (key === 'name') { const sign = desc ? 1 : -1; return [...rows].sort((a, b) => sign * byName(a, b)); }
   const flip = COLUMNS.find(c => c.key === key)?.lowBetter ? !desc : desc;
   return [...rows].sort((a, b) => {
     if (a[key] == null || b[key] == null) return Number(a[key] == null) - Number(b[key] == null) || byName(a, b);
