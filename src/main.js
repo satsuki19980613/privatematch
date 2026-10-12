@@ -113,7 +113,8 @@ async function boot() {
   if (app.net === realNet) realNet.onSessionLost(() => { table.leave(); room.stop(); app.user = null; app.prof = null; showScreen('menu'); renderMenu(); toast('ログインし直してください'); });
   try { app.user = await app.net.currentUser(); } catch (e) { app.user = null; }
   app.booting = false;
-  if (!app.user) return renderMenu();
+  // まだログインしていないブラウザに戻ってきた（Discord のアプリ内ブラウザから始めたときなど）：ログインのあとで確かめる
+  if (!app.user) { if (discord) { friend.keepReturn(discord); } return renderMenu(); }
   stashInvite();
   const linked = discord ? await friend.finishReturn(discord) : false;
   await refreshMe();

@@ -13,7 +13,7 @@ import {
   cumulative, cumulativeSeasons, trend, toggleFocus, slotOf, parseFocus, fmtRate, fmtNum, dayOf,
 } from '../friend.js';
 
-const MODE_KEY = 'pm-friend-mode', FOCUS_KEY = 'pm-friend-focus', STATE_KEY = 'pm-discord';
+const MODE_KEY = 'pm-friend-mode', FOCUS_KEY = 'pm-friend-focus', RETURN_KEY = 'pm-discord';
 const FRESH_MS = 30_000;   // 同じモード・シーズンを読み直すまでの間
 const TOP = 5;             // スタッツの画面に出すランキングの人数
 const DOTS = '<div class="empty-note"><span class="dots" style="justify-content:center"><i></i><i></i><i></i></span></div>';
@@ -30,7 +30,6 @@ export const isFriend = () => !!app.prof?.friend?.ok;
 
 /* ===================== Discord のメンバー確認 ===================== */
 const LINK_ERR = { not_member: 'Discord のメンバーではありません', friend_off: 'FRIEND MATCH は準備中です', too_many: '回数が多すぎます。しばらく待ってから' };
-const randomState = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
 function sessionSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* プライベートモード */ } }
 function sessionTake(k) {
   try { const v = sessionStorage.getItem(k); sessionStorage.removeItem(k); return v; } catch { return null; }
@@ -52,31 +51,42 @@ export function openGate(invite = null) {
     try { await startDiscord(invite); } catch (e) { go.disabled = false; toast(LINK_ERR[e.code] || '確認を始められませんでした'); }
   };
 }
-// Discord の同意の画面へ（このページを離れる）。戻りを照合する state と、あとで入る部屋番号はセッションに預ける
+// Discord の同意の画面へ（このページを離れる）。あとで入る部屋番号はセッションに預ける。
+// 戻りを照合する state はサーバーが出し、戻ったときもサーバーが確かめる（server/game/discord.js）：
+// Discord のアプリ内ブラウザから始めると、認可のあと別のブラウザへ戻ってくることがあり、このブラウザに預けた値では照合できないため
 async function startDiscord(invite) {
-  const state = randomState();
-  const r = await app.net.game({ op: 'discord_start', state });
-  sessionSet(STATE_KEY, state);
+  const r = await app.net.game({ op: 'discord_start' });
   if (invite) sessionSet(INVITE_KEY, invite);
   location.assign(r.url);
 }
+// Discord の戻りの形（code は 1 回限りの値、state はサーバーが出した '期限.署名'）
+const RETURN_SHAPE = { code: /^[\w-]{8,128}$/, state: /^\d{10,16}\.[\w-]{20,64}$/ };
+function parseKept(raw) {
+  let v = null;
+  try { v = JSON.parse(raw); } catch { /* 壊れていれば無い扱い */ }
+  return RETURN_SHAPE.code.test(v?.code) && RETURN_SHAPE.state.test(v?.state) ? { code: v.code, state: v.state } : null;
+}
 /**
  * 起動時：Discord から戻ってきた URL（?code=…&state=… / ?error=…&state=…）なら、その値を受け取って URL から消す。
- * state が預けたものと違えば受け取らない。=> { code } | { error } | null
+ * URL に無ければ、ログインの前に預けた戻り（keepReturn）を受け取る。=> { code, state } | { error } | null
  */
 export function takeReturn() {
   const u = new URL(location.href), state = u.searchParams.get('state');
-  if (!state) return null;
-  const mine = sessionTake(STATE_KEY) === state, code = u.searchParams.get('code'), error = u.searchParams.get('error');
+  const kept = parseKept(sessionTake(RETURN_KEY));
+  if (!state) return kept;
+  const code = u.searchParams.get('code'), error = u.searchParams.get('error');
   for (const k of ['code', 'state', 'error', 'error_description']) u.searchParams.delete(k);
   history.replaceState(null, '', u.pathname + u.search + u.hash);
-  if (!mine || (!code && !error)) return null;
-  return code ? { code } : { error };
+  if (!RETURN_SHAPE.state.test(state)) return kept;
+  if (code && RETURN_SHAPE.code.test(code)) return { code, state };
+  return error ? { error } : kept;
 }
+/** まだログインしていないブラウザに戻ってきた：ログインの往復の間だけ預ける（code の期限が切れていれば、もう一度確認してもらう） */
+export function keepReturn(ret) { if (ret.code) sessionSet(RETURN_KEY, JSON.stringify(ret)); }
 /** takeReturn の値をサーバーで確かめる（ログイン済みのとき）。=> 確認できたか */
 export async function finishReturn(ret) {
   if (!ret.code) { toast('Discord の確認を中止しました'); return false; }
-  try { await app.net.game({ op: 'discord_link', code: ret.code }); }
+  try { await app.net.game({ op: 'discord_link', code: ret.code, state: ret.state }); }
   catch (e) { toast(LINK_ERR[e.code] || 'Discord で確認できませんでした'); return false; }
   toast('Discord のメンバーを確認しました');
   return true;

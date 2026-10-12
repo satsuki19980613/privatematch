@@ -176,15 +176,17 @@ export function makeDb(pool, deps = {}) {
     }),
     request: step((room, uid, req) => applyRequest(room, uid, req, now())),
 
-    // Discord の同意の画面へ。=> { url }
-    discordStart: async (redirect, state) => {
+    // Discord の同意の画面へ（state はその人に出す。discord.js）。=> { url }
+    discordStart: async (uid, redirect) => {
       if (!discord) throw new MoveError('friend_off');
-      return { url: discord.authorizeUrl(redirect, state) };
+      return { url: discord.authorizeUrl(redirect, discord.stateFor(uid, now())) };
     },
     // Discord から戻った code を確かめ、メンバーなら friend_members に入れる。=> { ok: true, until }
+    // state がその人に出したものでなければ断る（ほかの人の code を混ぜられない）。
     // 回数は Discord に問い合わせる前に数える（失敗した分も数える）。メンバーでなければ前の確認も消す（サーバーを抜けた人）
-    discordLink: async (uid, code, redirect) => {
+    discordLink: async (uid, { code, state }, redirect) => {
       if (!discord) throw new MoveError('friend_off');
+      if (!discord.checkState(state, uid, now())) throw new MoveError('discord_failed');
       const hit = await pool.query("select public.rate_hit($1,'discord') as ok", [uid]).catch(e => { if (e?.code === '23503') { throw new MoveError('no_profile'); } throw e; });
       if (!hit.rows[0].ok) throw new MoveError('too_many');
       const v = await discord.verify(code, redirect);

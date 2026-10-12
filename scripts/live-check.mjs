@@ -161,10 +161,10 @@ async function e2e() {
   const fst = await rpc(users[0], 'friend_stats', { p_mode: 'club', p_season: null });
   check('friend_stats も確認していない人は読めない', fst.status >= 400 && /not_friend/.test(fst.body), `${fst.status} ${fst.body.slice(0, 80)}`);
   // Discord の設定（DISCORD_*）が Function に無ければ friend_off、あれば Discord の同意の画面の URL
-  const ds = await game(users[0], { op: 'discord_start', state: `live-${RUN}-state-0000` });
+  const ds = await game(users[0], { op: 'discord_start' });
   check('Discord の確認の開始は friend_off か Discord の URL', (ds.status === 503 && ds.code === 'friend_off') || (ds.status === 200 && String(ds.json?.url).startsWith('https://discord.com/')), `${ds.status} ${ds.code || ''}`);
-  const dl = await game(users[0], { op: 'discord_link', code: '!' });
-  check('形の正しくない code は malformed', dl.status === 422 && dl.code === 'malformed', `${dl.status} ${dl.code}`);
+  const dl = await game(users[0], { op: 'discord_link', code: 'live-check-code', state: 'not-a-state' });
+  check('形の正しくない state は malformed', dl.status === 422 && dl.code === 'malformed', `${dl.status} ${dl.code}`);
 
   // FreeMatch：作る → 一覧に出る → 作成者が抜けると消える
   const fr = await game(users[0], { op: 'create', kind: 'free', config: { players: 2, startBb: 75, speed: 'normal', levelMin: 3, mode: 'club' } });

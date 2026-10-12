@@ -5,8 +5,8 @@ import { normalizeFx } from '../../src/fx.js';
 export const MAX_BODY = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^\d{6}$/;
-// Discord の確認の往復で使う値（state はブラウザが作る乱数、code は Discord が返す 1 回限りの値）
-const DISCORD_STATE = /^[A-Za-z0-9_-]{16,64}$/;
+// Discord の確認の往復で使う値（state はサーバーが出した '期限.署名'、code は Discord が返す 1 回限りの値）
+const DISCORD_STATE = /^\d{10,16}\.[A-Za-z0-9_-]{20,64}$/;
 const DISCORD_CODE = /^[A-Za-z0-9_-]{8,128}$/;
 // MoveError の code → HTTP ステータス（それ以外は 422）
 export const STATUS = {
@@ -82,11 +82,11 @@ export function createHandler(deps) {
           return reply(200, await deps.chat(uid, room, body.text));
         // FRIEND MATCH のメンバー確認（Discord）。戻り先はこのサイトの入口（許可した Origin + '/'）に限る
         case 'discord_start':
-          if (!site || typeof body.state !== 'string' || !DISCORD_STATE.test(body.state)) return reply(422, { error: 'malformed' });
-          return reply(200, await deps.discordStart(site, body.state));
+          if (!site) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.discordStart(uid, site));
         case 'discord_link':
-          if (!site || typeof body.code !== 'string' || !DISCORD_CODE.test(body.code)) return reply(422, { error: 'malformed' });
-          return reply(200, await deps.discordLink(uid, body.code, site));
+          if (!site || typeof body.code !== 'string' || !DISCORD_CODE.test(body.code) || typeof body.state !== 'string' || !DISCORD_STATE.test(body.state)) return reply(422, { error: 'malformed' });
+          return reply(200, await deps.discordLink(uid, { code: body.code, state: body.state }, site));
         default:
           return reply(422, { error: 'malformed' });
       }

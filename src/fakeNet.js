@@ -417,7 +417,7 @@ export async function game(body) {
       case 'discord_start': {
         if (!NOFRIEND) throw new MoveError('friend_off');
         const u = new URL(location.href);
-        u.searchParams.set('code', 'fake-discord-code'); u.searchParams.set('state', body.state);
+        u.searchParams.set('code', 'fake-discord-code'); u.searchParams.set('state', `${now + 600_000}.fake-state-signature-0123456789`);
         return lag({ url: u.toString() });
       }
       case 'discord_link': {

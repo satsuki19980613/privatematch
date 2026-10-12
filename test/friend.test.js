@@ -9,7 +9,7 @@ import {
 } from '../src/friend.js';
 import { aggregate, sampleRows, seasonAt, demoKey } from '../src/friendDemo.js';
 import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, postChat, setRoomFx, friendResults, social, KINDS } from '../server/game/rules.js';
-import { makeDiscord } from '../server/game/discord.js';
+import { makeDiscord, STATE_TTL_MS } from '../server/game/discord.js';
 import { createHandler, STATUS } from '../server/game/handler.js';
 import { makeDb } from '../server/game/db.js';
 import { DEFAULT_CONFIG, MODE_IDS, payoutsFor } from '../src/structure.js';
@@ -255,6 +255,23 @@ describe('Discord のメンバー確認', () => {
     assert.deepEqual(Object.fromEntries(u.searchParams), { client_id: '111', response_type: 'code', scope: 'identify guilds.members.read', redirect_uri: 'https://app.example/', state: 'state-1234567890abcd', prompt: 'none' });
   });
 
+  test('state はその人・その期限のものだけが合う（ほかの人・期限切れ・書き換え・別の鍵は合わない）', () => {
+    const d = makeDiscord(CFG), now = 1_800_000_000_000, state = d.stateFor(U(1), now);
+    assert.match(state, /^\d{13}\.[\w-]{43}$/);
+    assert.equal(d.checkState(state, U(1), now), true);
+    assert.equal(d.checkState(state, U(1), now + STATE_TTL_MS), true);
+    assert.equal(d.checkState(state, U(1), now + STATE_TTL_MS + 1), false);   // 10 分で切れる
+    assert.equal(d.checkState(state, U(2), now), false);                      // ほかの人に出したもの
+    const [exp, sig] = state.split('.');
+    assert.equal(d.checkState(`${+exp + 60_000}.${sig}`, U(1), now), false);  // 期限を書き換えた
+    assert.equal(d.checkState(`${exp}.${sig.slice(0, -1)}A`, U(1), now), false);
+    assert.equal(d.checkState(`${exp}.${sig}.x`, U(1), now), false);
+    for (const bad of ['', 'x', '.', `${exp}.`, `.${sig}`, 'NaN.abc', null, undefined, 5]) assert.equal(d.checkState(bad, U(1), now), false, String(bad));
+    // 先の日付の期限は、署名が合っていても通さない（出したのは今から 10 分以内のものだけ）
+    assert.equal(d.checkState(d.stateFor(U(1), now + STATE_TTL_MS + 1), U(1), now), false);
+    assert.equal(makeDiscord({ ...CFG, clientSecret: 'other' }).checkState(state, U(1), now), false);
+  });
+
   test('メンバーなら鍵付きハッシュを返し、トークンは失効させる（ID もトークンも返さない）', async () => {
     const calls = [], d = makeDiscord({ ...CFG, fetcher: fakeDiscord({ id: '123456789012345678' }, calls) });
     const v = await d.verify('code-1', 'https://app.example/');
@@ -299,27 +316,28 @@ describe('HTTP：Discord の確認', () => {
   const calls = [];
   const h = createHandler({
     allowedOrigins: ['https://app.example'], verifyToken: async t => (t === 'good' ? U(1) : null), logError: () => {},
-    discordStart: async (redirect, state) => { calls.push(['start', redirect, state]); return { url: 'https://discord.com/oauth2/authorize?x=1' }; },
-    discordLink: async (uid, code, redirect) => { calls.push(['link', uid, code, redirect]); return { ok: true, until: 1 }; },
+    discordStart: async (uid, redirect) => { calls.push(['start', uid, redirect]); return { url: 'https://discord.com/oauth2/authorize?x=1' }; },
+    discordLink: async (uid, ret, redirect) => { calls.push(['link', uid, ret, redirect]); return { ok: true, until: 1 }; },
   });
   const post = async (body, origin = 'https://app.example', token = 'good') => {
     const r = await h(new Request('https://f/', { method: 'POST', headers: { Authorization: `Bearer ${token}`, ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) }));
     return [r.status, await r.json()];
   };
 
-  test('戻り先はこのサイトの入口だけ。state と code の形を確かめる', async () => {
-    assert.deepEqual(await post({ op: 'discord_start', state: 'abcdef0123456789abcdef0123456789' }), [200, { url: 'https://discord.com/oauth2/authorize?x=1' }]);
-    assert.deepEqual(calls.at(-1), ['start', 'https://app.example/', 'abcdef0123456789abcdef0123456789']);
-    assert.deepEqual(await post({ op: 'discord_link', code: 'AbC-123_xyz' }), [200, { ok: true, until: 1 }]);
-    assert.deepEqual(calls.at(-1), ['link', U(1), 'AbC-123_xyz', 'https://app.example/']);
+  test('戻り先はこのサイトの入口だけ。code と state の形を確かめる', async () => {
+    const state = '1800000000000.abcdefghijklmnopqrstuvwxyz0123456789-_ABCDE', code = 'AbC-123_xyz';
+    assert.deepEqual(await post({ op: 'discord_start' }), [200, { url: 'https://discord.com/oauth2/authorize?x=1' }]);
+    assert.deepEqual(calls.at(-1), ['start', U(1), 'https://app.example/']);
+    assert.deepEqual(await post({ op: 'discord_link', code, state }), [200, { ok: true, until: 1 }]);
+    assert.deepEqual(calls.at(-1), ['link', U(1), { code, state }, 'https://app.example/']);
     const n = calls.length;
-    for (const body of [{ op: 'discord_start' }, { op: 'discord_start', state: 'short' }, { op: 'discord_start', state: 'has space 0123456789' }, { op: 'discord_start', state: 5 },
-      { op: 'discord_link' }, { op: 'discord_link', code: 'x' }, { op: 'discord_link', code: 'a&b=c0123456' }, { op: 'discord_link', code: 'x'.repeat(129) }])
+    for (const body of [{ op: 'discord_link' }, { op: 'discord_link', code }, { op: 'discord_link', state }, { op: 'discord_link', code: 'x', state }, { op: 'discord_link', code: 'a&b=c0123456', state },
+      { op: 'discord_link', code: 'x'.repeat(129), state }, { op: 'discord_link', code, state: 'abcdef0123456789abcdef0123456789' }, { op: 'discord_link', code, state: '1800000000000.has space 0123456789abcdef' }, { op: 'discord_link', code, state: 5 }])
       assert.deepEqual(await post(body), [422, { error: 'malformed' }], JSON.stringify(body));
     // 許可していない Origin・Origin 無しからは始められない
-    assert.equal((await post({ op: 'discord_start', state: 'abcdef0123456789abcdef0123456789' }, 'https://evil.example'))[0], 422);
-    assert.equal((await post({ op: 'discord_link', code: 'AbC-123_xyz' }, null))[0], 422);
-    assert.equal((await post({ op: 'discord_link', code: 'AbC-123_xyz' }, 'https://app.example', 'bad'))[0], 401);
+    assert.equal((await post({ op: 'discord_start' }, 'https://evil.example'))[0], 422);
+    assert.equal((await post({ op: 'discord_link', code, state }, null))[0], 422);
+    assert.equal((await post({ op: 'discord_link', code, state }, 'https://app.example', 'bad'))[0], 401);
     assert.equal(calls.length, n);
   });
 
@@ -331,13 +349,15 @@ describe('HTTP：Discord の確認', () => {
 /* ---------------- DB の結合テスト ---------------- */
 describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が無い' }, () => {
   let T, clock, who, db;
-  // Discord の代役：code がそのまま Discord の利用者（'out' はサーバーに居ない人）
+  // Discord の代役：code がそのまま Discord の利用者（'out' はサーバーに居ない人）。state は本物（discord.js）と同じ作り
+  const real = makeDiscord(CFG);
   const discord = {
+    stateFor: real.stateFor, checkState: real.checkState,
     authorizeUrl: (redirect, state) => `https://discord.example/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirect)}`,
     verify: async code => (code === 'out' ? { member: false } : { member: true, key: `key-${code}` }),
   };
   const SITE = 'https://app.example/';
-  const link = (uid, code) => db.discordLink(uid, code, SITE);
+  const link = (uid, code, to = db) => to.discordLink(uid, { code, state: real.stateFor(uid, clock.t) }, SITE);
   const members = async () => (await T.pool.query('select uid, discord_key from public.friend_members order by discord_key')).rows.map(r => [r.uid, r.discord_key]);
   const results = async room => (await T.pool.query('select uid, mode, players, place, pt::float8 as pt, hands, vpip, pfr from public.friend_results where room=$1 order by place', [room])).rows;
   const code = e => e.code;
@@ -367,7 +387,14 @@ describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が
     assert.equal((await T.rpc(a, 'me')).friend, null);
     await assert.rejects(db.create(a, 'friend', DEFAULT_CONFIG), e => code(e) === 'not_friend');
     await assert.rejects(T.rpc(a, 'friend_stats', ['club', null]), /not_friend/);
-    assert.deepEqual(await db.discordStart(SITE, 'state-0123456789abcdef'), { url: 'https://discord.example/authorize?state=state-0123456789abcdef&redirect_uri=https%3A%2F%2Fapp.example%2F' });
+    // 確認の開始：state はその人のもの。ほかの人の state・期限切れの state では確認できず、Discord にも問い合わせない
+    const url = new URL((await db.discordStart(a, SITE)).url), state = url.searchParams.get('state');
+    assert.equal(url.searchParams.get('redirect_uri'), SITE); assert.equal(real.checkState(state, a, clock.t), true);
+    await assert.rejects(db.discordLink(b, { code: 'bob', state }, SITE), e => code(e) === 'discord_failed');
+    clock.t += 10 * 60_000 + 1;
+    await assert.rejects(db.discordLink(a, { code: 'alice', state }, SITE), e => code(e) === 'discord_failed');
+    assert.deepEqual(await members(), []);
+    assert.equal((await T.pool.query("select count(*)::int as n from public.rate_limits where kind='discord'")).rows[0].n, 0);
     const linked = await link(a, 'alice');
     assert.equal(linked.ok, true); assert.ok(Math.abs(linked.until - (Date.now() + 30 * 86_400_000)) < 120_000);
     const f = (await T.rpc(a, 'me')).friend;
@@ -397,8 +424,8 @@ describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が
     await assert.rejects(link(b, 'out'), e => code(e) === 'not_member');
     assert.deepEqual(await members(), [[c, 'key-alice']]);
     const off = makeDb(T.pool, { now: () => clock.t });
-    await assert.rejects(off.discordStart(SITE, 'state-0123456789abcdef'), e => code(e) === 'friend_off');
-    await assert.rejects(off.discordLink(a, 'alice', SITE), e => code(e) === 'friend_off');
+    await assert.rejects(off.discordStart(a, SITE), e => code(e) === 'friend_off');
+    await assert.rejects(link(a, 'alice', off), e => code(e) === 'friend_off');
     await assert.rejects(link(randomUUID(), 'ghost'), e => code(e) === 'no_profile');
   });
 
@@ -419,11 +446,11 @@ describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が
     const [, , , , , f] = who;
     let asked = 0;
     const counting = makeDb(T.pool, { now: () => clock.t, discord: { ...discord, verify: async () => { asked++; return { member: false }; } } });
-    for (let i = 0; i < 10; i++) await assert.rejects(counting.discordLink(f, 'out', SITE), e => code(e) === 'not_member');
-    await assert.rejects(counting.discordLink(f, 'out', SITE), e => code(e) === 'too_many');
+    for (let i = 0; i < 10; i++) await assert.rejects(link(f, 'out', counting), e => code(e) === 'not_member');
+    await assert.rejects(link(f, 'out', counting), e => code(e) === 'too_many');
     assert.equal(asked, 10);
     await T.pool.query("update public.rate_limits set since = now() - interval '11 minutes' where uid=$1 and kind='discord'", [f]);
-    await assert.rejects(counting.discordLink(f, 'out', SITE), e => code(e) === 'not_member');
+    await assert.rejects(link(f, 'out', counting), e => code(e) === 'not_member');
   });
 
   test('終局した FRIEND MATCH の結果が残り、スタッツの RPC は見本の集計と一致する。PRIVATE MATCH は残さない', async () => {
