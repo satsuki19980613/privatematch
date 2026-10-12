@@ -103,7 +103,10 @@ async function prod() {
   check('Data API はトークン無しを断る（4xx）', d0.status >= 400 && d0.status < 500, `${d0.status} ${d0.body.slice(0, 160)}`);
   const d1 = await timed('data api', DATA + '/rpc/me', { method: 'POST', headers: { Origin: SITE, 'Content-Type': 'application/json', Authorization: 'Bearer eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.AAAA' }, body: '{}' });
   check('Data API は偽のトークンを断る（4xx）', d1.status >= 400 && d1.status < 500, `${d1.status} ${d1.body.slice(0, 160)}`);
-  for (const t of ['profiles', 'rooms', 'room_hands', 'friend_members', 'friend_results']) {
+  // Discord からの呼び出し（番号での確認）は、署名が合わなければ断る
+  const di = await timed('function', GAME, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Signature-Ed25519': '00'.repeat(64), 'X-Signature-Timestamp': '1' }, body: '{"type":1}' });
+  check('Function は Discord の署名が合わない呼び出しを 401 で断る', di.status === 401, `${di.status} ${di.body.slice(0, 80)}`);
+  for (const t of ['profiles', 'rooms', 'room_hands', 'friend_members', 'friend_results', 'friend_codes']) {
     const r = await timed('data api', `${DATA}/${t}?select=*&limit=1`, { headers: { Origin: SITE } });
     check(`Data API で表 ${t} を直接読めない`, r.status >= 400, `${r.status} ${r.body.slice(0, 100)}`);
   }
@@ -165,6 +168,9 @@ async function e2e() {
   check('Discord の確認の開始は friend_off か Discord の URL', (ds.status === 503 && ds.code === 'friend_off') || (ds.status === 200 && String(ds.json?.url).startsWith('https://discord.com/')), `${ds.status} ${ds.code || ''}`);
   const dl = await game(users[0], { op: 'discord_link', code: 'live-check-code', state: 'not-a-state' });
   check('形の正しくない state は malformed', dl.status === 422 && dl.code === 'malformed', `${dl.status} ${dl.code}`);
+  // 番号での確認：公開鍵（DISCORD_PUBLIC_KEY）が Function に無ければ friend_off、あれば 6 桁の番号
+  const dc = await game(users[0], { op: 'discord_code' });
+  check('番号での確認の開始は friend_off か 6 桁の番号', (dc.status === 503 && dc.code === 'friend_off') || (dc.status === 200 && /^\d{6}$/.test(dc.json?.code ?? '')), `${dc.status} ${dc.code || ''}`);
 
   // FreeMatch：作る → 一覧に出る → 作成者が抜けると消える
   const fr = await game(users[0], { op: 'create', kind: 'free', config: { players: 2, startBb: 75, speed: 'normal', levelMin: 3, mode: 'club' } });

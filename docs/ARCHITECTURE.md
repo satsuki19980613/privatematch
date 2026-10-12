@@ -99,6 +99,7 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `stay` | `{ room, fx? }` | 同上（終局後に席に残る） |
 | `rematch` | `{ room, fx? }` | 新しい部屋の `{ room, ver, now, view }`（席に残った人の profiles → 元の部屋の順にロック。ほかの部屋に居る人は除く） |
 | `discord_start` | `{}` | `{ url }`（Discord の同意の画面。state はサーバーがその人に出す） |
+| `discord_code` | `{}` | `{ code, until, guild }`（番号での確認の番号。6 桁・10 分・1 人 1 つ。guild = 専用のサーバーの ID） |
 | `discord_link` | `{ code, state }` | `{ ok: true, until }`（Discord から戻った code と state を確かめ、メンバーなら 30 日の確認を入れる） |
 
 FRIEND MATCH（`kind: 'friend'`）の `create` と `join` は、Discord で確認できた人（`friend_ok`）だけ。そうでなければ `not_friend`。
@@ -115,6 +116,10 @@ Discord のメンバー確認（`server/game/discord.js`。設定は Function �
 
 エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）、`too_many`（429。回数の制限）、`not_friend`（403。FRIEND MATCH に入れる確認が無い・切れた）、`not_member`（403。Discord のサーバーのメンバーでない）、`friend_off`（503。Discord の設定が無い）、`discord_failed`（502。Discord に届かない・code が正しくない）。
 
+- 番号での確認（Discord からの呼び出し）：`X-Signature-Ed25519` のヘッダが付いた POST は、Bearer JWT ではなく Discord の署名で確かめる（`discordInteract`。本文は 64 KB まで）。署名 = アプリの鍵で `X-Signature-Timestamp + 本文` に付けた Ed25519。合わなければ 401（Discord は登録のときに、合わない署名でも呼んで確かめる）。
+  PING（type 1）には `{ type: 1 }`。`/link`（type 2）は、専用のサーバーの中から（`guild_id`）本人（`member.user.id`）が打ったものだけを受け（ロールの指定があればそのロールも）、番号（全角の数字・空白をそろえた 6 桁）が `friend_codes` にあれば消して、その番号を出した人を `friend_members` に入れる（鍵付きハッシュは OAuth2 と同じ）。返事は打った本人にだけ見えるメッセージ（type 4・flags 64）。
+  `discord_code` は回数を数え（`discord_link` と同じ 10 分に 10 回）、その人の前の番号と期限切れの番号を消してから、空いている番号を入れる。公開鍵（`DISCORD_PUBLIC_KEY`）が無ければ `friend_off`。公開鍵と `/link` の登録は配備のとき（`scripts/discord.mjs`）。
+
 回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。Discord での確認（`discord_link`）は 10 分に 10 回。Function へのリクエスト（ログイン済みの分。成功も失敗も）は 1 分に 300 回（`deps.flood`）。どれも DB で数える（`rate_limits`。Function はリクエストごとにメモリが分かれるので、メモリの中では数えられない）。Data API の読み取り（`room_poll` など）は数えていない。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
@@ -125,6 +130,7 @@ Discord のメンバー確認（`server/game/discord.js`。設定は Function �
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
 | `rate_limits` | 回数の制限（uid × 種類 `code` / `create` / `req` / `discord` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`・`20261010210000_rate_req.sql`） |
+| `friend_codes` | 番号での確認のために出した番号（code = 6 桁（主キー）、uid（一意）、expires_at）。読み書きは Function だけ。RLS 有効・権限なし |
 | `friend_members` | FRIEND MATCH に入れる人（uid、discord_key = Discord の利用者 ID の鍵付きハッシュ（一意）、verified_at）。書き込みは Function の `discord_link` だけ（`20261012000000_friend.sql`） |
 | `friend_results` | FRIEND MATCH の結果（room, uid, mode, players, place, pt, hands, vpip, pfr, ended_at。1 試合 × 1 人）。書き込みは Function が終局した手で 1 回だけ。部屋が消えても残り、利用者が消えると一緒に消える |
 
@@ -144,6 +150,7 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 - 自動更新（`src/update.js`・`src/ui/update.js`）：配信中の `index.html`（`fetch('/', { cache: 'no-store' })`）が読み込む入口のスクリプト（`/assets/index-<ハッシュ>.js`）が、いま動いているものと違えば新しい版。確かめるのは、アプリを前に出したとき（`visibilitychange`）・開いたまま 10 分ごと・メニューに戻ったとき（`toMenu`）。読み込み直す（`location.reload()`）のは、メニューに居て（待機室・卓ではない）、ダイアログも入力の途中も無いときだけ。それ以外で見つけたら覚えておき、次の機会に読み込み直す。後から読み込む部品が取れなかったとき（`vite:preloadError`）も新しい版が出たものとして扱う。読み込み直しは 5 分に 1 回まで（sessionStorage `pm-updated` に時刻だけを置く）。新しい版で起動したら「バージョンを更新しました」とトーストで知らせる（`announce`：前に起動したときの入口を localStorage `pm-version` に置き、違っていれば知らせる。自動で読み込み直したときも、自分で開き直したときも出る。この端末で初めて開いたときは出ない）。開発サーバーでは働かない（入口が `/src/main.js`）。サービスワーカー（`public/sw.js`）は何もキャッシュしない。
 - メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、FRIEND MATCH、STATS、SETTINGS。
 - FRIEND MATCH（`src/ui/friend.js`）：メニューのボタンは、`me().friend.ok` なら入口へ、そうでなければ Discord での確認のダイアログ（`#gateDlg`）を出す。
+  - 番号での確認：ダイアログの「番号で確認」で `discord_code` の番号と `/link` を出し（Copy・「Discord を開く」= `https://discord.com/channels/<guild>`・残り時間）、3 秒ごとと画面に戻ったときに `me()` を読んで、確認できたら入口へ（招待 URL から来ていれば、その部屋の確認へ）。期限が来たら最初の画面に戻す。iPhone / iPad では「番号で確認」を先に出す（Discord のアプリが OAuth2 の同意の画面を受け取らないため）。メニューのボタンは、確認がまだなら `me()` を読み直してから決める（ほかの端末で済ませた確認をすぐ拾う）。
   - 確認の往復：`discord_start` の URL で Discord へ移動 → 戻ってきた URL の `code` / `state` を起動時に受け取って URL から消し（`takeReturn`）、`discord_link` → `me()` を読み直して入口へ。まだログインしていないブラウザに戻ってきたときは、sessionStorage `pm-discord` に印だけを預け（戻りの値は預けない）、ログインのあとで確認のダイアログをもう一度出す（許可済みなので、同意の画面を挟まずに戻ってくる）。招待 URL から来た friend の部屋は、確認のあと参加の確認に戻る（部屋番号を sessionStorage `pm-invite` に預ける）。
   - 入口：フレンドマッチを開始（PRIVATE MATCH と同じ部屋の作成。部屋番号と招待 URL を Discord で共有する）・部屋番号で入る・STATS・RANKING。
   - STATS：ゲームモード（種類 → 段階。localStorage `pm-friend-mode`）ごと。「シーズン内」は、シーズン（日本時間の暦月。通算も選べる）の自分の順位・合計・平均と加点率・平均順位、ランキングの上位 5 人（＋自分）、累積ポイント推移のグラフ（強調した人の線とメンバー平均の破線。通算はシーズンごとに足し上げる）、メンバー別の表（合計・平均・加点率・1 位率・平均順位・参加・生存 T。見出しで並べ替え、いちばん上はメンバー平均）。「シーズン推移」は、選んだ指標（合計・平均・加点率・1 位率・平均順位・生存ターン）のシーズンごとのグラフと表（新しいシーズンが左）。行を押すとその人の詳細（`#memberDlg`：通算・VPIP・PFR・順位の分布・シーズン別・最近の記録）。

@@ -1,10 +1,11 @@
 // FRIEND MATCH の画面：入口（部屋を作る / 部屋番号で入る / STATS / RANKING）、Discord のメンバー確認、スタッツ、ランキング。
 // 専用の Discord サーバーのメンバーだけが入れる（確認は Function "game" の discord_start / discord_link。server/game/discord.js）。
+// 確認は 2 通り：Discord の同意の画面へ行く（OAuth2）か、出た番号を Discord のサーバーで /link 番号 と打つ（discord_code。Discord のアプリだけで済む）。
 // スタッツとランキングはサーバーに残した FRIEND MATCH の結果から（RPC friend_stats。集計は src/friend.js）。
 // 表示の項目と形は Kagaribi Stat Hub のスタッツビュー：シーズン内（累積 pt のグラフ・メンバー別の表）とシーズン推移（指標ごとのグラフと表）。
 // ゲームモードをまたいで混ぜない。シーズンは日本時間の暦月。
 import { MODE_IDS, modeLabel } from '../structure.js';
-import { $, app, esc, head, openDlg, toast, fmtPt, localGet, localSet, statTile, INVITE_KEY } from './util.js';
+import { $, app, esc, head, openDlg, toast, fmtPt, localGet, localSet, statTile, copyText, INVITE_KEY } from './util.js';
 import { paint, setPane, currentPane } from './menu.js';
 import { modeSegHTML, bindModeSeg } from './modeseg.js';
 import { lineChartHTML, bindLineChart } from './linechart.js';
@@ -36,20 +37,84 @@ function sessionTake(k) {
 }
 
 /** メニューの FRIEND MATCH：確認済みなら入口へ、まだなら Discord での確認へ */
-export function openFriend() {
+let opening = false;
+/** メニューの FRIEND MATCH。確認がまだなら、ほかの端末で済ませたばかりかもしれないので、読み直してから決める */
+export async function openFriend() {
   if (isFriend()) return setPane('friend');
-  openGate();
+  if (opening) return;
+  opening = true;
+  try { await readMe(); } finally { opening = false; }
+  if (isFriend()) setPane('friend'); else openGate();
+}
+// プロフィールを読み直す（確認できたかを見る）。読めなければ今のまま
+async function readMe() {
+  try { const p = await app.net.rpc('me'); if (p) app.prof = p; } catch { /* 次の機会に */ }
+}
+
+/* ---------- 確認のダイアログ ---------- */
+// iPhone / iPad の Discord アプリは同意の画面（OAuth2）を受け取らないので、番号での確認を先に出す
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const POLL_MS = 3000;              // 番号を出している間、確認できたかを見に行く間隔
+const SNOWFLAKE = /^\d{5,25}$/;    // Discord のサーバーの ID
+const gateBtn = (id, label, primary) => `<button class="${cls('btn', primary && 'primary')}" id="${id}" type="button">${label}</button>`;
+let gate = null;                   // 番号を出している間の状態 { invite, until, poll, tick }
+
+function stopGate() {
+  if (!gate) return;
+  clearInterval(gate.poll); clearInterval(gate.tick);
+  document.removeEventListener('visibilitychange', checkGate);
+  gate = null;
 }
 /** Discord での確認のダイアログ。invite = 確認のあとに入る部屋番号（招待 URL から来たとき） */
 export function openGate(invite = null) {
-  $('#gateBody').innerHTML = head('FRIEND MATCH', 'Discord') +
-    '<div class="btns"><button class="btn primary" id="gateGo" type="button">Discord で確認</button></div>';
+  stopGate();
+  const byCode = gateBtn('gateCode', '番号で確認', IOS), byPage = gateBtn('gateGo', 'Discord で確認', !IOS);
+  $('#gateBody').innerHTML = head('FRIEND MATCH', 'Discord') + '<div class="btns">' + (IOS ? byCode + byPage : byPage + byCode) + '</div>';
+  const dlg = $('#gateDlg');
+  dlg.onclose = stopGate;
   openDlg('#gateDlg');
-  const go = $('#gateGo');
+  const go = $('#gateGo'), code = $('#gateCode');
+  const failed = e => { go.disabled = false; code.disabled = false; toast(LINK_ERR[e.code] || '確認を始められませんでした'); };
   go.onclick = async () => {
     go.disabled = true;
-    try { await startDiscord(invite); } catch (e) { go.disabled = false; toast(LINK_ERR[e.code] || '確認を始められませんでした'); }
+    try { await startDiscord(invite); } catch (e) { failed(e); }
   };
+  code.onclick = async () => {
+    code.disabled = true;
+    try { showCode(await app.net.game({ op: 'discord_code' }), invite); } catch (e) { failed(e); }
+  };
+}
+const leftText = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+// 番号を出す：Discord のサーバーで /link 番号 と打ってもらい、確認できるまで見に行く（期限が来たら最初の画面に戻す）
+function showCode(r, invite) {
+  const digits = String(r.code), open = SNOWFLAKE.test(r.guild ?? '') ? `<a class="btn primary" href="https://discord.com/channels/${r.guild}" target="_blank" rel="noopener">Discord を開く</a>` : '';
+  $('#gateBody').innerHTML = head('FRIEND MATCH', 'Discord') + `
+    <div class="gate-code"><span class="lbl">Discord のサーバーで送信</span>
+      <div class="gate-cmd"><b>/link</b><span class="code-big" aria-label="番号">${esc(digits.replace(/(\d{3})(\d{3})/, '$1 $2'))}</span></div>
+      <span class="gate-left" id="gateLeft">${leftText(r.until - Date.now())}</span></div>
+    <div class="btns"><button class="btn ghost" id="gateCopy" type="button">Copy</button>${open}</div>`;
+  $('#gateCopy').onclick = () => copyText(digits);
+  stopGate();
+  gate = { invite, until: r.until, poll: setInterval(checkGate, POLL_MS), tick: setInterval(tickGate, 1000) };
+  document.addEventListener('visibilitychange', checkGate);   // Discord のアプリから戻ってきたら、すぐ見に行く
+}
+function tickGate() {
+  if (!gate) return;
+  const left = gate.until - Date.now(), el = $('#gateLeft');
+  if (left <= 0) { const { invite } = gate; return openGate(invite); }
+  if (el) el.textContent = leftText(left);
+}
+async function checkGate() {
+  if (!gate || gate.busy || document.visibilityState !== 'visible') return;
+  gate.busy = true;
+  try { await readMe(); } finally { if (gate) gate.busy = false; }
+  if (!gate || !isFriend()) return;
+  const { invite } = gate;
+  $('#gateDlg').close();   // onclose が見に行くのを止める
+  toast('Discord のメンバーを確認しました');
+  if (invite) sessionSet(INVITE_KEY, invite);
+  await app.nav.refreshMe();   // 招待 URL から来ていれば、その部屋の確認が開く
+  if (!invite && !app.prof?.room) setPane('friend');
 }
 // Discord の同意の画面へ（このページを離れる）。あとで入る部屋番号はセッションに預ける。
 // 戻りを照合する state はサーバーが出し、戻ったときもサーバーが確かめる（server/game/discord.js）：

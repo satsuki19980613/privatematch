@@ -82,7 +82,7 @@ describe('QA server（専用 DB）', { skip }, () => {
   // ================= 1. 権限（RLS・GRANT） =================
   describe('権限', () => {
     test('表は authenticated / anonymous から読み書きできない（RLS 有効・GRANT 無し）', async () => {
-      for (const t of ['profiles', 'rooms', 'room_hands', 'room_chat', 'rate_limits', 'friend_members', 'friend_results']) {
+      for (const t of ['profiles', 'rooms', 'room_hands', 'room_chat', 'rate_limits', 'friend_members', 'friend_results', 'friend_codes']) {
         const { rows: [c] } = await pool.query('select relrowsecurity from pg_class where oid = $1::regclass', [`public.${t}`]);
         assert.equal(c.relrowsecurity, true, `${t} の RLS`);
         for (const role of ['authenticated', 'anonymous', 'public'])

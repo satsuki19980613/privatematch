@@ -8,7 +8,8 @@
 //   &chat=many  PRIVATE MATCH の卓で Bot がよく喋る（3〜6 秒に 1 回。上限ちょうどの長い文も混ぜる。見た目の確認用）
 //   &allin    Bot がよくオールインする（ランアウトの演出の確認用）
 //   &short    初期スタックを 2〜4 BB にする（すぐ終局する。再戦の確認用）
-//   &nofriend FRIEND MATCH の Discord の確認がまだの人として始める（確認の往復を確かめる。「Discord で確認」はこのページへ code を付けて戻る）
+//   &nofriend FRIEND MATCH の Discord の確認がまだの人として始める（確認の往復を確かめる。「Discord で確認」はこのページへ code を付けて戻る。
+//             「番号で確認」は番号を出して 8 秒後に確認済みになる）
 // 演出の確認（デモのメニューのボタン。create の demo）：部屋ごとの設定 R.show
 //   river    4 人。自分 100BB・Bot 15BB。先に動く Bot がオールイン、ほかの Bot は降りる。配りは「プリフロップで両方オールインになったら、
 //            ターンで 2 人に勝ちの目が残る」ものを選ぶ（半分はリバーで逆転）＝リバーの溜めの演出が毎回見られる
@@ -34,6 +35,7 @@ const ALLIN = q.has('allin');
 const SHORT = q.has('short');
 const NOFRIEND = q.has('nofriend');
 const FAKE_FRIEND = 'pm-fake-friend';   // &nofriend で確認を済ませた印（このタブの間だけ）
+const FAKE_LINK_MS = 8000;              // &nofriend の「番号で確認」が、確認済みになるまでの時間
 const TALK = CHATTY ? [3000, 6000] : [20000, 40000];   // Bot の雑談の間隔
 const ME = '00000000-0000-4000-8000-000000000001';
 const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 'Taro', 'Nana'];
@@ -419,6 +421,12 @@ export async function game(body) {
         const u = new URL(location.href);
         u.searchParams.set('code', 'fake-discord-code'); u.searchParams.set('state', `${now + 600_000}.fake-state-signature-0123456789`);
         return lag({ url: u.toString() });
+      }
+      // 番号での確認の代役：番号を出し、少しして（Discord で /link を打ったことにして）確認済みにする
+      case 'discord_code': {
+        if (!NOFRIEND) throw new MoveError('friend_off');
+        setTimeout(() => { try { sessionStorage.setItem(FAKE_FRIEND, '1'); } catch { /* プライベートモード */ } }, FAKE_LINK_MS);
+        return lag({ code: '482913', until: now + 600_000, guild: '100000000000000001' });
       }
       case 'discord_link': {
         try { sessionStorage.setItem(FAKE_FRIEND, '1'); } catch { /* プライベートモード */ }

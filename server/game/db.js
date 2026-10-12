@@ -6,12 +6,14 @@
 //   fx : rooms 行をロック → 演出 GIF を変える（部屋に入った後に設定で変えた分）
 //   rematch : 席に残った人の profiles 行をロック → rooms 行をロック → ほかの部屋に居る人を除いて新しい部屋を作って開始 → 元の部屋に rematch.next
 //   FRIEND MATCH（kind = friend）: create / join は Discord で確認できた人だけ（friend_ok。そうでなければ not_friend）。終局した手で、全員の結果を friend_results に残す
+//   discordCode / discordInteract : 番号での確認（アプリが番号を出し、Discord のサーバーで /link 番号 と打つ。discord.js）
 //   discordStart / discordLink : Discord での確認（discord.js）。確認できたら friend_members に鍵付きハッシュと時刻を入れる（同じ Discord アカウントは 1 人だけ）
 // ロックの順番は常に profiles → rooms。
 // 回数の制限（db/migrations/20261010200000_rate_limit.sql）：create は成功した分を数える（上限を超えたら too_many。ほかの理由で失敗した分は巻き戻るので数えない）。
 // join は部屋番号のはずれを数える（はずれをコミットしてから not_found を返す。上限に達していれば番号を調べる前に too_many）。
 // flood はリクエストごとに 1 回、トランザクションの外で数える（失敗したリクエストも数える。20261010210000_rate_req.sql）。
 import { randomUUID } from 'node:crypto';
+import { LINK_REPLY } from './discord.js';
 import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx, friendResults } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
 import { secureRnd } from '../../src/rnd.js';
@@ -49,6 +51,15 @@ async function lockMe(c, uid) {
   if (!r.rows[0]) throw new MoveError('no_profile');
   return r.rows[0].nickname;
 }
+// メンバーとして残す（同じ Discord アカウントは 1 人だけ：ほかの人に付いていた確認は外す）。=> 確認が切れる時刻（ms）
+async function saveMember(c, uid, key) {
+  await lockMe(c, uid);
+  await c.query('delete from public.friend_members where discord_key=$2 and uid<>$1', [uid, key]);
+  const r = await c.query(`insert into public.friend_members(uid,discord_key,verified_at) values($1,$2,now())
+      on conflict (uid) do update set discord_key=excluded.discord_key,verified_at=excluded.verified_at
+      returning floor(extract(epoch from verified_at + public.friend_ttl())*1000)::float8 as until_ms`, [uid, key]);
+  return r.rows[0].until_ms;
+}
 async function activeRoom(c, uid) {
   const r = await c.query('select public.active_room($1) as id', [uid]);
   return r.rows[0].id;
@@ -85,8 +96,18 @@ async function saveResults(c, room) {
     [room.id, room.config.mode, room.config.players, JSON.stringify(friendResults(room, recs))]);
 }
 
+// 番号での確認：番号が使える時間と、空いている番号を引き直す回数
+const CODE_TTL = '10 minutes', CODE_TRIES = 8;
+// コマンドへの返事（type 4 = メッセージ、flags 64 = 打った本人にだけ見える）
+const say = text => ({ type: 4, data: { content: text, flags: 64 } });
+
 export function makeDb(pool, deps = {}) {
   const now = deps.now ?? Date.now, rnd = deps.rnd ?? secureRnd, discord = deps.discord ?? null;
+  // Discord の確認の回数（10 分に 10 回。OAuth2 も番号も同じ数え方）
+  async function discordHit(uid) {
+    const hit = await pool.query("select public.rate_hit($1,'discord') as ok", [uid]).catch(e => { if (e?.code === '23503') { throw new MoveError('no_profile'); } throw e; });
+    if (!hit.rows[0].ok) throw new MoveError('too_many');
+  }
 
   const reply = (room, uid, views = viewsOf(room)) => {
     const pos = room.members.indexOf(uid);
@@ -187,21 +208,48 @@ export function makeDb(pool, deps = {}) {
     discordLink: async (uid, { code, state }, redirect) => {
       if (!discord) throw new MoveError('friend_off');
       if (!discord.checkState(state, uid, now())) throw new MoveError('discord_failed');
-      const hit = await pool.query("select public.rate_hit($1,'discord') as ok", [uid]).catch(e => { if (e?.code === '23503') { throw new MoveError('no_profile'); } throw e; });
-      if (!hit.rows[0].ok) throw new MoveError('too_many');
+      await discordHit(uid);
       const v = await discord.verify(code, redirect);
       if (!v.member) {
         await pool.query('delete from public.friend_members where uid=$1', [uid]);
         throw new MoveError('not_member');
       }
+      return tx(pool, async c => ({ ok: true, until: await saveMember(c, uid, v.key) }));
+    },
+    // 番号での確認：その人の番号を出す（前の番号は消す。10 分だけ使える）。=> { code, until, guild }
+    discordCode: async uid => {
+      if (!discord?.interactions) throw new MoveError('friend_off');
+      await discordHit(uid);
       return tx(pool, async c => {
         await lockMe(c, uid);
-        await c.query('delete from public.friend_members where discord_key=$2 and uid<>$1', [uid, v.key]);
-        const r = await c.query(`insert into public.friend_members(uid,discord_key,verified_at) values($1,$2,now())
-            on conflict (uid) do update set discord_key=excluded.discord_key,verified_at=excluded.verified_at
-            returning floor(extract(epoch from verified_at + public.friend_ttl())*1000)::float8 as until_ms`, [uid, v.key]);
-        return { ok: true, until: r.rows[0].until_ms };
+        await c.query('delete from public.friend_codes where uid=$1 or expires_at <= now()', [uid]);
+        // 候補をいくつか引き、まだ使われていない最初の 1 つを入れる
+        const tries = Array.from({ length: CODE_TRIES }, () => genCode(rnd));
+        const r = await c.query(`insert into public.friend_codes(code,uid,expires_at)
+            select t.c, $2, now() + interval '${CODE_TTL}' from unnest($1::text[]) with ordinality as t(c, i)
+            where not exists (select 1 from public.friend_codes f where f.code = t.c) order by t.i limit 1
+            on conflict (code) do nothing returning code, floor(extract(epoch from expires_at)*1000)::float8 as until_ms`, [tries, uid]);
+        if (!r.rows[0]) throw new MoveError('busy');
+        return { code: r.rows[0].code, until: r.rows[0].until_ms, guild: discord.guild };
       });
+    },
+    // Discord からの呼び出し（Interactions）。raw = 本文そのまま（署名はこれに付いている）。
+    // => Discord に返す JSON。署名が合わなければ null（401 にする）
+    discordInteract: async (raw, signature, timestamp) => {
+      if (!discord?.checkSignature(raw, signature, timestamp)) return null;
+      let body = null;
+      try { body = JSON.parse(raw); } catch { /* 読めなければ「使えません」と返す */ }
+      const it = discord.readInteraction(body);
+      if (it.type === 'pong') return { type: 1 };
+      if (it.type !== 'claim') return say(it.text);
+      // 番号は 1 回で消す。その番号を出した人をメンバーにする
+      const ok = await tx(pool, async c => {
+        const f = await c.query('delete from public.friend_codes where code=$1 and expires_at > now() returning uid', [it.code]);
+        if (!f.rows[0]) return false;
+        await saveMember(c, f.rows[0].uid, it.key);
+        return true;
+      });
+      return say(ok ? LINK_REPLY.ok : LINK_REPLY.badCode);
     },
     tick: step((room, uid) => tickRoom(room, uid, now())),
 
