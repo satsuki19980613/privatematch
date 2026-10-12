@@ -93,7 +93,7 @@ const KINDS = new Set(['fold', 'check', 'call', 'bet', 'raise', 'allin']);
 const MAX_ACTIONS = 1000;   // 1 ハンドのアクション数（実際は多くて数十。読み込むファイルで画面が固まらないための上限）
 export function validGame(g) {
   return !!g && typeof g === 'object' && str(g.roomId, 64) && optInt(g.seat) && g.seat >= 0 && g.seat < 6 &&
-    ['running', 'finished', 'cancelled'].includes(g.status) && ['private', 'free'].includes(g.kind) && (g.code == null || str(g.code, 16)) &&
+    ['running', 'finished', 'cancelled'].includes(g.status) && ['private', 'free', 'friend'].includes(g.kind) && (g.code == null || str(g.code, 16)) &&
     !!g.config && typeof g.config === 'object' && int(g.config.players) && g.config.players >= 2 && g.config.players <= 6 &&
     Array.isArray(g.names) && g.names.length <= 6 && g.names.every(x => str(x, 64)) &&
     Array.isArray(g.players) && g.players.length <= 6 && g.players.every(p => p && typeof p === 'object' && str(p.name ?? '', 64) && optInt(p.place) && optNum(p.pt)) &&

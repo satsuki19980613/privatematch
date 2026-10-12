@@ -1,12 +1,13 @@
-// メニューの画面：ログイン、メイン（PrivateMatch / FreeMatch / STATS）、部屋の作成、部屋番号で参加、FreeMatch の募集一覧、
-// 参加前の確認、プロフィール。待機室は room.js、成績・履歴は stats.js が同じ #menuIn に描く。
+// メニューの画面：ログイン、メイン（PrivateMatch / FreeMatch / FriendMatch / STATS）、部屋の作成、部屋番号で参加、FreeMatch の募集一覧、
+// 参加前の確認、プロフィール。待機室は room.js、成績・履歴は stats.js、FRIEND MATCH（入口・スタッツ・ランキング）は friend.js が同じ #menuIn に描く。
 import {
   PLAYER_COUNTS, START_BBS, SPEEDS, SPEED_LABEL, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES,
   DEFAULT_CONFIG, normalizeConfig, configSummary, modeLabel, chipsLabel,
 } from '../structure.js';
-import { $, app, esc, head, openDlg, toast, localGet, localSet } from './util.js';
+import { $, app, esc, head, openDlg, toast, localGet, localSet, kindLabel } from './util.js';
 import * as room from './room.js';
 import * as stats from './stats.js';
+import * as friend from './friend.js';
 import { openSettings } from './settings.js';
 import { getFx } from './gif.js';
 import { available as fxAvailable } from '../klipy.js';
@@ -15,9 +16,11 @@ const GSVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d
 const CFG_KEY = 'pm-config';
 const FREE_POLL_MS = 5000;
 
-// pane: 'main' | 'private' | 'free' | 'create' | 'join' | 'room' | 'stats' | 'history'
+// pane: 'main' | 'private' | 'free' | 'friend' | 'fstats' | 'frank' | 'create' | 'join' | 'room' | 'stats' | 'history'
 let pane = 'main';
 let createKind = 'private';
+let joinFrom = 'private';   // 「部屋番号で入る」を開いた元（BACK で戻る先）
+const FRIEND_PANES = ['friend', 'fstats', 'frank'];
 let freeList = null, freeTimer = 0, freeGen = 0;
 const root = () => $('#menuIn');
 
@@ -28,6 +31,7 @@ export function setPane(p, opts = {}) {
   if (pane === 'free' && p !== 'free') stopFree();
   pane = p;
   if (opts.kind) createKind = opts.kind;
+  if (p === 'join') joinFrom = opts.from ?? 'private';
   if (p === 'free') startFree();
   renderMenu();
 }
@@ -40,6 +44,7 @@ export function renderMenu() {
   if (!app.user) return paint(el, loginHTML(true), bindLogin);
   if (pane === 'room') return room.render(el);
   if (pane === 'stats' || pane === 'history') return stats.render(el, pane);
+  if (FRIEND_PANES.includes(pane)) return friend.render(el, pane);
   if (pane === 'private') return paint(el, privateHTML(), bindPrivate);
   if (pane === 'free') return paint(el, freeHTML(), bindFree);
   if (pane === 'create') return paint(el, createHTML(), bindCreate);
@@ -74,6 +79,7 @@ function mainHTML() {
     ${r ? `<button class="mbtn back-room" id="backRoom" type="button"><span>参加中の部屋へ戻る<small>部屋番号 ${esc(r.code)}</small></span><span class="rt">→</span></button>` : ''}
     <button class="mbtn" id="pmBtn" type="button"><span>PRIVATE MATCH<small>部屋番号・招待 URL で知り合いと</small></span></button>
     <button class="mbtn" id="fmBtn" type="button"><span>FREE MATCH<small>公開の部屋で誰とでも</small></span></button>
+    <button class="mbtn" id="frBtn" type="button"><span>FRIEND MATCH<small>Discord のメンバーと ・ スタッツとランキング</small></span></button>
     <button class="mbtn" id="stBtn" type="button"><span>STATS<small>成績とハンド履歴</small></span></button>
     <button class="mbtn" id="setMBtn" type="button"><span>SETTINGS<small>${fxAvailable() ? 'ベットサイズ・演出 GIF' : 'ベットサイズ'}</small></span></button>
     ${showcase() ? `<div class="list-h"><span class="eyebrow">SHOWCASE</span></div>
@@ -95,6 +101,7 @@ function bindMain(el) {
   const br = el.querySelector('#backRoom'); if (br) br.onclick = () => app.nav.enterRoom(app.prof.room.id);
   el.querySelector('#pmBtn').onclick = () => setPane('private');
   el.querySelector('#fmBtn').onclick = () => setPane('free');
+  el.querySelector('#frBtn').onclick = friend.openFriend;
   el.querySelector('#stBtn').onclick = () => setPane('stats');
   el.querySelector('#setMBtn').onclick = openSettings;
   el.querySelectorAll('[data-demo]').forEach(b => b.onclick = () => startShowcase(b.dataset.demo));
@@ -150,7 +157,7 @@ function createHTML() {
   const kindSeg = `<div class="seg form-seg" data-key="kind">${GAME_KINDS.map(k => `<button type="button" data-v="${k}" aria-pressed="${kind === k}">${GAME_KIND_LABELS[k]}</button>`).join('')}</div>`;
   const varSeg = variants.length > 1 ? `<div class="seg form-seg" data-key="mode">${variants.map(m => `<button type="button" data-v="${m}" aria-pressed="${cfg.mode === m}">${kind === 'rank' ? 'STAGE ' + GAME_MODES[m].variant : GAME_MODES[m].variant}</button>`).join('')}</div>` : '';
   const pay = GAME_MODES[cfg.mode].payouts.slice(0, cfg.players).map((v, i) => `<span><i>${i + 1}位</i>${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(v)}</span>`).join('');
-  return `${back(createKind === 'free' ? 'free' : 'private')}<div class="pane-h"><span class="eyebrow">${createKind === 'free' ? 'FREE MATCH' : 'PRIVATE MATCH'}</span><b>部屋を作る</b></div>
+  return `${back(createKind)}<div class="pane-h"><span class="eyebrow">${kindLabel(createKind)}</span><b>部屋を作る</b></div>
     <div class="form">
       <span class="lbl">人数</span>${seg('players', PLAYER_COUNTS, v => v + '人')}
       <span class="lbl">初期チップ</span>${seg('startBb', START_BBS, chipsLabel)}
@@ -173,8 +180,8 @@ function bindCreate(el) {
   btn.onclick = async () => {
     if (btn.disabled) { return; } btn.disabled = true;
     try {
-      // 演出 GIF は PRIVATE MATCH だけ（FREE MATCH には送らない）
-      const r = await app.net.game({ op: 'create', kind: createKind, config: cfg, ...(createKind === 'private' ? { fx: getFx() } : {}) });
+      // 演出 GIF は PRIVATE MATCH と FRIEND MATCH だけ（FREE MATCH には送らない）
+      const r = await app.net.game({ op: 'create', kind: createKind, config: cfg, ...(createKind === 'free' ? {} : { fx: getFx() }) });
       app.prof && (app.prof.room = { id: r.room, code: r.view.room.code, kind: createKind, status: 'waiting', started: false });
       app.nav.enterRoom(r.room, r);
     } catch (e) { btn.disabled = false; showJoinError(e); }
@@ -183,7 +190,7 @@ function bindCreate(el) {
 
 /* ---------- 部屋番号で参加 ---------- */
 function joinHTML() {
-  return `${back('private')}<div class="pane-h"><span class="eyebrow">PRIVATE MATCH</span><b>部屋番号で入る</b></div>
+  return `${back(joinFrom)}<div class="pane-h"><span class="eyebrow">${kindLabel(joinFrom)}</span><b>部屋番号で入る</b></div>
     <input class="tin code-in" id="codeIn" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000" aria-label="部屋番号">
     <button class="btn primary big" id="codeGo" type="button" disabled>次へ</button>`;
 }
@@ -208,20 +215,25 @@ export async function openJoin(code) {
   if (r.member && ['waiting', 'running', 'paused'].includes(r.status)) { $('#joinDlg').close(); app.nav.enterRoom(r.id); return; }
   const open = r.status === 'waiting' && r.seated < r.config.players;
   const why = r.status === 'waiting' ? '満員です。' : ['running', 'paused'].includes(r.status) ? 'この部屋はもう始まっています。' : 'この部屋は終わっています。';
-  body.innerHTML = head(r.kind === 'free' ? 'FREE MATCH' : 'PRIVATE MATCH', `部屋 ${esc(r.code)}`) +
+  // FRIEND MATCH の部屋は、Discord で確認してから（確認のあと、この部屋の参加の確認に戻る）
+  const gate = open && r.kind === 'friend' && !friend.isFriend();
+  body.innerHTML = head(kindLabel(r.kind), `部屋 ${esc(r.code)}`) +
     `<dl class="spec"><dt>作成者</dt><dd>${esc(r.host || '')}</dd><dt>参加</dt><dd>${r.seated} / ${r.config.players} 人</dd><dt>設定</dt><dd>${esc(configSummary(r.config))}</dd></dl>
     ${open ? '' : `<p class="err">${why}</p>`}
-    <div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn primary" id="joinGo" type="button" ${open ? '' : 'disabled'}>参加する</button></div>`;
+    <div class="btns"><button class="btn ghost" data-close type="button">Cancel</button><button class="btn primary" id="joinGo" type="button" ${open ? '' : 'disabled'}>${gate ? 'Discord で確認' : '参加する'}</button></div>`;
   const go = $('#joinGo');
   go.onclick = async () => {
+    if (gate) { $('#joinDlg').close(); friend.openGate(r.code); return; }
     go.disabled = true;
-    try { const x = await app.net.game({ op: 'join', code: r.code, ...(r.kind === 'private' ? { fx: getFx() } : {}) }); $('#joinDlg').close(); app.nav.enterRoom(x.room, x); }
+    try { const x = await app.net.game({ op: 'join', code: r.code, ...(r.kind === 'free' ? {} : { fx: getFx() }) }); $('#joinDlg').close(); app.nav.enterRoom(x.room, x); }
     catch (e) { go.disabled = false; $('#joinDlg').close(); showJoinError(e); }
   };
 }
 export function showJoinError(e) {
   const code = e?.code;
   if (code === 'in_other_room' && e.data?.room) { toast('参加中の部屋があります'); app.nav.enterRoom(e.data.room); return; }
+  // Discord での確認が切れていた（30 日）：もう一度確かめてもらう
+  if (code === 'not_friend') { if (app.prof) { app.prof.friend = null; } friend.openGate(); return; }
   toast({ room_full: '満員です', room_closed: 'この部屋には参加できません', not_found: '部屋が見つかりません', busy: '混み合っています。もう一度', too_many: '回数が多すぎます。しばらく待ってから',
     malformed: '設定を確かめてください' }[code] || '通信エラー。もう一度');
 }

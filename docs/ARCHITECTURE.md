@@ -1,7 +1,7 @@
 # PrivateMatch — アーキテクチャと実装契約
 
 モジュール間のインターフェースはこの文書で固定する。変える場合はこの文書を先に更新する。
-技術構成は Multiplier（satsuki19980613/Multiplier）、ゲームの設定とスタッツ画面は pocket-ICM（satsuki19980613/pocket-ICM の SIT & GO）を踏襲する。
+技術構成は Multiplier（satsuki19980613/Multiplier）、ゲームの設定とスタッツ画面は pocket-ICM（satsuki19980613/pocket-ICM の SIT & GO）、FRIEND MATCH のスタッツの項目と形は Kagaribi Stat Hub（satsuki19980613/Kagaribi-Stat-Hub）を踏襲する。
 
 ## 0. 全体像
 
@@ -14,6 +14,8 @@
   src/history/* ── IndexedDB（成績・ハンド履歴の正本）
 共有ロジック: src/structure.js（設定）/ src/engine.js（ルール）/ server/game/rules.js（部屋・再戦）/ src/chat.js（チャットの文字の決まり）/ src/equity.js（演出の勝率）/ src/pace.js（卓の遷移の間と順番）/ src/betsize.js（ベットサイズの設定と候補の額）/ src/fx.js（演出 GIF の slug とメディアの選び方）
 演出 GIF:  src/klipy.js ── KLIPY API（api.klipy.com。ブラウザから直接）／メディアは static*.klipy.com からブラウザが直接（サーバー・Service Worker を通さない）
+FRIEND MATCH: Function "game" ── Discord の API（discord.com。メンバーの確認。server/game/discord.js）／ブラウザは同意の画面へ移動して戻るだけ
+           src/friend.js（スタッツとランキングの集計。純関数）／サーバーに残すのは 1 試合 × 1 人の結果だけ（friend_results）
 開発・デモ: src/fakeNet.js（?fake（開発）/ ?demo（本番も）でサーバー無しに全画面を確認。本物の rules.js とエンジンをブラウザで動かす。
           デモのメニューの SHOWCASE：river = 4 人・自分 100BB・Bot 15BB、先に動く Bot がオールインしてほかは降り、配りはターンで 2 人に勝ちの目が残るもの（半分はリバーで逆転）を乱数の鍵を選び直して作る／flow = 3 人・普通の速さ／rematch = 3 人・2〜4BB・Bot は全員席に残る）
 ```
@@ -65,8 +67,10 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 - 生存者が全員 sitout ならハンド間で一時停止、10 分で中止。
 
 ## 4. `server/game/rules.js` — 部屋（純関数。fakeNet も使う）
-`room = { id, code, kind: 'private'|'free', host, config, status, started, members, names, fx, state, ver, createdAt, startedAt, rematch }`
-- `fx`：席ごとの演出 GIF（KLIPY の slug | null。`members` と同じ順）。PRIVATE MATCH だけ持ち、FREE MATCH は全員 null（正しくない slug も null。`src/fx.js` の `normalizeFx`）。`createRoom({ …, fx })` / `joinRoom(…, fx)` で入り、開始時に席と一緒に並べ替えてエンジンへ（誰も設定していなければ渡さない）。待機中に抜けた人の分は消える。以前の部屋は `fx` が無い（`fxOf` は全員 null）。
+`room = { id, code, kind: 'private'|'free'|'friend', host, config, status, started, members, names, fx, state, ver, createdAt, startedAt, rematch }`
+- `kind`：`friend`（FRIEND MATCH）は、チャット・演出 GIF・再戦が PRIVATE MATCH と同じ（`social(kind)` = private か friend）。違いは、Discord で確認できた人だけが作成・参加でき（DB 側で確かめる。§5）、終局した結果をサーバーに残すこと。
+- `friendResults(room, recs)`：終局した friend の部屋の、席ごとの `[{ uid, place, pt, hands, vpip, pfr }]`（recs = その部屋の全ハンドの記録。ハンドの集計は端末の STATS と同じ `gameHandStats`）。friend でない・終局していない・中止の部屋は `[]`。
+- `fx`：席ごとの演出 GIF（KLIPY の slug | null。`members` と同じ順）。PRIVATE MATCH と FRIEND MATCH だけ持ち、FREE MATCH は全員 null（正しくない slug も null。`src/fx.js` の `normalizeFx`）。`createRoom({ …, fx })` / `joinRoom(…, fx)` で入り、開始時に席と一緒に並べ替えてエンジンへ（誰も設定していなければ渡さない）。待機中に抜けた人の分は消える。以前の部屋は `fx` が無い（`fxOf` は全員 null）。
 - `createRoom` / `joinRoom`（満席で席をシャッフルして開始）/ `leaveRoom`（待機中は離れる。作成者なら中止。進行中は left。終局後・飛んだ後は再戦の対象から外れる＝`rematch.gone`）
 - `applyRequest(room, uid, { op: 'act', ver, move } | { op: 'sitout' } | { op: 'sitin' }, now)` / `tickRoom(room, uid, now)` → `{ room, record }`
 - `viewsOf(room)`：開始前は `[待機室]`、開始後は席ごとのビュー（`{ ...viewFor, ver: room.ver, room: roomInfo, rematch }`。rematch は終局後だけ `{ stay, gone, next, host, closesAt }`、それ以外は null）。
@@ -74,7 +78,7 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
   - `stayRoom(room, uid, now, fx?)`：fx（undefined でなければ）は再戦で使う GIF（試合の途中で設定を変えた分。もう残っていれば GIF だけ書き換え、ver は変えない）。終局（finished）から `REMATCH_MS` 以内で、まだ next が無く、途中で退出していない（left でない）人が席に残る。それ以外は `room_closed`。
   - `rematchLeader({ stay, gone, host }, endedAt, now)`：作成者が残っているか、去っておらず（gone にも left にもならず）終局から `REMATCH_HOST_WAIT_MS` 以内なら作成者の席。そうでなければ先に残った人の席（いなければ null）。ブラウザもビューの rematch で同じ関数を使う。
   - `rematchRoom(room, uid, { id, code, names, busy, fx? }, now, rnd)` → `{ room, next }`：GIF は残った人の `room.fx`（押した人は fx を送ればそれ）。再戦を始められる席の人だけ（`not_host`）。押した人も残ったことになる。残った人からほかの部屋に居る人（busy）を除き、2 人未満なら `not_enough`。`next` は同じ kind・同じ設定で人数 = 残った人数、作成者 = 押した人、名前は今の表示名、席はシャッフルして開始済み。元の部屋は `rematch.next` を入れて ver + 1。
-- `postChat(room, uid, text, lastAt, now)` → `{ seat, text }`（text は `normalizeChat` 済み。room は変えない）。メンバーでない → `not_found`、private でない・未開始 → `chat_closed`、文が不正 → `malformed`、同じ席の前の発言（`lastAt`）から 1 秒未満 → `too_fast`。終局後も部屋がある限り送れる。
+- `postChat(room, uid, text, lastAt, now)` → `{ seat, text }`（text は `normalizeChat` 済み。room は変えない）。メンバーでない → `not_found`、FREE MATCH・未開始 → `chat_closed`、文が不正 → `malformed`、同じ席の前の発言（`lastAt`）から 1 秒未満 → `too_fast`。終局後も部屋がある限り送れる。
 
 チャットの文字（`src/chat.js`。サーバーとブラウザの入力欄が共有）
 - 幅の単位：全角（East Asian Width の W / F 相当・絵文字）= 2、それ以外 = 1（コードポイント単位）。上限 `CHAT_MAX_UNITS = 80`（全角 40 文字 / 半角 80 文字。20 文字では足りないという声で 2 倍にした）。吹き出し 1 つは `BUBBLE_MAX_UNITS = 40`（全角 20 文字）までで、長い発言は `splitChat` で分ける：数は最少、長さはなるべく均等（最後だけ短い切れ端にしない）、切れ目は均等な位置に近い空白・句読点の後ろ（幅の 15% までずれてよい）、書記素の途中では切らない。分けた吹き出しは、前の分を読む時間（`dwell`）をおいてから次の分に入れ替える。同じ席の連投は `CHAT_MIN_INTERVAL_MS = 1000` 以上あける。1 部屋 `CHAT_ROOM_MAX = 2000` 件まで。
@@ -90,16 +94,27 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `act` | `{ room, ver, move }` | 同上 |
 | `sitout` / `sitin` | `{ room }` | 同上 |
 | `tick` | `{ room }` | 同上（何も無ければ 409 `not_yet`） |
-| `fx` | `{ room, fx }` | 同上（部屋に入った後に演出 GIF を変えた。PRIVATE MATCH だけ反映し、進行中はエンジンにもすぐ入れて ver + 1。FREE MATCH・同じ値は何もしない） |
+| `fx` | `{ room, fx }` | 同上（部屋に入った後に演出 GIF を変えた。PRIVATE MATCH と FRIEND MATCH だけ反映し、進行中はエンジンにもすぐ入れて ver + 1。FREE MATCH・同じ値は何もしない） |
 | `chat` | `{ room, text }` | `{ now, msg: { seq, seat, text, at } }`（ゲームの `ver` は変えない） |
 | `stay` | `{ room, fx? }` | 同上（終局後に席に残る） |
 | `rematch` | `{ room, fx? }` | 新しい部屋の `{ room, ver, now, view }`（席に残った人の profiles → 元の部屋の順にロック。ほかの部屋に居る人は除く） |
+| `discord_start` | `{ state }` | `{ url }`（Discord の同意の画面。state はブラウザが作る 16〜64 文字の乱数で、戻りで照合する） |
+| `discord_link` | `{ code }` | `{ ok: true, until }`（Discord から戻った code を確かめ、メンバーなら 30 日の確認を入れる） |
 
-`fx`（演出 GIF の slug。ブラウザは PRIVATE MATCH のときだけ送る）は任意で、正しくなければ null として扱う（参加は止めない）。
+FRIEND MATCH（`kind: 'friend'`）の `create` と `join` は、Discord で確認できた人（`friend_ok`）だけ。そうでなければ `not_friend`。
 
-エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）、`too_many`（429。回数の制限）。
+Discord のメンバー確認（`server/game/discord.js`。設定は Function の環境変数 `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_GUILD_ID`、任意で `DISCORD_ROLE_ID`。無ければ `friend_off`）
+- 戻り先（redirect_uri）は、リクエストの Origin（許可したものだけ）+ `/`。ブラウザから戻り先は受け取らない。
+- `discord_link`：回数を数える（10 分に 10 回。失敗した分も）→ code をアクセストークンに換える → `GET /users/@me/guilds/{guild}/member`（scope `identify guilds.members.read`。居なければ 404）→ トークンを失効させる。
+  メンバー（ロールの指定があればそのロールも持つ）なら、`HMAC-SHA256(client secret, guild:Discord の利用者 ID)` を `friend_members.discord_key` に入れる（ID そのもの・名前・トークンは残さない）。
+  同じ鍵をほかの人が持っていれば、その人の確認を外す（同じ Discord アカウントは 1 人だけ）。メンバーでなければ本人の前の確認も消して `not_member`。
+- 確認は 30 日（`friend_ttl`）で切れ、もう一度 Discord を経由する（`prompt=none` なので、許可済みなら同意の画面は出ない）。
 
-回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。Function へのリクエスト（ログイン済みの分。成功も失敗も）は 1 分に 300 回（`deps.flood`）。どれも DB で数える（`rate_limits`。Function はリクエストごとにメモリが分かれるので、メモリの中では数えられない）。Data API の読み取り（`room_poll` など）は数えていない。
+`fx`（演出 GIF の slug。ブラウザは FREE MATCH 以外のとき送る）は任意で、正しくなければ null として扱う（参加は止めない）。
+
+エラー：`not_authenticated`（401）、`unavailable`（503。JWKS に届かない。ブラウザはログアウトしない）、`in_other_room`（`room` 付き）、`room_full`、`room_closed`、`not_found`、`stale`、`not_your_turn`、`game_over`、`busy`、`illegal`、`malformed`、`chat_closed`（409。FREE MATCH・開始前）、`too_fast`（429。同じ席の連投が 1 秒未満）、`chat_full`（409。1 部屋 2000 件）、`not_host`（409。再戦を始められる人でない）、`not_enough`（409。残った人が 2 人未満）、`too_many`（429。回数の制限）、`not_friend`（403。FRIEND MATCH に入れる確認が無い・切れた）、`not_member`（403。Discord のサーバーのメンバーでない）、`friend_off`（503。Discord の設定が無い）、`discord_failed`（502。Discord に届かない・code が正しくない）。
+
+回数の制限（1 人ごと）：部屋番号のはずれ（`join` の `not_found` と RPC `room_peek` の null を合わせて）は 10 分に 10 回で、達すると窓が明けるまで `join` も `room_peek` も `too_many`（当たりの番号でも通さない）。`create` は成功した分が 10 分に 10 回。Discord での確認（`discord_link`）は 10 分に 10 回。Function へのリクエスト（ログイン済みの分。成功も失敗も）は 1 分に 300 回（`deps.flood`）。どれも DB で数える（`rate_limits`。Function はリクエストごとにメモリが分かれるので、メモリの中では数えられない）。Data API の読み取り（`room_poll` など）は数えていない。
 
 ## 6. DB（`db/migrations/*.sql`、追加のみ）
 | 表 | 内容 |
@@ -108,11 +123,13 @@ fxSeat(hand, fx)         // 演出 GIF を出す席：精算済みのショー�
 | `rooms` | code（6 桁。生きている部屋の中で一意）、kind、host、config、status、started、members、names、state、ver、views、due_ms、rematch（終局後の再戦の受付。`20261008000000_rematch.sql`）、fx（席ごとの演出 GIF の slug。`20261009000000_fx.sql`） |
 | `room_hands` | 終わったハンドの記録（端末へ渡すまでの一時置き場）。終局から 3 日で部屋ごと消える |
 | `room_chat` | チャットの発言（room, seq, seat, text, created_at）。書き込みは Function の `chat` だけ。部屋と一緒に消える。`rooms.chat_seq` が最新の seq |
-| `rate_limits` | 回数の制限（uid × 種類 `code` / `create` / `req` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`・`20261010210000_rate_req.sql`） |
+| `rate_limits` | 回数の制限（uid × 種類 `code` / `create` / `req` / `discord` ごとの窓の始まりと回数。上限と窓は `rate_rule`。`20261010200000_rate_limit.sql`・`20261010210000_rate_req.sql`） |
+| `friend_members` | FRIEND MATCH に入れる人（uid、discord_key = Discord の利用者 ID の鍵付きハッシュ（一意）、verified_at）。書き込みは Function の `discord_link` だけ（`20261012000000_friend.sql`） |
+| `friend_results` | FRIEND MATCH の結果（room, uid, mode, players, place, pt, hands, vpip, pfr, ended_at。1 試合 × 1 人）。書き込みは Function が終局した手で 1 回だけ。部屋が消えても残り、利用者が消えると一緒に消える |
 
 認証で届く個人の情報は残さない（`20261010000000_auth_scrub.sql`・`20261010100000_auth_scrub_profile.sql`）：Neon Auth が書く行を、書き込みのたびにトリガーで置き換える。`neon_auth."user"` の `email` は `<id>@privatematch.invalid`、`name` は `Player`、`image` は空。`neon_auth.account` の `idToken` / `accessToken` / `refreshToken` は空。`neon_auth.session` の `ipAddress` / `userAgent` は空。アプリはどれも使わない。残っていないかは `scripts/auth-audit.mjs`（Live が本番と dev で数える）。
 
-RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋）、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`（無ければ null で、はずれとして数える。上限に達していれば `too_many`）、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、private でなければ `[]`）。
+RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・終わってから 3 日以内の部屋・`friend` = `{ ok, until }`（Discord での確認。無ければ null））、`set_nickname`、`room_poll(p_room, p_ver)`（`chat` に最新の seq）、`room_peek(p_code)`（無ければ null で、はずれとして数える。上限に達していれば `too_many`）、`free_rooms()`、`room_hands(p_room, p_after)`（自分の手札だけ `hole` に入る）、`room_chat(p_room, p_after)`（`seq > p_after` の新しい方から最大 200 件を古い順に `[{ seq, seat, text, at }]`。メンバーでなければ `not_found`、FREE MATCH は `[]`）、`friend_stats(p_mode, p_season)`（FRIEND MATCH のスタッツとランキングの元。確認できた人だけ（そうでなければ `not_friend`）。`{ me, mode, season, seasons, members: [{ k, name }], agg: [{ s, k, n, pt, plus, first, place, dist, hands, vpip, pfr }], games: [{ k, at, place, pt }] }`。`k` は uid のハッシュ（uid は返さない）、シーズン `s` は日本時間の暦月 `'2026-10'`、`agg` は全シーズンのシーズン × 人の集計、`games` は選んだシーズン（無い・知らない値なら最新）の 1 試合 × 1 人で新しい方から 5000 件まで）。
 
 ## 7. 端末の記録（`src/history/*`）
 - IndexedDB `privatematch`：`games`（1 試合 1 件）と `hands`（`[roomId, handNo]`）。
@@ -123,16 +140,25 @@ RPC（`authenticated` のみ）：`me()`（プロフィール・居る部屋・�
 - プレイヤーのメモ（`src/history/notes.js`）：localStorage `pm-notes`（デモは `pm-notes-demo`）に `{ [nameKey]: { name, mark: 0..6, text（200 文字まで）, at } }`（プロトタイプの無い入れ物。名前が `constructor` などでもよい）。印もメモも空なら消す。中身が変わらない書き込みは何もしない（`at` も変えない）。ほかのタブの書き換え（`storage`）で読み直す。IMPORT は壊れた行を捨て、`at` を今より先にせず、同じ人は `at` の新しい方を残し、3000 人まで。
 
 ## 8. 画面
-- メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、STATS、SETTINGS。ランキングは無い。
+- メニュー：PRIVATE MATCH（部屋を作る / 部屋番号で入る）、FREE MATCH（部屋を作る＋募集中の一覧）、FRIEND MATCH、STATS、SETTINGS。
+- FRIEND MATCH（`src/ui/friend.js`）：メニューのボタンは、`me().friend.ok` なら入口へ、そうでなければ Discord での確認のダイアログ（`#gateDlg`）を出す。
+  - 確認の往復：ブラウザが state（乱数）を作って `discord_start` → sessionStorage `pm-discord` に預けて Discord へ移動 → 戻ってきた URL の `code` / `state` を起動時に受け取って URL から消し（`takeReturn`。state が違えば捨てる）、`discord_link` → `me()` を読み直して入口へ。招待 URL から来た friend の部屋は、確認のあと参加の確認に戻る（部屋番号を sessionStorage `pm-invite` に預ける）。
+  - 入口：フレンドマッチを開始（PRIVATE MATCH と同じ部屋の作成。部屋番号と招待 URL を Discord で共有する）・部屋番号で入る・STATS・RANKING。
+  - STATS：ゲームモード（種類 → 段階。localStorage `pm-friend-mode`）ごと。「シーズン内」は、シーズン（日本時間の暦月。通算も選べる）の自分の順位・合計・平均と加点率・平均順位、ランキングの上位 5 人（＋自分）、累積ポイント推移のグラフ（強調した人の線とメンバー平均の破線。通算はシーズンごとに足し上げる）、メンバー別の表（合計・平均・加点率・1 位率・平均順位・参加・生存 T。見出しで並べ替え、いちばん上はメンバー平均）。「シーズン推移」は、選んだ指標（合計・平均・加点率・1 位率・平均順位・生存ターン）のシーズンごとのグラフと表（新しいシーズンが左）。行を押すとその人の詳細（`#memberDlg`：通算・VPIP・PFR・順位の分布・シーズン別・最近の記録）。
+  - RANKING：ゲームモードとシーズン（通算も）ごと。合計 pt の多い順 → 平均順位の良い順 → 参加の多い順（すべて同じなら同じ順位）。自分の行は YOU の色。
+  - 指標（`src/friend.js`）：平均 = 合計 pt ÷ 参加数、加点率 = pt > 0 の回数 ÷ 参加数、1 位率、平均順位、生存ターン = ハンド数 ÷ VPIP(%) × 100 ÷ 参加数（端末の STATS と同じ `survivalTurns`）。モードもシーズンも混ぜない。
+  - グラフ（`src/ui/linechart.js`）：強調は 6 人まで（localStorage `pm-friend-focus`。選んでいなければ自分）。色は選んだときに空いている最小の番号（`--fs1`〜`--fs6`）で、外すまで変えない（順位で塗り替えない）。チップが凡例を兼ね、なぞるとその位置の全系列の値を出す。
+  - 読み込み：`friend_stats` をモード × シーズンごとに 30 秒覚える。卓から戻ると捨てる。`not_friend` が返ったら（確認が切れた）メニューへ戻して確認のダイアログ。
+  - `?fake` / `?demo`：確認済みとして動き、見本の結果（`src/friendDemo.js`。種から決まる 320 試合）を RPC と同じ形に集計して返す。デモで打った FRIEND MATCH の結果もそこに足す。`?fake&nofriend` は確認の往復の代役。
 - 設定（`src/ui/settings.js`、`#setDlg`）：ヘッダの歯車（メニューでも卓でも）とメニューの SETTINGS から開く。入口にベットサイズと演出 GIF の 2 つのボタン（← BACK で戻る）。演出 GIF を選べない（`VITE_KLIPY_KEY` が無く、デモでもない）ときは入口を出さずにベットサイズを開く。
-- 演出 GIF（`src/ui/gif.js`）：選んだ slug だけを端末に保存（localStorage `pm-fx`。デモは `pm-fx-demo`）。部屋に入った後に変えたら op `fx` ですぐ部屋にも送る（`main.js`）。今の GIF と「なし」、検索欄（プレースホルダー「Search KLIPY」。入力の 0.45 秒後・Enter で検索、空ならトレンド）、結果の格子（API の順のまま。上の部分は止めたまま格子だけがスクロールし、下まで送ると次のページ）。選ぶと KLIPY の Share Trigger を送る。KLIPY の呼び出しは `src/klipy.js`（`content_filter=high`、`customer_id` は端末のランダムな値 `pm-klipy-cid`、メディアと URL は保存しない）。`?fake` / `?demo` は手元の見本（`src/fxDemo.js`。自作の動く SVG）を同じ形で返し、Bot も PRIVATE MATCH では 4 人に 3 人が見本の GIF を持つ。
+- 演出 GIF（`src/ui/gif.js`。PRIVATE MATCH と FRIEND MATCH）：選んだ slug だけを端末に保存（localStorage `pm-fx`。デモは `pm-fx-demo`）。部屋に入った後に変えたら op `fx` ですぐ部屋にも送る（`main.js`）。今の GIF と「なし」、検索欄（プレースホルダー「Search KLIPY」。入力の 0.45 秒後・Enter で検索、空ならトレンド）、結果の格子（API の順のまま。上の部分は止めたまま格子だけがスクロールし、下まで送ると次のページ）。選ぶと KLIPY の Share Trigger を送る。KLIPY の呼び出しは `src/klipy.js`（`content_filter=high`、`customer_id` は端末のランダムな値 `pm-klipy-cid`、メディアと URL は保存しない）。`?fake` / `?demo` は手元の見本（`src/fxDemo.js`。自作の動く SVG）を同じ形で返し、Bot も PRIVATE MATCH では 4 人に 3 人が見本の GIF を持つ。
 - ベットサイズ：端末に保存（localStorage `pm-betsizes`）。スライダーの刻み（0.1/0.2/0.5/1/2/5 BB）と、場面ごとの候補（各 15 個まで）：Preflop Open（BB）、Preflop vs Raise（x = 直前のレイズ額の倍 / BB）、Postflop Bet（ポットの %）、Postflop vs Bet/Raise（x = 直前のベットの倍 / % = コール後のポットの割合を足す）。All-in は消せない。開いているベットのシートは変更で作り直す。
 - 待機室：部屋番号・招待 URL（`/?room=123456`。Copy / 共有）・参加者・満席で自動開始。
 - 卓：2〜6 席の楕円（自分は下）、操作は Fold / Check / Call / Bet・Raise（プリセット＋スライダー。プリセットは Min と設定の候補のうち Min と All-in の間に入るもので、横にスクロール。All-in は右端に固定）、Check/Fold の予約、離席 / I'm back、Leave。
-- 卓のチャット（PRIVATE MATCH だけ）：入力ボタンはドックの近く。発言は発言した人の席の真上に吹き出しで出る（ふわっと出て消える。1 席に 1 つ）。ほかの席・ベット・ボード・ドック・情報の行・ほかの吹き出しに重ならない置き方を毎フレーム選ぶ：上（少し上へずらすときはしっぽの柄で席につなぐ）→ 札かプレートの横（しっぽは横向き）→ 下（しっぽは上向き）。形は標準・細め・横長と少し小さい文字（11px まで）、とても狭い卓では 1 行の帯（長い文は横に流れる）。それでも吹き出しどうしが重なれば古い方を先に消す（履歴には残る）。発言者の色は YOU と、自分から見た席の順の 5 色（`--pc1`〜`--pc5`）で、吹き出し・チャット履歴・席の合図で共通。スマホではキーボードに合わせて卓を縮める（小さすぎれば卓を縮小表示にし、吹き出しは読める大きさのまま）。キーボードの高さは画面の大きさごとに端末に覚え（localStorage `pm-kbh`）、2 回目からは入力欄を開いた瞬間にキーボードと同時に縮め始める（閉じるときも同時に戻す。`src/ui/viewport.js` の `expectKeyboard`）。送っても入力欄とキーボードはそのまま（続けて打てる）で、閉じるのは入力ボタン・×・外側を押したとき。デモ（`?demo`）で本物のキーボードが出ないとき（PC・開発者ツールのスマホ表示）は模擬キーボードを出して同じ縮み方を確かめられる。同期は `room_poll` の `chat` が増えたら `room_chat` を差分で読む。入室時の履歴は既読扱い。
+- 卓のチャット（PRIVATE MATCH と FRIEND MATCH）：入力ボタンはドックの近く。発言は発言した人の席の真上に吹き出しで出る（ふわっと出て消える。1 席に 1 つ）。ほかの席・ベット・ボード・ドック・情報の行・ほかの吹き出しに重ならない置き方を毎フレーム選ぶ：上（少し上へずらすときはしっぽの柄で席につなぐ）→ 札かプレートの横（しっぽは横向き）→ 下（しっぽは上向き）。形は標準・細め・横長と少し小さい文字（11px まで）、とても狭い卓では 1 行の帯（長い文は横に流れる）。それでも吹き出しどうしが重なれば古い方を先に消す（履歴には残る）。発言者の色は YOU と、自分から見た席の順の 5 色（`--pc1`〜`--pc5`）で、吹き出し・チャット履歴・席の合図で共通。スマホではキーボードに合わせて卓を縮める（小さすぎれば卓を縮小表示にし、吹き出しは読める大きさのまま）。キーボードの高さは画面の大きさごとに端末に覚え（localStorage `pm-kbh`）、2 回目からは入力欄を開いた瞬間にキーボードと同時に縮め始める（閉じるときも同時に戻す。`src/ui/viewport.js` の `expectKeyboard`）。送っても入力欄とキーボードはそのまま（続けて打てる）で、閉じるのは入力ボタン・×・外側を押したとき。デモ（`?demo`）で本物のキーボードが出ないとき（PC・開発者ツールのスマホ表示）は模擬キーボードを出して同じ縮み方を確かめられる。同期は `room_poll` の `chat` が増えたら `room_chat` を差分で読む。入室時の履歴は既読扱い。
 - 卓の金額：ベット・ポット・ドックの POT / CALL / Call・Raise・ベットのシート・勝った額は BB（ポットは下にチップも）。席のプレートのスタックは BB かチップ数のどちらか一方（既定は BB）。スタックを押すと全員の席が切り替わり（両方を重ねて描き、320ms でふわっと入れ替える）、端末に保存する（localStorage `pm-stk`）。
 - ショーダウンの演出（`src/ui/table.js`）：精算済みのビューは結果を一度に運ぶので、このハンドの賭けを見ていた卓（またはブラインドだけでオールインになって配った時点で精算済みのハンド）では `RUNOUT` の順に見せる。ベットをポットへ飛ばす（オールインなら ALL-IN の帯）→ 相手の手札を表に → 勝率の札（`equities`：残り 2 枚以下は全通り、それ以上はハンド番号を種にした 40000 回の試行。どの端末でも同じ値）→ フロップ（1 枚 828ms・270ms 刻みでゆっくり開き、開ききってから勝率）・ターン（開いて勝率を更新して止める）→ リバー（まだ 2 人以上に勝ちの目があれば、裏と表を背中合わせにした 1 つの立体の札を置き、端を -24° まで ease-in-out で持ち上げてから、速さ 0 から加速して -180° まで返す。途中で要素を差し替えず、角度は一方向にしか動かない。表が見えるのは置いてから 1.75 秒。決着していれば普通にめくって早めに結果へ）→ 勝者の 5 枚を浮かせ（1000ms）、ポットから勝者へ（1170ms）。演出の間は勝者・役名・増えたスタック・飛んだ順位・ドックの WINS・結果のダイアログ・端末への記録を伏せる（相手の表になった札も、ランアウトが始まる前の一拍を含めて、演出で返すまで裏）。ハンドが決まって自分が飛んだ・終局したときの結果のダイアログは、結果を見せてから 3 秒（`PACE.result`）おいて出す（ボードと勝者を見せる）。読み込み直し・裏に回っていたときは結果をそのまま出す。
-- 勝者の演出 GIF（`src/ui/fxshow.js`。PRIVATE MATCH だけ）：卓のビューの `fx` が変わったら全席の分を `gifs/items` 1 回で引き、動く画像（webp。無ければ gif、それも無ければ動画）を先に読み込んでおく（iPhone の Safari は画面に出していない動画を先読みしないので、動画は使わない）。ショーダウンの演出で勝負が決まって（普通のショーダウンは手札を表にして `RUNOUT.show`、リバーは勝率が決まったところ）一間（`FX.wait`）おいてから、勝者（`fxSeat`）の GIF を卓の中央（卓の幅の 64%・440px まで、高さの 52% まで。縦横比は GIF のまま）に、まわりを暗くして出し、下に勝者の名前（YOU / 相手の色）。`FX.in` で出て `FX.show` 見せ、`FX.out` で消えてボードに戻り、`FX.gap` おいてから勝者の 5 枚・ポットから勝者へのチップ・順位。読み込みが終わっていなければ出さずにすぐ結果へ（進行は待たない）。卓を出ると読み込んだものを手放す。
+- 勝者の演出 GIF（`src/ui/fxshow.js`。PRIVATE MATCH と FRIEND MATCH）：卓のビューの `fx` が変わったら全席の分を `gifs/items` 1 回で引き、動く画像（webp。無ければ gif、それも無ければ動画）を先に読み込んでおく（iPhone の Safari は画面に出していない動画を先読みしないので、動画は使わない）。ショーダウンの演出で勝負が決まって（普通のショーダウンは手札を表にして `RUNOUT.show`、リバーは勝率が決まったところ）一間（`FX.wait`）おいてから、勝者（`fxSeat`）の GIF を卓の中央（卓の幅の 64%・440px まで、高さの 52% まで。縦横比は GIF のまま）に、まわりを暗くして出し、下に勝者の名前（YOU / 相手の色）。`FX.in` で出て `FX.show` 見せ、`FX.out` で消えてボードに戻り、`FX.gap` おいてから勝者の 5 枚・ポットから勝者へのチップ・順位。読み込みが終わっていなければ出さずにすぐ結果へ（進行は待たない）。卓を出ると読み込んだものを手放す。
 - 遷移の間（`src/pace.js`）：受け取ったビューは列に並べ、前の遷移を見せ終わってから 1 つずつ当てる（`receive` → `pump` → `apply`。3 秒以上遅れたら最新へ飛ぶ。裏に回っている間は最新だけ）。`plan(prev, v)` が遷移の種類（action / street / win / showdown / deal / deal-showdown）と時刻を決め、卓はその順に見せる。
   - action：まとめて来た複数のアクションも 1 拍（550ms）ずつ。チップと札は 220ms で出し、まだ見せていないベットはスタックに残して見せる。手番の合図と操作ボタンは最後のアクションから 1 拍後。
   - street：最後のベット（コールで閉じたときもそのチップ）を 300ms 見せ → 612ms でポットへ集める → 160ms 空けて新しい札を返す（フロップは 1 枚 468ms・198ms 刻み、ターン・リバーは 260ms）→ 手番。フロップで約 2 秒。

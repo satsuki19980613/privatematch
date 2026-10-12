@@ -4,15 +4,19 @@
 // 部屋 room = { id, code, kind, host, config, status, started, members: [uid], names: [表示名], fx: [slug | null], state, ver, createdAt, startedAt, rematch }
 //   status: 'waiting' | 'running' | 'paused' | 'finished' | 'cancelled'（開始後はエンジンの状態と同じ）
 //   members: 待機中は参加順（先頭が作成者）、開始後は席順。state はエンジンの状態（山札を含む。サーバーだけが持つ）
-//   fx: 席ごとの演出 GIF（KLIPY の slug。src/fx.js）。PRIVATE MATCH だけで、FREE MATCH は全員 null。開始時にエンジンへ渡す（engine.js の fxSeat）。
+//   kind: 'private'（部屋番号・招待 URL で入る）| 'free'（一覧に出る）| 'friend'（FRIEND MATCH。Discord のメンバーだけが入れ、結果をサーバーに残す）
+//   fx: 席ごとの演出 GIF（KLIPY の slug。src/fx.js）。PRIVATE MATCH と FRIEND MATCH だけで、FREE MATCH は全員 null。開始時にエンジンへ渡す（engine.js の fxSeat）。
 //       以前の部屋には無い（null は全員なし）
 //   rematch: 終局後の再戦の受付 { stay: [席]（席に残った順）, gone: [席]（Menu へ去った）, next: { id, code } | null（始まった再戦の部屋） }。無ければ null
 import { newTable, act, tick, sitin, sitout, leave, viewFor, handRecord, dueAt, EngineError } from '../../src/engine.js';
 import { normalizeConfig, WAITING_EXPIRES_MS, REMATCH_MS, REMATCH_HOST_WAIT_MS } from '../../src/structure.js';
 import { normalizeChat, CHAT_MIN_INTERVAL_MS } from '../../src/chat.js';
 import { normalizeFx } from '../../src/fx.js';
+import { gameHandStats } from '../../src/history/stats.js';
 
-export const KINDS = ['private', 'free'];
+export const KINDS = ['private', 'free', 'friend'];
+/** チャットと演出 GIF がある部屋（知り合いどうしの PRIVATE MATCH と FRIEND MATCH。FREE MATCH には無い） */
+export const social = kind => kind === 'private' || kind === 'friend';
 
 export class MoveError extends Error {
   constructor(code, extra) { super(code); this.code = code; this.extra = extra; }
@@ -26,9 +30,9 @@ export const genCode = rnd => String(Math.floor(rnd() * 1e6)).padStart(6, '0');
 const live = room => ['waiting', 'running', 'paused'].includes(room.status);
 /** 席ごとの演出 GIF（以前の部屋は全員 null） */
 export const fxOf = room => room.fx ?? room.members.map(() => null);
-const fxFor = (kind, fx) => (kind === 'private' ? normalizeFx(fx) : null);
+const fxFor = (kind, fx) => (social(kind) ? normalizeFx(fx) : null);
 
-/** 部屋を作る（作成者が最初の参加者）。fx = 作成者の演出 GIF（PRIVATE MATCH だけ残す） */
+/** 部屋を作る（作成者が最初の参加者）。fx = 作成者の演出 GIF（PRIVATE MATCH と FRIEND MATCH だけ残す） */
 export function createRoom({ id, code, kind, uid, name, config, now, fx = null }) {
   if (!KINDS.includes(kind)) throw new MoveError('malformed');
   const cfg = normalizeConfig(config);
@@ -52,7 +56,7 @@ function start(r, now, rnd) {
   const order = shuffle(r.members.map((u, i) => i), rnd);
   const fx = fxOf(r);
   r.members = order.map(i => r.members[i]); r.names = order.map(i => r.names[i]); r.fx = order.map(i => fx[i]);
-  r.state = newTable({ config: r.config, names: r.names, now, rnd, fx: r.kind === 'private' ? r.fx : null });
+  r.state = newTable({ config: r.config, names: r.names, now, rnd, fx: social(r.kind) ? r.fx : null });
   r.started = true; r.startedAt = now; r.status = r.state.status;
 }
 
@@ -121,13 +125,13 @@ export function tickRoom(room, uid, now) {
 }
 
 /**
- * チャットの発言（PRIVATE MATCH の卓だけ。開始後なら終局後も部屋がある限り送れる）。ゲームの ver とは独立（room は変えない）。
+ * チャットの発言（PRIVATE MATCH と FRIEND MATCH の卓だけ。開始後なら終局後も部屋がある限り送れる）。ゲームの ver とは独立（room は変えない）。
  * lastAt はその席の最後の発言時刻（ms。無ければ null）。=> { seat, text }（text は normalizeChat 済み）
  */
 export function postChat(room, uid, text, lastAt, now) {
   const seat = seatOf(room, uid);
   if (seat < 0) throw new MoveError('not_found');
-  if (room.kind !== 'private' || !room.started) throw new MoveError('chat_closed');
+  if (!social(room.kind) || !room.started) throw new MoveError('chat_closed');
   const t = normalizeChat(text);
   if (t == null) throw new MoveError('malformed');
   if (lastAt != null && now - lastAt < CHAT_MIN_INTERVAL_MS) throw new MoveError('too_fast');
@@ -135,7 +139,7 @@ export function postChat(room, uid, text, lastAt, now) {
 }
 
 /**
- * 演出 GIF を変える（部屋に入った後に設定で変えた分。PRIVATE MATCH だけで、FREE MATCH は何もしない）。待機中は開始時に、
+ * 演出 GIF を変える（部屋に入った後に設定で変えた分。PRIVATE MATCH と FRIEND MATCH だけで、FREE MATCH は何もしない）。待機中は開始時に、
  * 進行中はエンジンの状態（state.fx）にもすぐ入れる（次に精算するハンドから。全員のビューに届くよう ver を上げる）。
  * 終局後は再戦で使う分。=> { room, record: null }
  */
@@ -143,7 +147,7 @@ export function setRoomFx(room, uid, fx) {
   const seat = seatOf(room, uid);
   if (seat < 0) throw new MoveError('not_found');
   const f = fxFor(room.kind, fx);
-  if (room.kind !== 'private' || f === fxOf(room)[seat]) return { room, record: null };
+  if (!social(room.kind) || f === fxOf(room)[seat]) return { room, record: null };
   const r = clone(room);
   r.fx = fxOf(room).map((x, s) => (s === seat ? f : x));
   if (r.started && r.state && live(r)) {
@@ -212,6 +216,18 @@ export function rematchRoom(room, uid, { id, code, names, busy = new Set(), fx }
   const r = clone(room);
   r.rematch = { ...rm, stay, next: { id, code } }; r.ver++;
   return { room: r, next };
+}
+
+/**
+ * FRIEND MATCH の結果（終局した部屋の、席ごとの順位・pt とハンドの集計）。recs = その部屋の全ハンドの記録（handRecord の rec）。
+ * => [{ uid, place, pt, hands, vpip, pfr }]（順位が決まった席だけ）。FRIEND MATCH でない・終局していない部屋は []
+ */
+export function friendResults(room, recs) {
+  if (room.kind !== 'friend' || !room.started || room.status !== 'finished') return [];
+  return room.members.map((uid, seat) => {
+    const p = room.state.players[seat], hs = gameHandStats(recs, seat);
+    return { uid, place: p.place, pt: p.pt ?? 0, hands: hs?.hands ?? 0, vpip: hs?.vpip.n ?? 0, pfr: hs?.pfr.n ?? 0 };
+  }).filter(r => Number.isInteger(r.place));
 }
 
 /** 次に何かが起きる時刻（DB の due_ms） */

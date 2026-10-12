@@ -1,9 +1,10 @@
 // STATS（pocket-ICM のスタッツ画面と同じ骨組み）：ゲームモードを選び、そのモードだけで試合数・平均順位・1位率・入賞率・累計 pt・直近の成績、
 // HANDS・VPIP・PFR・生存ターン、順位分布、累計 pt のグラフと期間。HAND HISTORY（試合ごとの一覧 → ハンドの詳細）。
 // データはすべてこの端末の IndexedDB（history/store.js）。プレイヤーのメモ（history/notes.js）も EXPORT / IMPORT に含める。
-import { configSummary, GAME_KINDS, GAME_KIND_LABELS, MODES_BY_KIND, GAME_MODES, MODE_IDS } from '../structure.js';
-import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb, localGet, localSet } from './util.js';
+import { configSummary, MODE_IDS } from '../structure.js';
+import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb, localGet, localSet, kindShort, statTile } from './util.js';
 import { paint, setPane } from './menu.js';
+import { modeSegHTML, bindModeSeg } from './modeseg.js';
 import * as store from '../history/store.js';
 import { syncRoom } from '../history/sync.js';
 import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, latestMode, gameHandStats, mergeStats } from '../history/stats.js';
@@ -47,15 +48,9 @@ export function render(el, pane, fromLoad) {
 
 /* ===================== STATS ===================== */
 const PLACE_LABEL = ['1位', '2位', '3位', '4位', '5位', '6位'];
-const stat = (label, value, unit = '', sub = '', tone = '') => `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unit && value !== '–' ? `<span class="hs-unit">${unit}</span>` : ''}</b>${sub ? `<span class="hs-sub">${sub}</span>` : ''}</div>`;
+const stat = statTile;
 const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 
-/** ゲームモードの選択（種類 → クラブ以外は段階） */
-function modeHTML() {
-  const kind = GAME_MODES[mode].kind, variants = MODES_BY_KIND[kind];
-  return `<div class="seg hs-mode" data-key="kind">${GAME_KINDS.map(k => `<button type="button" data-v="${k}" aria-pressed="${kind === k}">${GAME_KIND_LABELS[k]}</button>`).join('')}</div>
-    ${variants.length > 1 ? `<div class="seg hs-mode hs-var" data-key="mode">${variants.map(m => `<button type="button" data-v="${m}" aria-pressed="${mode === m}">${kind === 'rank' ? 'STAGE ' + GAME_MODES[m].variant : GAME_MODES[m].variant}</button>`).join('')}</div>` : ''}`;
-}
 /** 選んだモードで、期間で絞った試合 */
 const pickedGames = () => filterByPeriod(byMode(finishedGames(games), mode), period);
 
@@ -69,7 +64,7 @@ function statsHTML() {
     <div class="panel hs-panel">
       <div class="hs-head"><span class="hs-title">STATS</span><span class="hs-total">全モード <b>${total.toLocaleString()}</b></span></div>
       <button class="btn ghost wide hs-history-btn" id="histBtn" type="button">HAND HISTORY</button>
-      <div class="hs-modes">${modeHTML()}</div>
+      <div class="hs-modes">${modeSegHTML(mode)}</div>
       <div class="hs-first"><span>First Play</span><b>${all.length ? fmtDate(all[0].endedAt) : '–'}</b></div>
       <div class="hs-grid">
         ${stat('試合数', sum.games.toLocaleString())}
@@ -120,11 +115,7 @@ function bindStats(el) {
   el.querySelector('[data-back]').onclick = () => setPane('main');
   el.querySelector('#histBtn').onclick = () => { openGame = null; shown = PAGE; setPane('history'); };
   el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { period = b.dataset.p; render(el, 'stats'); });
-  el.querySelectorAll('.hs-mode').forEach(sg => sg.onclick = e => {
-    const b = e.target.closest('[data-v]'); if (!b) return;
-    mode = sg.dataset.key === 'kind' ? (GAME_MODES[mode].kind === b.dataset.v ? mode : MODES_BY_KIND[b.dataset.v][0]) : b.dataset.v;
-    localSet(MODE_KEY, mode); render(el, 'stats');
-  });
+  bindModeSeg(el, () => mode, m => { mode = m; localSet(MODE_KEY, mode); render(el, 'stats'); });
   const svg = el.querySelector('#hcSvg'), pts = cumulativePt(pickedGames()), g = geo(pts);
   const move = e => {
     if (!g.n) return;
@@ -183,7 +174,7 @@ function gameRow(g) {
       }
     }
     return `<li class="hg${open ? ' open' : ''}"><button class="hg-head" type="button" data-game="${esc(g.roomId)}">
-      <span class="hg-top"><span class="hg-date">${g.startedAt ? fmtTime(g.startedAt) : ''}</span><span class="hg-kind">${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}</span><span class="hg-res">${status}</span></span>
+      <span class="hg-top"><span class="hg-date">${g.startedAt ? fmtTime(g.startedAt) : ''}</span><span class="hg-kind">${kindShort(g.kind)} #${esc(g.code)}</span><span class="hg-res">${status}</span></span>
       <span class="hg-cfg"><span class="hg-cfg-t">${esc(configSummary(g.config))}</span><span class="hg-cfg-n">・ ${+g.hands || 0} hands</span></span>
       <span class="hg-opp">${g.players.map((p, s) => s === g.seat ? '' : esc(p.name)).filter(Boolean).join(' / ')}</span></button>${body}</li>`;
 }
@@ -227,7 +218,7 @@ export function openHand(g, h) {
       <ul class="hd-acts">${posts}${acts.map(a => `<li><span class="nm2">${name(a.seat)}</span><span class="pl k-${esc(a.kind)}">${esc(actionText(a))}</span>${a.auto ? '<small>auto</small>' : ''}</li>`).join('')}</ul></div>`);
   }
   const res = h.pots.map((p, i) => `<li>${p.eligible?.length === 1 && i > 0 ? 'Uncalled ' : h.pots.length > 1 ? (i === 0 ? 'Main' : 'Side') + ' ' : ''}${fmt(p.amount)} → ${p.winners.map(name).join(', ')}${p.winners.length === 1 && !(p.eligible?.length === 1 && i > 0) && h.names[p.winners[0]] ? ` <small>${esc(h.names[p.winners[0]])}</small>` : ''}</li>`).join('');
-  $('#handBody').innerHTML = head(`HAND #${fmt(h.handNo)} ・ LV ${fmt(h.level)} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${g.kind === 'free' ? 'FREE' : 'PRIVATE'} #${esc(g.code)}`) +
+  $('#handBody').innerHTML = head(`HAND #${fmt(h.handNo)} ・ LV ${fmt(h.level)} ・ ${fmt(h.sb)}/${fmt(h.bb)} (${fmt(h.ante)})`, `${kindShort(g.kind)} #${esc(g.code)}`) +
     `<table class="tbl hd-tbl"><thead><tr><th>POS</th><th>NAME</th><th>STACK</th><th>CARDS</th><th>NET</th></tr></thead><tbody>${players}</tbody></table>
     ${streets.join('')}
     <div class="hd-sh"><b>Result</b></div><ul class="hd-acts">${res}</ul>

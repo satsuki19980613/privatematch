@@ -139,7 +139,7 @@ export function runoutMs(from) {
   // プリフロップのオールイン（from = 0）は、卓がアクションの後に一間（PACE.preflop と同じ preflop）おいてから始める
   return (from === 0 ? R.preflop : 0) + R.gather + R.reveal + (from < 3 ? R.flop : 0) + (from < 4 ? R.street : 0) + R.river + R.latency;
 }
-// 勝者の演出 GIF（PRIVATE MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（wait）おいてから卓の中央に出し、
+// 勝者の演出 GIF（PRIVATE MATCH と FRIEND MATCH だけ。engine.js の fxSeat）。ショーダウンで勝負が決まって一間（wait）おいてから卓の中央に出し、
 //   消してボードに戻ってから、ポットを勝者へ動かす。wait 一間 / in 出る / show 見せる / out 消える / gap ボードに戻ってからチップが動くまで。
 //   GIF を出さないハンドは一間もおかない
 //   （out と gap は、消えてからが速すぎるという声で 1.8 倍にした。もとは 320 / 250）。

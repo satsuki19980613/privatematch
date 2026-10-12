@@ -49,6 +49,8 @@ export function fmtPt(v) {
   const s = (Math.round(Math.abs(v) * 10) / 10).toFixed(1).replace(/\.0$/, '');
   return `${v > 0 ? '+' : '−'}${s}`;
 }
+/** 数字のタイル（STATS と FRIEND MATCH のスタッツ）。値が無い（–）ときは単位を付けない */
+export const statTile = (label, value, unit = '', sub = '', tone = '') => `<div class="hs-stat"><span class="statlbl">${label}</span><b class="hs-val${tone ? ' ' + tone : ''}">${value}${unit && value !== '–' ? `<span class="hs-unit">${unit}</span>` : ''}</b>${sub ? `<span class="hs-sub">${sub}</span>` : ''}</div>`;
 /** bb の表示（小数第 1 位まで） */
 export const fmtBb = (chips, bb) => { const v = Math.round((chips / (bb || 1)) * 10) / 10; return (v % 1 === 0 ? String(v) : v.toFixed(1)); };
 
@@ -69,12 +71,19 @@ export function fly(fromEl, toEl, label, cls, delay = 0, done = null, D = 650) {
   an.onfinish = end; setTimeout(end, D + delay + 150);
 }
 
+/** 部屋の種類の表示（待機室・参加前の確認）と、履歴の一覧に出す短い表示 */
+export const KIND_LABEL = { private: 'PRIVATE MATCH', free: 'FREE MATCH', friend: 'FRIEND MATCH' };
+export const kindLabel = kind => KIND_LABEL[kind] ?? KIND_LABEL.private;
+export const kindShort = kind => kindLabel(kind).split(' ')[0];
+/** 招待 URL をログインや Discord の確認の往復をまたいで預ける先（sessionStorage） */
+export const INVITE_KEY = 'pm-invite';
+
 /** 招待 URL（部屋番号で開く） */
 export const inviteUrl = code => `${location.origin}/?room=${code}`;
 /** 招待 URL を共有（共有シートが無ければクリップボード） */
 export async function shareInvite(code, kind) {
   const url = inviteUrl(code);
-  const text = `PrivateMatch の${kind === 'free' ? '' : 'プライベート'}部屋に招待します（部屋番号 ${code}）`;
+  const text = `PrivateMatch の${{ free: '', friend: 'フレンドマッチの' }[kind] ?? 'プライベート'}部屋に招待します（部屋番号 ${code}）`;
   if (navigator.share) { try { await navigator.share({ title: 'PrivateMatch', text, url }); return; } catch (e) { if (e?.name === 'AbortError') return; } }
   await copyText(url);
 }

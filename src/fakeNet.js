@@ -8,6 +8,7 @@
 //   &chat=many  PRIVATE MATCH の卓で Bot がよく喋る（3〜6 秒に 1 回。上限ちょうどの長い文も混ぜる。見た目の確認用）
 //   &allin    Bot がよくオールインする（ランアウトの演出の確認用）
 //   &short    初期スタックを 2〜4 BB にする（すぐ終局する。再戦の確認用）
+//   &nofriend FRIEND MATCH の Discord の確認がまだの人として始める（確認の往復を確かめる。「Discord で確認」はこのページへ code を付けて戻る）
 // 演出の確認（デモのメニューのボタン。create の demo）：部屋ごとの設定 R.show
 //   river    4 人。自分 100BB・Bot 15BB。先に動く Bot がオールイン、ほかの Bot は降りる。配りは「プリフロップで両方オールインになったら、
 //            ターンで 2 人に勝ちの目が残る」ものを選ぶ（半分はリバーで逆転）＝リバーの溜めの演出が毎回見られる
@@ -15,13 +16,14 @@
 //   rematch  3 人・2〜4BB ですぐ終わり、Bot は全員席に残る（席に残る → Rematch）
 //   fx       4 人（PRIVATE MATCH）。river と同じ打ち方・スタックで、毎回ショーダウンになり勝者の演出 GIF が出る配りを選ぶ。
 //            自分が GIF を設定していれば 7 割は自分が勝つ（自分の GIF）、残りと未設定なら Bot が勝つ（Bot は全員が見本の GIF を持つ）
-import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader, setRoomFx } from '../server/game/rules.js';
+import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, postChat, MoveError, genCode, roomInfo, stayRoom, rematchRoom, rematchOpen, rematchLeader, setRoomFx, social, friendResults } from '../server/game/rules.js';
 import { legalActions, dueAt, handRecord, newTable, act, tick, fxSeat } from './engine.js';
 import { equities } from './equity.js';
 import { DEFAULT_CONFIG } from './structure.js';
 import { CHAT_ROOM_MAX } from './chat.js';
 import { DEMO_SLUGS } from './fxDemo.js';
 import { secureRnd } from './rnd.js';
+import { aggregate, sampleRows, demoKey } from './friendDemo.js';
 
 const q = new URLSearchParams(location.search);
 const WAIT = q.has('wait') ? Math.max(0, +q.get('wait') || 0) : 1500;
@@ -30,6 +32,8 @@ const THINK = q.has('fast') ? [200, 500] : [700, 2200];
 const CHATTY = q.get('chat') === 'many';
 const ALLIN = q.has('allin');
 const SHORT = q.has('short');
+const NOFRIEND = q.has('nofriend');
+const FAKE_FRIEND = 'pm-fake-friend';   // &nofriend で確認を済ませた印（このタブの間だけ）
 const TALK = CHATTY ? [3000, 6000] : [20000, 40000];   // Bot の雑談の間隔
 const ME = '00000000-0000-4000-8000-000000000001';
 const NAMES = ['Mika', 'Kenta', 'Yui', 'Sora', 'Riku', 'Hana', 'Daichi', 'Emi', 'Taro', 'Nana'];
@@ -46,7 +50,7 @@ const fail = code => { const e = new Error(code); e.code = code; e.status = code
 const between = ([a, b]) => a + rnd() * (b - a);
 const pickOf = a => a[Math.floor(rnd() * a.length)];
 // PRIVATE MATCH の Bot の演出 GIF（4 人に 3 人。all なら全員。見本の slug。src/fxDemo.js）
-const botFx = (room, all) => (room.kind === 'private' && (all || rnd() < 0.75) ? pickOf(DEMO_SLUGS) : null);
+const botFx = (room, all) => (social(room.kind) && (all || rnd() < 0.75) ? pickOf(DEMO_SLUGS) : null);
 // 配りを選び直す演出の確認（river / fx）
 const rigged = show => show === 'river' || show === 'fx';
 const newRoom = (room, show = null) => ({ room, hands: [], bots: new Set(), botAt: 0, nextJoin: Infinity, chat: [], chatLast: [], talk: null, stayAt: null, show, wait: show ? 250 : WAIT });
@@ -72,8 +76,27 @@ function seedFree() {
 seedFree();
 
 function save(R, out) {
+  const was = R.room.status;
   R.room = out.room;
   if (out.record) { R.hands.push(out.record); bigPot(R, out.record.rec); }
+  if (was !== 'finished') recordFriend(R);
+}
+
+/* ---------- FRIEND MATCH：Discord の確認と、スタッツ・ランキングの見本（src/friendDemo.js） ---------- */
+let friendRows = null;
+function rowsOf() { friendRows ??= sampleRows(me.nickname); return friendRows; }
+function friendOk() {
+  if (!NOFRIEND) return true;
+  try { return sessionStorage.getItem(FAKE_FRIEND) === '1'; } catch { return false; }
+}
+function needFriend(kind) { if (kind === 'friend' && !friendOk()) throw new MoveError('not_friend'); }
+// 終局した FRIEND MATCH の結果を見本に足す（db.js の saveResults と同じ）
+function recordFriend(R) {
+  const room = R.room, at = Date.now();
+  for (const x of friendResults(room, R.hands.map(h => h.rec))) {
+    const name = room.names[room.members.indexOf(x.uid)];
+    rowsOf().push({ k: demoKey(x.uid === ME ? 'me' : name), name, mode: room.config.mode, at, place: x.place, pt: x.pt, hands: x.hands, vpip: x.vpip, pfr: x.pfr });
+  }
 }
 
 // チャット（rules.js の postChat と同じ契約。DB の chat と同じく、先に postChat を通してから件数の上限を見る）
@@ -110,7 +133,7 @@ function talkers(R, except = []) {
 const shuffled = a => a.map(x => [rnd(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
 function say(R, seat, text, at) { talkState(R).queue.push({ seat, text, at }); }
 function bigPot(R, rec) {
-  if (R.room.kind !== 'private' || !R.bots.size) return;
+  if (!social(R.room.kind) || !R.bots.size) return;
   const pot = rec.won.reduce((a, b) => a + b, 0);
   if (pot < (CHATTY ? 10 : 30) * rec.bb || rnd() > (CHATTY ? 0.9 : 0.4)) return;
   const winners = rec.won.map((w, s) => (w > 0 ? s : -1)).filter(s => s >= 0);
@@ -121,7 +144,7 @@ function bigPot(R, rec) {
 }
 function botTalk(R, now) {
   const room = R.room;
-  if (room.kind !== 'private' || !room.started || !R.bots.size || room.status === 'cancelled') return;
+  if (!social(room.kind) || !room.started || !R.bots.size || room.status === 'cancelled') return;
   const T = talkState(R);
   if (!T.hello) {
     T.hello = true;
@@ -295,7 +318,8 @@ export async function rpc(name, args = {}) {
     case 'me': {
       const R = mine();
       const recent = [...rooms.values()].filter(x => x.room.started && x.room.members.includes(ME)).map(x => ({ id: x.room.id, endedAt: x.room.state.endedAt }));
-      return lag({ nickname: me.nickname, room: R ? { id: R.room.id, code: R.room.code, kind: R.room.kind, status: R.room.status, started: R.room.started } : null, recent });
+      const friend = friendOk() ? { ok: true, until: Date.now() + 30 * 86_400_000 } : null;
+      return lag({ nickname: me.nickname, room: R ? { id: R.room.id, code: R.room.code, kind: R.room.kind, status: R.room.status, started: R.room.started } : null, recent, friend });
     }
     case 'set_nickname': {
       const v = String(args.p_name || '').trim();
@@ -309,7 +333,7 @@ export async function rpc(name, args = {}) {
     }
     case 'room_chat': {
       const R = rooms.get(args.p_room); if (!R?.room.members.includes(ME)) throw fail('not_found');
-      if (R.room.kind !== 'private') return lag([]);
+      if (!social(R.room.kind)) return lag([]);
       return lag(R.chat.filter(m => m.seq > (args.p_after || 0)).slice(-200));
     }
     case 'room_peek': {
@@ -326,6 +350,11 @@ export async function rpc(name, args = {}) {
       const seat = R.room.members.indexOf(ME);
       return lag(R.hands.filter(h => h.rec.handNo > (args.p_after || 0)).slice(0, 200).map(h => ({ ...h.rec, hole: h.holes[seat] })));
     }
+    case 'friend_stats': {
+      if (!friendOk()) throw fail('not_friend');
+      const rows = rowsOf().map(x => (x.k === demoKey('me') ? { ...x, name: me.nickname } : x));
+      return lag(aggregate(rows, { me: demoKey('me'), mode: args.p_mode, season: args.p_season }));
+    }
     default: throw fail('not_found');
   }
 }
@@ -341,6 +370,7 @@ export async function game(body) {
         let cur = mine();
         if (cur && show) { try { save(cur, leaveRoom(cur.room, ME, now)); } catch (e) { /* もう無い */ } cur = mine(); }   // 演出の確認はいまの卓を抜けてから
         if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
+        needFriend(body.kind);
         const id = crypto.randomUUID();
         const config = show ? { ...DEFAULT_CONFIG, ...SHOWS[show] } : body.config;
         const room = createRoom({ id, code: genCode(rnd), kind: body.kind, uid: ME, name: me.nickname, config, now, fx: body.fx });
@@ -352,6 +382,7 @@ export async function game(body) {
         const R = [...rooms.values()].find(x => x.room.code === body.code && ['waiting', 'running', 'paused'].includes(x.room.status));
         if (!R) throw new MoveError('not_found');
         if (!R.room.members.includes(ME)) {
+          needFriend(R.room.kind);
           const cur = mine(); if (cur) throw new MoveError('in_other_room', { room: cur.room.id });
           save(R, { room: shorten(joinRoom(R.room, ME, me.nickname, now, rnd, body.fx), SHORT || R.show === 'rematch') });
           R.nextJoin = now + WAIT;
@@ -381,6 +412,17 @@ export async function game(body) {
         if (typeof body.text !== 'string') throw new MoveError('malformed');
         const msg = pushChat(R, ME, body.text, now);
         return lag({ now: Date.now(), msg });
+      }
+      // Discord の確認の代役（&nofriend のときだけ）：同意の画面の代わりに、このページへ code と state を付けて戻る
+      case 'discord_start': {
+        if (!NOFRIEND) throw new MoveError('friend_off');
+        const u = new URL(location.href);
+        u.searchParams.set('code', 'fake-discord-code'); u.searchParams.set('state', body.state);
+        return lag({ url: u.toString() });
+      }
+      case 'discord_link': {
+        try { sessionStorage.setItem(FAKE_FRIEND, '1'); } catch { /* プライベートモード */ }
+        return lag({ ok: true, until: now + 30 * 86_400_000 });
       }
       default: throw new MoveError('malformed');
     }

@@ -5,12 +5,14 @@
 //   stay : rooms 行をロック → 席に残る（終局後の再戦の受付。演出 GIF を変えていれば再戦の分を書き換える）
 //   fx : rooms 行をロック → 演出 GIF を変える（部屋に入った後に設定で変えた分）
 //   rematch : 席に残った人の profiles 行をロック → rooms 行をロック → ほかの部屋に居る人を除いて新しい部屋を作って開始 → 元の部屋に rematch.next
+//   FRIEND MATCH（kind = friend）: create / join は Discord で確認できた人だけ（friend_ok。そうでなければ not_friend）。終局した手で、全員の結果を friend_results に残す
+//   discordStart / discordLink : Discord での確認（discord.js）。確認できたら friend_members に鍵付きハッシュと時刻を入れる（同じ Discord アカウントは 1 人だけ）
 // ロックの順番は常に profiles → rooms。
 // 回数の制限（db/migrations/20261010200000_rate_limit.sql）：create は成功した分を数える（上限を超えたら too_many。ほかの理由で失敗した分は巻き戻るので数えない）。
 // join は部屋番号のはずれを数える（はずれをコミットしてから not_found を返す。上限に達していれば番号を調べる前に too_many）。
 // flood はリクエストごとに 1 回、トランザクションの外で数える（失敗したリクエストも数える。20261010210000_rate_req.sql）。
 import { randomUUID } from 'node:crypto';
-import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx } from './rules.js';
+import { MoveError, genCode, createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, viewsOf, dueOf, postChat, stayRoom, rematchRoom, setRoomFx, friendResults } from './rules.js';
 import { CHAT_ROOM_MAX } from '../../src/chat.js';
 import { secureRnd } from '../../src/rnd.js';
 
@@ -69,8 +71,22 @@ async function save(c, room, record) {
   return views;
 }
 
+// FRIEND MATCH に入れる人か（Discord での確認が切れていない）
+async function needFriend(c, uid) {
+  if (!(await c.query('select public.friend_ok($1) as ok', [uid])).rows[0].ok) throw new MoveError('not_friend');
+}
+// 終局した FRIEND MATCH の結果を残す（スタッツとランキングの元。部屋が消えても残る）
+async function saveResults(c, room) {
+  if (room.kind !== 'friend' || room.status !== 'finished') return;
+  const recs = (await c.query('select rec from public.room_hands where room=$1 order by hand_no', [room.id])).rows.map(r => r.rec);
+  await c.query(`insert into public.friend_results(room,uid,mode,players,place,pt,hands,vpip,pfr)
+      select $1,x.uid,$2,$3,x.place,x.pt,x.hands,x.vpip,x.pfr
+      from jsonb_to_recordset($4::jsonb) as x(uid uuid, place int, pt numeric, hands int, vpip int, pfr int) on conflict do nothing`,
+    [room.id, room.config.mode, room.config.players, JSON.stringify(friendResults(room, recs))]);
+}
+
 export function makeDb(pool, deps = {}) {
-  const now = deps.now ?? Date.now, rnd = deps.rnd ?? secureRnd;
+  const now = deps.now ?? Date.now, rnd = deps.rnd ?? secureRnd, discord = deps.discord ?? null;
 
   const reply = (room, uid, views = viewsOf(room)) => {
     const pos = room.members.indexOf(uid);
@@ -82,6 +98,7 @@ export function makeDb(pool, deps = {}) {
     const room = await load(c, id);
     const out = fn(room, uid, ...args);
     const views = await save(c, out.room, out.record);
+    if (room.status !== 'finished') await saveResults(c, out.room);
     return reply(out.room, uid, views);
   });
 
@@ -92,6 +109,7 @@ export function makeDb(pool, deps = {}) {
     create: (uid, kind, config, fx) => tx(pool, async c => {
       await c.query('select public.purge_rooms()');
       const name = await lockMe(c, uid);
+      if (kind === 'friend') await needFriend(c, uid);
       const cur = await activeRoom(c, uid);
       if (cur) throw new MoveError('in_other_room', { room: cur });
       if (!(await c.query("select public.rate_hit($1,'create') as ok", [uid])).rows[0].ok) throw new MoveError('too_many');
@@ -115,6 +133,7 @@ export function makeDb(pool, deps = {}) {
         if (!f.rows[0]) { await c.query("select public.rate_hit($1,'code')", [uid]); return null; }
         const room = await load(c, f.rows[0].id);
         if (room.members.includes(uid)) return reply(room, uid);
+        if (room.kind === 'friend') await needFriend(c, uid);
         const cur = await activeRoom(c, uid);
         if (cur) throw new MoveError('in_other_room', { room: cur });
         const next = joinRoom(room, uid, name, now(), rnd, fx);
@@ -156,6 +175,32 @@ export function makeDb(pool, deps = {}) {
       throw new MoveError('busy');
     }),
     request: step((room, uid, req) => applyRequest(room, uid, req, now())),
+
+    // Discord の同意の画面へ。=> { url }
+    discordStart: async (redirect, state) => {
+      if (!discord) throw new MoveError('friend_off');
+      return { url: discord.authorizeUrl(redirect, state) };
+    },
+    // Discord から戻った code を確かめ、メンバーなら friend_members に入れる。=> { ok: true, until }
+    // 回数は Discord に問い合わせる前に数える（失敗した分も数える）。メンバーでなければ前の確認も消す（サーバーを抜けた人）
+    discordLink: async (uid, code, redirect) => {
+      if (!discord) throw new MoveError('friend_off');
+      const hit = await pool.query("select public.rate_hit($1,'discord') as ok", [uid]).catch(e => { if (e?.code === '23503') { throw new MoveError('no_profile'); } throw e; });
+      if (!hit.rows[0].ok) throw new MoveError('too_many');
+      const v = await discord.verify(code, redirect);
+      if (!v.member) {
+        await pool.query('delete from public.friend_members where uid=$1', [uid]);
+        throw new MoveError('not_member');
+      }
+      return tx(pool, async c => {
+        await lockMe(c, uid);
+        await c.query('delete from public.friend_members where discord_key=$2 and uid<>$1', [uid, v.key]);
+        const r = await c.query(`insert into public.friend_members(uid,discord_key,verified_at) values($1,$2,now())
+            on conflict (uid) do update set discord_key=excluded.discord_key,verified_at=excluded.verified_at
+            returning floor(extract(epoch from verified_at + public.friend_ttl())*1000)::float8 as until_ms`, [uid, v.key]);
+        return { ok: true, until: r.rows[0].until_ms };
+      });
+    },
     tick: step((room, uid) => tickRoom(room, uid, now())),
 
     // チャットの発言。=> { now, msg: { seq, seat, text, at } }（時刻は DB の時計。room_chat の at と同じ）
