@@ -76,13 +76,22 @@ describe('FRIEND MATCH の集計', () => {
     assert.deepEqual([none.players, none.n, none.avg, none.survival], [0, 0, null, null]);
   });
 
-  test('ランキング：合計 pt → 平均順位 → 参加数。すべて同じなら同じ順位', () => {
+  test('ランキング：合計 pt → 平均 pt → 参加数。すべて同じなら同じ順位（順位そのものは比べない）', () => {
     const r = ranking(memberRows(DATA, ALL));
     assert.deepEqual(r.map(x => [x.rank, x.k]), [[1, 'a'], [2, 'b'], [3, 'c']]);
-    const m = (k, pt, avgPlace, n) => ({ k, name: k, pt, avgPlace, n });
-    const tied = ranking([m('z', 10, 2, 4), m('y', 10, 2, 4), m('x', 10, 1.5, 4), m('w', 12, 3, 9), m('v', 10, 2, 6), m('u', -3, 4, 1)]);
-    assert.deepEqual(tied.map(x => [x.rank, x.k]), [[1, 'w'], [2, 'x'], [3, 'v'], [4, 'y'], [4, 'z'], [6, 'u']]);
+    const m = (k, pt, n, avgPlace = 3) => ({ k, name: k, pt, n, avg: pt / n, avgPlace });
+    // x は同じ合計を少ない試合で取った（平均 pt が高い）。y と z は平均順位だけが違う（2 人卓ばかりの z は順位が良く出る）→ 同じ順位
+    const tied = ranking([m('z', 10, 4, 1.5), m('y', 10, 4, 3.2), m('x', 10, 2), m('w', 12, 9), m('v', 10, 6), m('u', -3, 1), m('t', 0, 5), m('s', 0, 2)]);
+    assert.deepEqual(tied.map(x => [x.rank, x.k]), [[1, 'w'], [2, 'x'], [3, 'y'], [3, 'z'], [5, 'v'], [6, 't'], [7, 's'], [8, 'u']]);
     assert.deepEqual(ranking([]), []);
+  });
+
+  test('pt の合計は小数 2 桁（足し上げの誤差で同じ合計が別の値にならない）', () => {
+    const agg = (s, k, pts) => ({ s, k, n: pts.length, pt: pts.reduce((a, b) => a + b, 0), plus: 0, first: 0, place: 0, dist: [0, 0, 0, 0, 0, 0], hands: 0, vpip: 0, pfr: 0 });
+    const data = { me: 'a', seasons: ['2026-09', '2026-10'], members: [{ k: 'a', name: 'A' }, { k: 'b', name: 'B' }],
+      agg: [agg('2026-09', 'a', [3.33, 0.67]), agg('2026-10', 'a', [4.33, -0.83]), agg('2026-09', 'b', [4.33, 0.67]), agg('2026-10', 'b', [-0.83, 3.33])] };
+    const rows = ranking(memberRows(data, ALL));
+    assert.deepEqual(rows.map(x => [x.rank, x.pt, x.avg]), [[1, 7.5, 1.875], [1, 7.5, 1.875]]);
   });
 
   test('並べ替え：良い順が既定（平均順位は小さい方が良い）。値の無い人は最後', () => {

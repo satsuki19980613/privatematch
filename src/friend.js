@@ -30,11 +30,14 @@ function addTo(sum, a) {
   return sum;
 }
 const ratio = (num, den) => (den ? num / den : null);
+// pt は小数 2 桁まで（src/structure.js の payoutsFor）。足し上げた誤差を落として、同じ合計を同じ値にする
+const round2 = v => Math.round(v * 100) / 100;
 
 /** 集計の値から指標を出す。参加 0 なら率と平均は null */
 export function metricsOf(a) {
+  const pt = round2(a.pt);
   return {
-    ...a, avg: ratio(a.pt, a.n), plusRate: ratio(a.plus, a.n), firstRate: ratio(a.first, a.n), avgPlace: ratio(a.place, a.n),
+    ...a, pt, avg: ratio(pt, a.n), plusRate: ratio(a.plus, a.n), firstRate: ratio(a.first, a.n), avgPlace: ratio(a.place, a.n),
     vpipRate: ratio(a.vpip, a.hands), pfrRate: ratio(a.pfr, a.hands), survival: survivalTurns(a.hands, { n: a.vpip, d: a.hands }, a.n),
   };
 }
@@ -57,9 +60,10 @@ export function totalOf(rows) {
 }
 
 const byName = (a, b) => a.name.localeCompare(b.name, 'ja');
-// ランキングの比べ方：合計 pt の多い順 → 平均順位の良い順 → 参加の多い順
-const rankCmp = (a, b) => b.pt - a.pt || a.avgPlace - b.avgPlace || b.n - a.n;
-/** ランキング（rank を足す。合計 pt・平均順位・参加数がすべて同じなら同じ順位） */
+// ランキングの比べ方：合計 pt の多い順 → 平均 pt の高い順 → 参加の多い順。
+// pt は人数によらず公平（payoutsFor）。順位そのものは少ない人数の卓ほど良く出るので、比べるのには使わない
+const rankCmp = (a, b) => b.pt - a.pt || b.avg - a.avg || b.n - a.n;
+/** ランキング（rank を足す。合計 pt・平均 pt・参加数がすべて同じなら同じ順位） */
 export function ranking(rows) {
   const sorted = [...rows].sort((a, b) => rankCmp(a, b) || byName(a, b));
   let rank = 0;

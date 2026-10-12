@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newTable, act, tick, sitout, sitin, leave, legalActions, viewFor, handRecord, totalChips, eval7, handName, dueAt, EngineError,
 } from '../src/engine.js';
-import { DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, LEVEL_MS } from '../src/structure.js';
+import { DEFAULT_CONFIG, BASE_BB, payoutsFor, ACTION_MS, TIME_BANK_MS, BETWEEN_HANDS_MS, PAUSED_EXPIRES_MS, blindsAt, nextLevel, LEVEL_MS, GAME_MODES, MODE_IDS, PLAYER_COUNTS } from '../src/structure.js';
 
 // 再現できる乱数（mulberry32）
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -105,8 +105,34 @@ test('退出：残り1人になったら即終了し、退出した席はスタ�
   assert.equal(st.players[1].status, 'left'); assert.equal(st.status, 'running');
   leave(st, 2, 6);
   assert.equal(st.status, 'finished'); assert.equal(st.winner, 0);
-  assert.equal(st.players[0].place, 1); assert.equal(st.players[0].pt, 5);
+  assert.equal(st.players[0].place, 1); assert.equal(st.players[0].pt, 4);
   assert.deepEqual(st.players.map(p => p.place).sort(), [1, 2, 3]);
+});
+
+test('順位 → pt：6 人卓は表のまま。少ない人数は表を等分した範囲の平均で、1 人あたりの平均 pt はどの人数でも同じ', () => {
+  const pay = (mode, players) => payoutsFor({ mode, players });
+  assert.deepEqual(pay('club', 6), [5, 3, 2, 1, 0, -1]);
+  assert.deepEqual(pay('club', 2), [3.33, 0]);            // 1〜3 位の平均・4〜6 位の平均
+  assert.deepEqual(pay('club', 3), [4, 1.5, -0.5]);       // 2 つずつの平均
+  assert.deepEqual(pay('club', 4), [4.33, 2.33, 0.67, -0.67]);
+  assert.deepEqual(pay('club', 5), [4.67, 2.67, 1.5, 0.33, -0.83]);
+  assert.deepEqual(pay('legend-base', 2), [21, -21]);
+  assert.deepEqual(pay('rank-3', 3), [20, 1.5, -11.5]);
+  const sum = a => a.reduce((x, y) => x + y, 0);
+  for (const mode of MODE_IDS) {
+    const base = GAME_MODES[mode].payouts, mean = sum(base) / base.length;
+    assert.deepEqual(pay(mode, 6), base, mode);
+    for (const n of PLAYER_COUNTS) {
+      const p = pay(mode, n);
+      assert.equal(p.length, n);
+      // 平均は同じ（小数 2 桁に丸めた分だけの誤差）。2 人卓だけ得をする、が起きない
+      assert.ok(Math.abs(sum(p) / n - mean) <= 0.005, `${mode} ${n}人: ${sum(p) / n} vs ${mean}`);
+      // 上の順位ほど多く、1 位は 6 人卓の 1 位以下・最下位は 6 人卓の最下位以上
+      for (let i = 1; i < n; i++) assert.ok(p[i - 1] > p[i], `${mode} ${n}人`);
+      assert.ok(p[0] <= base[0] && p[n - 1] >= base[5], `${mode} ${n}人`);
+      for (const v of p) assert.equal(v, Math.round(v * 100) / 100);
+    }
+  }
 });
 
 test('ビューは他人の手札と山札を見せない', () => {
