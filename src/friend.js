@@ -6,12 +6,10 @@
 //   平均 pt = 合計 pt ÷ 参加数、加点率 = pt > 0 の回数 ÷ 参加数、1 位率 = 1 位の回数 ÷ 参加数、平均順位 = 順位の平均、
 //   生存ターン = ハンド数 ÷ VPIP(%) × 100 ÷ 参加数（src/history/stats.js の survivalTurns と同じ）
 // シーズンは日本時間の暦月（'2026-10'）。モードをまたいで混ぜない（RPC がモードごとに返す）。
-import { survivalTurns } from './history/stats.js';
+import { survivalTurns, ALL, SEATS } from './history/stats.js';
 
-/** 通算（全シーズンの合計）・すべての人数 */
-export const ALL = 'all';
-/** 卓の人数 */
-export const SEATS = [2, 3, 4, 5, 6];
+/** ALL = 通算（全シーズンの合計）・すべての人数。卓の人数の決まりは src/history/stats.js と同じ */
+export { ALL, SEATS, seatsLabel, parseSeats } from './history/stats.js';
 /** グラフで強調できる人数（色の数。src/style.css の --fs1〜--fs6） */
 export const MAX_FOCUS = 6;
 const JST_MS = 9 * 3_600_000;
@@ -46,10 +44,6 @@ export function metricsOf(a) {
   };
 }
 
-/** 人数の表示（ALL は 'すべて'） */
-export const seatsLabel = p => (p === ALL ? 'すべて' : `${p}人`);
-/** 端末に覚えた人数を読み直す（知らない値は ALL） */
-export const parseSeats = raw => (SEATS.includes(Number(raw)) ? Number(raw) : ALL);
 /** そのモードで打たれた卓の人数（小さい順） */
 export const seatsOf = data => SEATS.filter(p => (data.agg ?? []).some(a => +a.p === p));
 const inSeats = (x, seats) => seats === ALL || +x.p === seats;

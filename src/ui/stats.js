@@ -1,20 +1,23 @@
 // STATS（pocket-ICM のスタッツ画面と同じ骨組み）：ゲームモードを選び、そのモードだけで試合数・平均順位・1位率・入賞率・累計 pt・直近の成績、
 // HANDS・VPIP・PFR・生存ターン、順位分布、累計 pt のグラフと期間。HAND HISTORY（試合ごとの一覧 → ハンドの詳細）。
 // FRIEND MATCH の試合は数えない（FRIEND MATCH の STATS が受け持つ。HAND HISTORY には並べる）。
+// 卓の人数（すべて / 2〜6 人）でも絞る。順位（平均順位・1位率・順位分布）は人数を選んだときだけ並べ、すべてのときは人数ごとの順位の表にする。
 // データはすべてこの端末の IndexedDB（history/store.js）。プレイヤーのメモ（history/notes.js）も EXPORT / IMPORT に含める。
 import { configSummary, MODE_IDS } from '../structure.js';
 import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb, localGet, localSet, kindShort, statTile } from './util.js';
 import { paint, setPane } from './menu.js';
 import { modeSegHTML, bindModeSeg } from './modeseg.js';
+import { seatsSegHTML, bindSeatsSeg, placeTableHTML } from './seats.js';
 import * as store from '../history/store.js';
 import { syncRoom } from '../history/sync.js';
-import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, byScope, latestMode, gameHandStats, mergeStats } from '../history/stats.js';
+import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, byScope, latestMode, gameHandStats, mergeStats,
+  ALL, parseSeats, seatsLabel, seatsOfGames, bySeats, placeRowsOf } from '../history/stats.js';
 import { allNotes, importNotes } from '../history/notes.js';
 import { netOfRecord, positionsOf, streetPots, STREET_NAMES, actionText, forcedOf } from '../history/hand.js';
 
-const MODE_KEY = 'pm-stats-mode';
-// mine: roomId → その試合の自分のハンド集計（全ハンドは持ち続けない）
-let games = null, mine = new Map(), loading = false, period = 'all', mode = null, openGame = null, handsCache = new Map(), hover = null;
+const MODE_KEY = 'pm-stats-mode', SEATS_KEY = 'pm-stats-seats';
+// mine: roomId → その試合の自分のハンド集計（全ハンドは持ち続けない）。seats: 卓の人数（ALL = すべて）
+let games = null, mine = new Map(), loading = false, period = 'all', mode = null, seats = ALL, openGame = null, handsCache = new Map(), hover = null;
 const PAGE = 30;
 let shown = PAGE;
 
@@ -32,6 +35,7 @@ async function load() {
   // 選んだモード（選んだことが無ければ最後に終わった試合のモード。知らない値は使わない）
   const m = localGet(MODE_KEY);
   mode = MODE_IDS.includes(m) ? m : latestMode(byScope(games, false), MODE_IDS);
+  seats = parseSeats(localGet(SEATS_KEY));
   loading = false;
   renderNow();
 }
@@ -54,28 +58,50 @@ const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}/${d.g
 
 /** 集計する試合（FRIEND MATCH を除いた、終わった試合） */
 const statGames = () => byScope(finishedGames(games), false);
-/** 選んだモードで、期間で絞った試合 */
-const pickedGames = () => filterByPeriod(byMode(statGames(), mode), period);
+/** 選んだモードの試合と、表示する卓の人数（選んだ人数の試合がそのモードに無ければ、すべて） */
+function modeGames() {
+  const inMode = byMode(statGames(), mode), list = seatsOfGames(inMode);
+  return { inMode, list, cur: list.includes(seats) ? seats : ALL };
+}
+/** 選んだモード・人数で、期間で絞った試合 */
+const pickedGames = () => { const m = modeGames(); return filterByPeriod(bySeats(m.inMode, m.cur), period); };
+
+const toneOf = v => { if (v > 0) { return 'gain'; } return v < 0 ? 'loss' : ''; };
+// 直近の成績。すべての卓では「順位/人数」（人数の違う順位を並べるので）
+function recentHTML(all, cur) {
+  if (cur !== ALL) { const r = recentPlaces(all, 10); return r.length ? esc(r.join(' ')) : '–'; }
+  const r = all.slice(-10).map(g => `<span class="rp">${esc(g.place)}<small>/${esc(g.config.players)}</small></span>`);
+  return r.length ? r.join(' ') : '–';
+}
+// 2 つ目と 3 つ目の数字：人数を選んだら平均順位と 1位率、すべての卓では平均 pt と平均の人数
+function placeTiles(sum, picked, cur) {
+  if (cur !== ALL) return stat('平均順位', sum.games ? sum.avgPlace.toFixed(2) : '–', '位') + stat('1位率', pctLabel(sum.firstRate), '%');
+  const avgPt = sum.games ? fmtPt(sum.totalPt / sum.games) : '–', avgSeats = sum.games ? (picked.reduce((a, g) => a + g.config.players, 0) / sum.games).toFixed(1) : '–';
+  return stat('平均pt', avgPt, 'pt') + stat('平均人数', avgSeats, '人');
+}
+// 順位分布：人数を選んだらその人数までの棒、すべての卓では人数ごとの表
+function distHTML(sum, picked, cur) {
+  if (cur === ALL) return placeTableHTML(placeRowsOf(picked));
+  const rows = sum.placeDist.slice(0, cur), max = Math.max(1, ...rows);
+  const row = (c, i) => `<div class="spd-row"><span class="spd-label">${PLACE_LABEL[i]}</span><span class="spd-bar"><span class="${i === 0 ? 'spd-fill first' : 'spd-fill'}" style="width:${(c / max) * 100}%"></span></span><span class="spd-count">${c}</span></div>`;
+  return `<div class="spd">${rows.map(row).join('')}</div>`;
+}
 
 function statsHTML() {
-  const own = statGames(), total = own.length, all = byMode(own, mode), picked = filterByPeriod(all, period);
-  const sum = summarize(picked), pts = cumulativePt(picked), recent = recentPlaces(all, 10), ps = mergeStats(picked.map(g => mine.get(g.roomId)));
-  const tone = v => (v > 0 ? 'gain' : v < 0 ? 'loss' : '');
-  const n = Math.min(6, Math.max(2, sum.maxPlayers || 6)), rows = sum.placeDist.slice(0, n), max = Math.max(1, ...rows);
-  const dist = rows.map((c, i) => `<div class="spd-row"><span class="spd-label">${PLACE_LABEL[i]}</span><span class="spd-bar"><span class="spd-fill${i === 0 ? ' first' : ''}" style="width:${(c / max) * 100}%"></span></span><span class="spd-count">${c}</span></div>`).join('');
+  const own = statGames(), total = own.length, { inMode, list, cur } = modeGames(), all = bySeats(inMode, cur), picked = filterByPeriod(all, period);
+  const sum = summarize(picked), pts = cumulativePt(picked), ps = mergeStats(picked.map(g => mine.get(g.roomId)));
   return `<button class="back" data-back type="button">← BACK</button>
     <div class="panel hs-panel">
       <div class="hs-head"><span class="hs-title">STATS</span><span class="hs-total">全モード <b>${total.toLocaleString()}</b></span></div>
       <button class="btn ghost wide hs-history-btn" id="histBtn" type="button">HAND HISTORY</button>
-      <div class="hs-modes">${modeSegHTML(mode)}</div>
+      <div class="hs-modes">${modeSegHTML(mode)}${seatsSegHTML(list, cur)}</div>
       <div class="hs-first"><span>First Play</span><b>${all.length ? fmtDate(all[0].endedAt) : '–'}</b></div>
       <div class="hs-grid">
         ${stat('試合数', sum.games.toLocaleString())}
-        ${stat('平均順位', sum.games ? sum.avgPlace.toFixed(2) : '–', '位')}
-        ${stat('1位率', pctLabel(sum.firstRate), '%')}
+        ${placeTiles(sum, picked, cur)}
         ${stat('入賞率', pctLabel(sum.cashRate), '%', '(pt &gt; 0)')}
-        ${stat('累計pt', fmtPt(sum.totalPt), 'pt', '', tone(sum.totalPt))}
-        ${stat('直近の成績', recent.length ? esc(recent.join(' ')) : '–', '', recent.length ? '古い→新しい' : '')}
+        ${stat('累計pt', fmtPt(sum.totalPt), 'pt', '', toneOf(sum.totalPt))}
+        ${stat('直近の成績', recentHTML(all, cur), '', all.length ? '古い→新しい' : '')}
       </div>
       <div class="hs-grid4">
         ${stat('HANDS', ps.hands.toLocaleString())}
@@ -84,7 +110,7 @@ function statsHTML() {
         ${stat('生存ターン', ps.survival == null ? '–' : ps.survival.toFixed(1))}
       </div>
     </div>
-    <div class="panel hs-panel"><span class="hs-title">順位分布</span><div class="spd">${dist}</div></div>
+    <div class="panel hs-panel"><div class="hs-head"><span class="hs-title">順位分布</span><span class="hs-total">${cur === ALL ? '人数別' : esc(seatsLabel(cur)) + 'の卓'}</span></div>${distHTML(sum, picked, cur)}</div>
     <div class="panel hs-panel">
       ${chartHTML(pts)}
       <div class="hs-period"><span class="hs-period-lbl">期間</span><div class="seg">${PERIODS.map(p => `<button type="button" data-p="${p.key}" aria-pressed="${period === p.key}">${p.label}</button>`).join('')}</div></div>
@@ -119,6 +145,7 @@ function bindStats(el) {
   el.querySelector('#histBtn').onclick = () => { openGame = null; shown = PAGE; setPane('history'); };
   el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { period = b.dataset.p; render(el, 'stats'); });
   bindModeSeg(el, () => mode, m => { mode = m; localSet(MODE_KEY, mode); render(el, 'stats'); });
+  bindSeatsSeg(el, p => { seats = p; localSet(SEATS_KEY, String(p)); render(el, 'stats'); });
   const svg = el.querySelector('#hcSvg'), pts = cumulativePt(pickedGames()), g = geo(pts);
   const move = e => {
     if (!g.n) return;

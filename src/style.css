@@ -1150,3 +1150,6 @@ dialog.glass-dlg.pd-kb{margin-bottom:auto}
 .pm-tbl td.pm-c{background:color-mix(in srgb,var(--you) calc(var(--h) * 60%),transparent);color:var(--ink)}
 .pm-tbl tr.hi td{color:var(--ink);font-weight:700}
 .pm-tbl tr.hi td:first-child{color:var(--you-text)}
+/* STATS の直近の成績（すべての卓では「順位/人数」） */
+.hs-val .rp{display:inline-block}
+.hs-val .rp small{font-size:.6em;font-weight:600;color:var(--muted)}

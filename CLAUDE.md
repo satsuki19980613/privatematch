@@ -12,7 +12,7 @@
 - **演出 GIF**: SETTINGS（入口 → 演出 GIF）で KLIPY の GIF を 1 つ選べる（任意。端末に slug だけ保存）。PRIVATE MATCH と FRIEND MATCH だけ、ショーダウンで勝った人（チョップを除く）の GIF を、勝負が決まって一間おいてから卓の中央に出し、消してからチップを勝者へ動かす。KLIPY の規約（API もメディアもブラウザから直接・URL は保存しない・結果を並べ替えない・検索欄は「Search KLIPY」）を守る（`src/klipy.js`・`src/ui/fxshow.js`）。
 - **自動更新**: 新しい版が配信されると、開いたままのアプリ（ホーム画面に追加したものも）が自動で読み込み直す。メニューに居るときだけで、待機室・試合中・入力の途中には行わない。新しい版で起動すると「バージョンを更新しました」と出る（`src/update.js`・`src/ui/update.js`）。
 - **記録**: 成績とハンド履歴は端末（IndexedDB）に保存する。サーバーの記録は端末へ渡すまでの一時置き場（終局から 3 日で消える）。FRIEND MATCH の結果（1 試合 × 1 人の順位・pt・ハンド数・VPIP / PFR の回数）だけはサーバーに残す。
-- **スタッツ**: STATS はゲームモードごと（モードをまたいで混ぜない）。FRIEND MATCH の試合は含めない（FRIEND MATCH の STATS が受け持つ。卓のプレイヤーのモーダルも、FRIEND MATCH の卓は FRIEND MATCH の試合だけ）。VPIP・PFR・生存ターン（ハンド数 ÷ VPIP(%) × 100 ÷ 試合数）。卓で席を押すとその人のスタッツとメモ・色の印（端末に保存。`src/ui/player.js`・`src/history/notes.js`）。
+- **スタッツ**: STATS はゲームモードごと（モードをまたいで混ぜない）。卓の人数（すべて / 2〜6 人）でも絞れ、順位は人数を選んだときだけ並べ、すべてのときは人数ごとの順位の表にする（FRIEND MATCH と同じ。`src/ui/seats.js`）。FRIEND MATCH の試合は含めない（FRIEND MATCH の STATS が受け持つ。卓のプレイヤーのモーダルも、FRIEND MATCH の卓は FRIEND MATCH の試合だけ）。VPIP・PFR・生存ターン（ハンド数 ÷ VPIP(%) × 100 ÷ 試合数）。卓で席を押すとその人のスタッツとメモ・色の印（端末に保存。`src/ui/player.js`・`src/history/notes.js`）。
 - **参考**: UI・認証・サーバー構成は satsuki19980613/Multiplier、ゲーム設定とスタッツ画面は satsuki19980613/pocket-ICM、FRIEND MATCH のスタッツの項目と形は satsuki19980613/Kagaribi-Stat-Hub。
 - **実装契約**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。セットアップとデプロイ: [docs/SETUP.md](docs/SETUP.md)。
 

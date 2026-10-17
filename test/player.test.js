@@ -1,7 +1,7 @@
 // 卓のプレイヤーのモーダルと STATS の集計（src/history/stats.js の byMode / byScope / playerStats / survivalTurns）と、メモ（src/history/notes.js）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byMode, byScope, latestMode, nameKey, playerStats, survivalTurns, handStats, seatIn, gameHandStats, mergeStats } from '../src/history/stats.js';
+import { byMode, byScope, latestMode, nameKey, ALL, SEATS, seatsLabel, parseSeats, seatsOfGames, bySeats, placeRowsOf, playerStats, survivalTurns, handStats, seatIn, gameHandStats, mergeStats } from '../src/history/stats.js';
 
 // localStorage の代役（notes.js は最初に使うときに読む）
 const mem = new Map();
@@ -84,6 +84,23 @@ test('byScope：FRIEND MATCH の試合と、それ以外（PRIVATE / FREE MATCH�
   assert.deepEqual(byScope(gs, true).map(g => g.roomId), ['f', 'g']);
   assert.deepEqual(byMode(byScope(gs, true), 'club').map(g => g.roomId), ['f']);
   assert.equal(latestMode(byScope(gs, false)), 'club');   // 最後に終わった FRIEND MATCH（rank-4）は既定に使わない
+});
+
+test('卓の人数：打った人数だけを選べ、選んだ人数で絞る。人数ごとの順位は分布をその人数までにする', () => {
+  const g = (id, players, place, pt = 1) => ({ ...game(id, 'club', ['x'], 0, 1), config: { players, mode: 'club' }, place, pt });
+  const gs = [g('a', 2, 1), g('b', 6, 3), g('c', 2, 2), g('d', 6, 1), g('e', 6, 6), g('f', 4, 2)];
+  assert.deepEqual(seatsOfGames(gs), [2, 4, 6]); assert.deepEqual(seatsOfGames([]), []);
+  assert.deepEqual(bySeats(gs, 6).map(x => x.roomId), ['b', 'd', 'e']);
+  assert.equal(bySeats(gs, ALL), gs);
+  assert.deepEqual(placeRowsOf(gs), [
+    { p: 2, n: 2, first: 1, dist: [1, 1], firstRate: 0.5, avgPlace: 1.5 },
+    { p: 4, n: 1, first: 0, dist: [0, 1, 0, 0], firstRate: 0, avgPlace: 2 },
+    { p: 6, n: 3, first: 1, dist: [1, 0, 1, 0, 0, 1], firstRate: 1 / 3, avgPlace: 10 / 3 },
+  ]);
+  assert.deepEqual(placeRowsOf([]), []);
+  assert.deepEqual(SEATS, [2, 3, 4, 5, 6]);
+  assert.equal(seatsLabel(ALL), 'すべて'); assert.equal(seatsLabel(3), '3人');
+  assert.deepEqual(['2', '6', 'all', '7', null].map(parseSeats), [2, 6, ALL, ALL, ALL]);
 });
 
 test('メモ：印とメモを保存し、空にすると消える。名前は大文字小文字を無視', () => {
