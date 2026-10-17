@@ -1,13 +1,17 @@
-// FRIEND MATCH のスタッツとランキングの集計（純関数）。入力は RPC friend_stats の返り値（db/migrations/20261012000000_friend.sql）：
-//   { me, mode, season, seasons: ['2026-10'], members: [{ k, name }], agg: [{ s, k, n, pt, plus, first, place, dist, hands, vpip, pfr }], games: [{ k, at, place, pt }] }
+// FRIEND MATCH のスタッツとランキングの集計（純関数）。入力は RPC friend_stats の返り値（db/migrations/20261017000000_friend_by_seats.sql）：
+//   { me, mode, season, seasons: ['2026-10'], members: [{ k, name }], agg: [{ s, k, p, n, pt, plus, first, place, dist, hands, vpip, pfr }], games: [{ k, at, p, place, pt }] }
+//   p は卓の人数（2〜6）。順位（平均順位・1 位率・順位の分布）は人数の違う卓どうしでは比べられないので、人数を選んだときだけ出し、
+//   すべての卓では人数ごとの表（placeRows）にする。pt は人数によらず公平（payoutsFor）なので、人数をまたいで足す
 // 指標（Kagaribi Stat Hub と同じ定義。クラブマッチ以外のモードにも当てはまるよう、加点は「pt が + の順位」）：
 //   平均 pt = 合計 pt ÷ 参加数、加点率 = pt > 0 の回数 ÷ 参加数、1 位率 = 1 位の回数 ÷ 参加数、平均順位 = 順位の平均、
 //   生存ターン = ハンド数 ÷ VPIP(%) × 100 ÷ 参加数（src/history/stats.js の survivalTurns と同じ）
 // シーズンは日本時間の暦月（'2026-10'）。モードをまたいで混ぜない（RPC がモードごとに返す）。
 import { survivalTurns } from './history/stats.js';
 
-/** 通算（全シーズンの合計） */
+/** 通算（全シーズンの合計）・すべての人数 */
 export const ALL = 'all';
+/** 卓の人数 */
+export const SEATS = [2, 3, 4, 5, 6];
 /** グラフで強調できる人数（色の数。src/style.css の --fs1〜--fs6） */
 export const MAX_FOCUS = 6;
 const JST_MS = 9 * 3_600_000;
@@ -42,15 +46,33 @@ export function metricsOf(a) {
   };
 }
 
-/** メンバーごとの行（season = シーズン | ALL）。=> [{ k, name, me, …指標 }]。そのシーズンに 1 試合も無い人は含めない */
-export function memberRows(data, season = ALL) {
+/** 人数の表示（ALL は 'すべて'） */
+export const seatsLabel = p => (p === ALL ? 'すべて' : `${p}人`);
+/** 端末に覚えた人数を読み直す（知らない値は ALL） */
+export const parseSeats = raw => (SEATS.includes(Number(raw)) ? Number(raw) : ALL);
+/** そのモードで打たれた卓の人数（小さい順） */
+export const seatsOf = data => SEATS.filter(p => (data.agg ?? []).some(a => +a.p === p));
+const inSeats = (x, seats) => seats === ALL || +x.p === seats;
+
+/** メンバーごとの行（season = シーズン | ALL、seats = 卓の人数 | ALL）。=> [{ k, name, me, …指標 }]。そこに 1 試合も無い人は含めない */
+export function memberRows(data, season = ALL, seats = ALL) {
   const sums = new Map();
   for (const a of data.agg ?? []) {
-    if (season !== ALL && a.s !== season) continue;
+    if ((season !== ALL && a.s !== season) || !inSeats(a, seats)) continue;
     if (!sums.has(a.k)) sums.set(a.k, blank());
     addTo(sums.get(a.k), a);
   }
   return (data.members ?? []).filter(m => sums.has(m.k)).map(m => ({ k: m.k, name: m.name, me: m.k === data.me, ...metricsOf(sums.get(m.k)) }));
+}
+
+/**
+ * その人の順位を卓の人数ごとに（season = シーズン | ALL）。=> [{ p, n, first, place, dist（1〜p 位の回数）, firstRate, avgPlace }]（人数の小さい順。打っていない人数は含めない）
+ */
+export function placeRows(data, k, season = ALL) {
+  return seatsOf(data).flatMap(p => {
+    const r = memberRows(data, season, p).find(x => x.k === k);
+    return r ? [{ p, n: r.n, first: r.first, place: r.place, dist: r.dist.slice(0, p), firstRate: r.firstRate, avgPlace: r.avgPlace }] : [];
+  });
 }
 
 /** 全員ぶんの合計と指標（生存ターンは、値のある人の平均）。players = 1 試合以上打った人数 */
@@ -73,16 +95,18 @@ export function ranking(rows) {
   });
 }
 
-/** 表の列（並べ替えのキー）。lowBetter = 小さいほど良い */
+/** 表の列（並べ替えのキー）。lowBetter = 小さいほど良い、place = 順位の指標（人数を選んだときだけ） */
 export const COLUMNS = [
   { key: 'pt', label: '合計' },
   { key: 'avg', label: '平均' },
   { key: 'plusRate', label: '加点率' },
-  { key: 'firstRate', label: '1位率' },
-  { key: 'avgPlace', label: '平均順位', lowBetter: true },
+  { key: 'firstRate', label: '1位率', place: true },
+  { key: 'avgPlace', label: '平均順位', lowBetter: true, place: true },
   { key: 'n', label: '参加' },
   { key: 'survival', label: '生存T' },
 ];
+/** その人数で出す列（すべての卓では順位の列を出さない） */
+export const columnsFor = seats => COLUMNS.filter(c => seats !== ALL || !c.place);
 /** 並べ替え（key = 'name' か COLUMNS のキー。desc = 良い順。値の無い人は最後） */
 export function sortRows(rows, key, desc = true) {
   if (key === 'name') { const sign = desc ? 1 : -1; return [...rows].sort((a, b) => sign * byName(a, b)); }
@@ -94,11 +118,11 @@ export function sortRows(rows, key, desc = true) {
 }
 
 /**
- * シーズン内の累積 pt。days = 試合のあった日（日本時間・古い順）、series = k → その日までの合計、
+ * シーズン内の累積 pt（seats = 卓の人数 | ALL）。days = 試合のあった日（日本時間・古い順）、series = k → その日までの合計、
  * avg = メンバー平均（その日までの全員の合計 ÷ そのシーズンに 1 試合以上打った人数）
  */
-export function cumulative(games) {
-  const days = [...new Set(games.map(g => dayOf(g.at)))].sort((a, b) => a.localeCompare(b));
+export function cumulative(allGames, seats = ALL) {
+  const games = allGames.filter(g => inSeats(g, seats)), days = [...new Set(games.map(g => dayOf(g.at)))].sort((a, b) => a.localeCompare(b));
   const at = new Map(days.map((d, i) => [d, i])), perDay = new Map();
   for (const g of games) {
     if (!perDay.has(g.k)) perDay.set(g.k, new Array(days.length).fill(0));
@@ -117,29 +141,31 @@ function accumulate(per, len) {
   return { series, avg };
 }
 /** 通算の累積 pt（シーズンごとの合計を足し上げる）。=> { seasons, series, avg }（形は cumulative と同じ。1 試合も無い人は含めない） */
-export function cumulativeSeasons(data) {
-  const t = trend(data, 'pt'), played = new Map([...t.series].filter(([, v]) => v.some(x => x != null)));
+export function cumulativeSeasons(data, seats = ALL) {
+  const t = trend(data, 'pt', seats), played = new Map([...t.series].filter(([, v]) => v.some(x => x != null)));
   return { seasons: t.seasons, ...accumulate(played, t.seasons.length) };
 }
 
-/** シーズン推移で選べる指標 */
+/** シーズン推移で選べる指標（place = 順位の指標。人数を選んだときだけ） */
 export const TREND_METRICS = [
   { key: 'pt', label: '合計ポイント', unit: 'pt' },
   { key: 'avg', label: '平均ポイント', unit: 'pt' },
   { key: 'plusRate', label: '加点率', unit: '%' },
-  { key: 'firstRate', label: '1位率', unit: '%' },
-  { key: 'avgPlace', label: '平均順位', unit: '位' },
+  { key: 'firstRate', label: '1位率', unit: '%', place: true },
+  { key: 'avgPlace', label: '平均順位', unit: '位', place: true },
   { key: 'survival', label: '生存ターン', unit: 'ターン' },
 ];
+/** その人数で選べる指標 */
+export const trendMetricsFor = seats => TREND_METRICS.filter(m => seats !== ALL || !m.place);
 const isRate = key => key === 'plusRate' || key === 'firstRate';
 /**
- * シーズンごとの指標。series = k → シーズンごとの値（参加の無いシーズンは null。率は %）、
+ * シーズンごとの指標（seats = 卓の人数 | ALL）。series = k → シーズンごとの値（参加の無いシーズンは null。率は %）、
  * avg = そのシーズンに値のある人の平均（誰にも無ければ null）
  */
-export function trend(data, key) {
+export function trend(data, key, seats = ALL) {
   const seasons = data.seasons ?? [], series = new Map((data.members ?? []).map(m => [m.k, seasons.map(() => null)]));
   seasons.forEach((s, i) => {
-    for (const r of memberRows(data, s)) {
+    for (const r of memberRows(data, s, seats)) {
       if (r[key] != null) series.get(r.k)[i] = isRate(key) ? r[key] * 100 : r[key];
     }
   });

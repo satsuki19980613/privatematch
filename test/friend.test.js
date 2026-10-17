@@ -4,8 +4,8 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import {
-  ALL, MAX_FOCUS, COLUMNS, TREND_METRICS, seasonLabel, seasonShort, dayOf, dayShort, metricsOf, memberRows, totalOf, ranking, sortRows,
-  cumulative, cumulativeSeasons, trend, toggleFocus, slotOf, parseFocus, fmtRate, fmtNum,
+  ALL, MAX_FOCUS, COLUMNS, TREND_METRICS, SEATS, seasonLabel, seasonShort, dayOf, dayShort, metricsOf, memberRows, placeRows, totalOf, ranking, sortRows,
+  cumulative, cumulativeSeasons, trend, toggleFocus, slotOf, parseFocus, fmtRate, fmtNum, seatsOf, seatsLabel, parseSeats, columnsFor, trendMetricsFor,
 } from '../src/friend.js';
 import { aggregate, sampleRows, seasonAt, demoKey } from '../src/friendDemo.js';
 import { createRoom, joinRoom, leaveRoom, applyRequest, tickRoom, postChat, setRoomFx, friendResults, social, KINDS } from '../server/game/rules.js';
@@ -20,13 +20,13 @@ import { DBURL, openTestDb, playOut } from './dbkit.js';
 
 const U = i => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 const JST = (y, m, d, h = 12) => Date.UTC(y, m - 1, d, h - 9);
-const row = (k, mode, at, place, pt, hands = 20, vpip = 5, pfr = 3) => ({ k, name: k.toUpperCase(), mode, at, place, pt, hands, vpip, pfr });
-// 3 人・2 シーズンの小さな見本（club）。a は両方のシーズン、c は 10 月だけ
+const row = (k, mode, at, p, place, pt, hands = 20, vpip = 5, pfr = 3) => ({ k, name: k.toUpperCase(), mode, at, p, place, pt, hands, vpip, pfr });
+// 3 人・2 シーズンの小さな見本（club）。a は両方のシーズン、c は 10 月だけ。2 人卓と 3 人卓が混ざる
 const ROWS = [
-  row('a', 'club', JST(2026, 9, 3), 1, 5), row('b', 'club', JST(2026, 9, 3), 2, 3),
-  row('a', 'club', JST(2026, 10, 1), 2, 3), row('b', 'club', JST(2026, 10, 1), 1, 5), row('c', 'club', JST(2026, 10, 1), 3, 2),
-  row('a', 'club', JST(2026, 10, 2), 1, 5), row('c', 'club', JST(2026, 10, 2), 2, 3),
-  row('a', 'rank-3', JST(2026, 10, 2), 3, 5), row('b', 'rank-3', JST(2026, 10, 2), 6, -15),
+  row('a', 'club', JST(2026, 9, 3), 2, 1, 5), row('b', 'club', JST(2026, 9, 3), 2, 2, 3),
+  row('a', 'club', JST(2026, 10, 1), 3, 2, 3), row('b', 'club', JST(2026, 10, 1), 3, 1, 5), row('c', 'club', JST(2026, 10, 1), 3, 3, 2),
+  row('a', 'club', JST(2026, 10, 2), 2, 1, 5), row('c', 'club', JST(2026, 10, 2), 2, 2, 3),
+  row('a', 'rank-3', JST(2026, 10, 2), 6, 3, 5), row('b', 'rank-3', JST(2026, 10, 2), 6, 6, -15),
 ];
 const DATA = aggregate(ROWS, { me: 'a', mode: 'club' });
 
@@ -66,6 +66,37 @@ describe('FRIEND MATCH の集計', () => {
     const zero = metricsOf({ n: 0, pt: 0, plus: 0, first: 0, place: 0, hands: 0, vpip: 0, pfr: 0, dist: [0, 0, 0, 0, 0, 0] });
     assert.deepEqual([zero.avg, zero.plusRate, zero.firstRate, zero.avgPlace, zero.vpipRate, zero.survival], [null, null, null, null, null, null]);
     assert.deepEqual(memberRows({ me: 'x' }), []);
+  });
+
+  test('卓の人数：集計は人数ごとに分かれ、選んだ人数だけを数えられる（すべてなら人数をまたいで足す）', () => {
+    assert.deepEqual(seatsOf(DATA), [2, 3]); assert.deepEqual(seatsOf({}), []);
+    assert.deepEqual(DATA.agg.filter(a => a.k === 'a' && a.s === '2026-10').map(a => [a.p, a.n]).sort((x, y) => x[0] - y[0]), [[2, 1], [3, 1]]);
+    assert.deepEqual(DATA.games.map(g => g.p), [3, 3, 3, 2, 2]);
+    const two = memberRows(DATA, ALL, 2);
+    assert.deepEqual(two.map(r => [r.k, r.n, r.pt, r.avgPlace, r.firstRate]), [['a', 2, 10, 1, 1], ['b', 1, 3, 2, 0], ['c', 1, 3, 2, 0]]);
+    assert.deepEqual(memberRows(DATA, '2026-10', 3).map(r => [r.k, r.dist.slice(0, 3)]), [['a', [0, 1, 0]], ['b', [1, 0, 0]], ['c', [0, 0, 1]]]);
+    assert.deepEqual(memberRows(DATA, '2026-09', 3), []);
+    assert.deepEqual(memberRows(DATA, ALL, ALL), memberRows(DATA));
+  });
+
+  test('人数ごとの順位：打った人数だけを小さい順に、順位の分布はその人数まで', () => {
+    assert.deepEqual(placeRows(DATA, 'a'), [
+      { p: 2, n: 2, first: 2, place: 2, dist: [2, 0], firstRate: 1, avgPlace: 1 },
+      { p: 3, n: 1, first: 0, place: 2, dist: [0, 1, 0], firstRate: 0, avgPlace: 2 },
+    ]);
+    assert.deepEqual(placeRows(DATA, 'c', '2026-10').map(r => [r.p, r.dist]), [[2, [0, 1]], [3, [0, 0, 1]]]);
+    assert.deepEqual(placeRows(DATA, 'a', '2026-09').map(r => r.p), [2]);
+    assert.deepEqual(placeRows(DATA, 'nobody'), []);
+  });
+
+  test('順位の列と指標は人数を選んだときだけ。人数の表示と、端末に覚えた値の読み直し', () => {
+    assert.deepEqual(columnsFor(ALL).map(c => c.key), ['pt', 'avg', 'plusRate', 'n', 'survival']);
+    assert.deepEqual(columnsFor(4), COLUMNS);
+    assert.deepEqual(trendMetricsFor(ALL).map(m => m.key), ['pt', 'avg', 'plusRate', 'survival']);
+    assert.deepEqual(trendMetricsFor(2), TREND_METRICS);
+    assert.deepEqual(SEATS, [2, 3, 4, 5, 6]);
+    assert.equal(seatsLabel(ALL), 'すべて'); assert.equal(seatsLabel(4), '4人');
+    assert.deepEqual(['4', '2', '6', 'all', '7', '1', 'x', null, '4.5'].map(parseSeats), [4, 2, 6, ALL, ALL, ALL, ALL, ALL, ALL]);
   });
 
   test('全員の合計とメンバー平均の元', () => {
@@ -115,6 +146,13 @@ describe('FRIEND MATCH の集計', () => {
     assert.deepEqual(s.seasons, ['2026-09', '2026-10']);
     assert.deepEqual(s.series.get('a'), [5, 13]); assert.deepEqual(s.series.get('c'), [0, 5]);
     assert.deepEqual(s.avg, [8 / 3, 26 / 3]);
+    // 卓の人数で絞る
+    const three = cumulative(DATA.games, 3);
+    assert.deepEqual([three.days, three.series.get('a'), three.series.has('b')], [['2026-10-01'], [3], true]);
+    const two = cumulative(DATA.games, 2);
+    assert.deepEqual([two.days, two.series.get('a'), two.series.get('c'), two.series.has('b')], [['2026-10-02'], [5], [3], false]);
+    const s2 = cumulativeSeasons(DATA, 2);
+    assert.deepEqual([s2.series.get('a'), s2.series.get('b'), s2.series.get('c')], [[5, 10], [3, 3], [0, 3]]);
   });
 
   test('シーズン推移：参加の無いシーズンは null、率は %、平均は値のある人だけ', () => {
@@ -125,6 +163,8 @@ describe('FRIEND MATCH の集計', () => {
     assert.deepEqual(trend(DATA, 'firstRate').series.get('a'), [100, 50]);
     assert.deepEqual(trend(DATA, 'avgPlace').series.get('b'), [2, 1]);
     assert.deepEqual(trend({ seasons: [], members: [], agg: [] }, 'pt').avg, []);
+    assert.deepEqual(trend(DATA, 'avgPlace', 2).series.get('b'), [2, null]);   // b は 10 月に 2 人卓を打っていない
+    assert.deepEqual(trend(DATA, 'firstRate', 3).series.get('a'), [null, 0]);
     assert.deepEqual(TREND_METRICS.map(m => m.key), ['pt', 'avg', 'plusRate', 'firstRate', 'avgPlace', 'survival']);
   });
 
@@ -150,7 +190,8 @@ describe('FRIEND MATCH の集計', () => {
   test('見本の結果は種から決まり、RPC と同じ形に集計できる', () => {
     const now = JST(2026, 10, 12), rows = sampleRows('Me', now);
     assert.deepEqual(rows, sampleRows('Me', now));
-    assert.ok(rows.every(r => MODE_IDS.includes(r.mode) && r.place >= 1 && r.place <= 6 && r.at <= now + 86_400_000 && r.vpip <= r.hands && r.pfr <= r.vpip));
+    assert.ok(rows.every(r => MODE_IDS.includes(r.mode) && SEATS.includes(r.p) && r.place >= 1 && r.place <= r.p && r.at <= now + 86_400_000 && r.vpip <= r.hands && r.pfr <= r.vpip));
+    assert.deepEqual([...new Set(rows.map(r => r.p))].sort((a, b) => a - b), SEATS);   // 2〜6 人卓がすべて混ざる
     assert.ok(rows.some(r => r.k === demoKey('me') && r.name === 'Me'));
     for (const mode of MODE_IDS) {
       const d = aggregate(rows, { me: demoKey('me'), mode });
@@ -159,6 +200,8 @@ describe('FRIEND MATCH の集計', () => {
       assert.equal(all.reduce((a, r) => a + r.n, 0), mine.length);
       assert.ok(Math.abs(totalOf(all).pt - mine.reduce((a, r) => a + r.pt, 0)) < 1e-9);
       assert.deepEqual(ranking(all).map(r => r.rank)[0], 1);
+      // 人数ごとに分けても、足せばすべてと同じ
+      assert.equal(seatsOf(d).reduce((a, p) => a + memberRows(d, ALL, p).reduce((x, r) => x + r.n, 0), 0), mine.length);
     }
   });
 });
@@ -496,14 +539,15 @@ describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が
     assert.deepEqual(await results(priv.room), []);
 
     // ほかのシーズン・ほかのモードの結果を足して、RPC と見本の集計（src/friendDemo.js の aggregate）を突き合わせる
-    const add = (uid, mode, at, place, pt) => T.pool.query('insert into public.friend_results(room,uid,mode,players,place,pt,hands,vpip,pfr,ended_at) values($1,$2,$3,3,$4,$5,30,9,6,$6)', [randomUUID(), uid, mode, place, pt, new Date(at)]);
+    const add = (uid, mode, at, place, pt, players = 3) => T.pool.query('insert into public.friend_results(room,uid,mode,players,place,pt,hands,vpip,pfr,ended_at) values($1,$2,$3,$7,$4,$5,30,9,6,$6)', [randomUUID(), uid, mode, place, pt, new Date(at), players]);
     await add(a, 'rank-3', JST(2026, 8, 31, 23), 1, 25); await add(b, 'rank-3', JST(2026, 8, 31, 23), 2, 15);
     await add(a, 'rank-3', JST(2026, 9, 1, 0), 3, 5); await add(c, 'rank-3', JST(2026, 9, 1, 0), 1, 25);   // 日本時間の月初は次のシーズン
-    await add(a, 'legend-avg', JST(2026, 9, 5), 1, 37.5); await add(b, 'legend-avg', JST(2026, 9, 5), 2, 18);
+    await add(a, 'rank-3', JST(2026, 9, 2), 2, 10, 2); await add(b, 'rank-3', JST(2026, 9, 2), 1, 20, 2);   // 同じシーズンの 2 人卓
+    await add(a, 'legend-avg', JST(2026, 9, 5), 1, 37.5, 6); await add(b, 'legend-avg', JST(2026, 9, 5), 2, 18, 6);
     const rows = (await T.pool.query(`select public.friend_key(r.uid) as k, p.nickname as name, r.mode, (extract(epoch from r.ended_at) * 1000)::float8 as at,
-        r.place, r.pt::float8 as pt, r.hands, r.vpip, r.pfr from public.friend_results r join public.profiles p on p.uid = r.uid`)).rows.map(r => ({ ...r, at: Math.floor(r.at) }));
+        r.players as p, r.place, r.pt::float8 as pt, r.hands, r.vpip, r.pfr from public.friend_results r join public.profiles p on p.uid = r.uid`)).rows.map(r => ({ ...r, at: Math.floor(r.at) }));
     const keyOf = async u => (await T.pool.query('select public.friend_key($1) as k', [u])).rows[0].k;
-    const sortAgg = l => [...l].sort((x, y) => `${x.s}|${x.k}`.localeCompare(`${y.s}|${y.k}`));
+    const sortAgg = l => [...l].sort((x, y) => `${x.s}|${x.k}|${x.p}`.localeCompare(`${y.s}|${y.k}|${y.p}`));
     const sortBy = (l, f) => [...l].sort((x, y) => f(x).localeCompare(f(y)));
     for (const [mode, season] of [['rank-3', null], ['rank-3', '2026-08'], ['rank-3', '2026-09'], ['rank-3', 'bogus'], ['legend-avg', null], ['club', null]]) {
       const got = await T.rpc(a, 'friend_stats', [mode, season]), want = aggregate(rows, { me: await keyOf(a), mode, season });
@@ -516,6 +560,9 @@ describe('FRIEND MATCH（専用 DB）', { skip: !DBURL && 'TEST_DATABASE_URL が
     assert.deepEqual(stats.seasons.slice(0, 2), ['2026-08', '2026-09']);
     assert.equal(stats.season, stats.seasons.at(-1));
     assert.deepEqual(ranking(memberRows(stats, '2026-08')).map(r => [r.rank, r.pt]), [[1, 25], [2, 15]]);
+    // 2026-09 の a は 3 人卓（9/1）と 2 人卓（9/2）。順位は人数ごとに分かれる
+    assert.deepEqual(seatsOf(stats), [2, 3]);
+    assert.deepEqual(placeRows(stats, await keyOf(a), '2026-09').map(r => [r.p, r.n, r.dist]), [[2, 1, [0, 1]], [3, 1, [0, 0, 1]]]);
     assert.ok(!JSON.stringify(stats).includes(a));   // uid そのものは返さない
     // 部屋が消えても結果は残る。利用者が消えると結果も消える
     await T.pool.query('delete from public.rooms where id=$1', [made.room]);

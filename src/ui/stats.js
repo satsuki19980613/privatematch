@@ -1,5 +1,6 @@
 // STATS（pocket-ICM のスタッツ画面と同じ骨組み）：ゲームモードを選び、そのモードだけで試合数・平均順位・1位率・入賞率・累計 pt・直近の成績、
 // HANDS・VPIP・PFR・生存ターン、順位分布、累計 pt のグラフと期間。HAND HISTORY（試合ごとの一覧 → ハンドの詳細）。
+// FRIEND MATCH の試合は数えない（FRIEND MATCH の STATS が受け持つ。HAND HISTORY には並べる）。
 // データはすべてこの端末の IndexedDB（history/store.js）。プレイヤーのメモ（history/notes.js）も EXPORT / IMPORT に含める。
 import { configSummary, MODE_IDS } from '../structure.js';
 import { $, app, esc, fmt, head, openDlg, toast, cardHTML, cardText, fmtPt, fmtBb, localGet, localSet, kindShort, statTile } from './util.js';
@@ -7,7 +8,7 @@ import { paint, setPane } from './menu.js';
 import { modeSegHTML, bindModeSeg } from './modeseg.js';
 import * as store from '../history/store.js';
 import { syncRoom } from '../history/sync.js';
-import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, latestMode, gameHandStats, mergeStats } from '../history/stats.js';
+import { PERIODS, finishedGames, filterByPeriod, cumulativePt, recentPlaces, summarize, pctLabel, handStats, niceTicks, byMode, byScope, latestMode, gameHandStats, mergeStats } from '../history/stats.js';
 import { allNotes, importNotes } from '../history/notes.js';
 import { netOfRecord, positionsOf, streetPots, STREET_NAMES, actionText, forcedOf } from '../history/hand.js';
 
@@ -30,7 +31,7 @@ async function load() {
   catch { games = games || []; toast('この端末では記録を読み書きできません'); }
   // 選んだモード（選んだことが無ければ最後に終わった試合のモード。知らない値は使わない）
   const m = localGet(MODE_KEY);
-  mode = MODE_IDS.includes(m) ? m : latestMode(games, MODE_IDS);
+  mode = MODE_IDS.includes(m) ? m : latestMode(byScope(games, false), MODE_IDS);
   loading = false;
   renderNow();
 }
@@ -51,11 +52,13 @@ const PLACE_LABEL = ['1位', '2位', '3位', '4位', '5位', '6位'];
 const stat = statTile;
 const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
 
+/** 集計する試合（FRIEND MATCH を除いた、終わった試合） */
+const statGames = () => byScope(finishedGames(games), false);
 /** 選んだモードで、期間で絞った試合 */
-const pickedGames = () => filterByPeriod(byMode(finishedGames(games), mode), period);
+const pickedGames = () => filterByPeriod(byMode(statGames(), mode), period);
 
 function statsHTML() {
-  const total = finishedGames(games).length, all = byMode(finishedGames(games), mode), picked = filterByPeriod(all, period);
+  const own = statGames(), total = own.length, all = byMode(own, mode), picked = filterByPeriod(all, period);
   const sum = summarize(picked), pts = cumulativePt(picked), recent = recentPlaces(all, 10), ps = mergeStats(picked.map(g => mine.get(g.roomId)));
   const tone = v => (v > 0 ? 'gain' : v < 0 ? 'loss' : '');
   const n = Math.min(6, Math.max(2, sum.maxPlayers || 6)), rows = sum.placeDist.slice(0, n), max = Math.max(1, ...rows);

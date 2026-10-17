@@ -1,5 +1,5 @@
 // 卓の席を押すと開くプレイヤーのモーダル（#playerDlg。ingame.js と同じすりガラス）：その卓のゲームモードでの VPIP・PFR・生存ターン・HANDS
-// （終わった試合の集計。モードをまたいで混ぜない）と、この試合の分。相手の席ならメモと色の印（history/notes.js。この端末に保存）。
+// （終わった試合の集計。モードをまたいで混ぜない。FRIEND MATCH の卓は FRIEND MATCH の試合だけ、ほかの卓は FRIEND MATCH を除く）と、この試合の分。相手の席ならメモと色の印（history/notes.js。この端末に保存）。
 // 相手の数字は、この端末に残っている「一緒に打った試合」のハンド記録（全員のアクションが入っている）から数える。
 import { modeLabel } from '../structure.js';
 import { $, esc, fmt, head, openDlg } from './util.js';
@@ -7,12 +7,12 @@ import * as table from './table.js';
 import * as chat from './chat.js';
 import * as store from '../history/store.js';
 import { syncRoom } from '../history/sync.js';
-import { finishedGames, byMode, playerStats, pctLabel, seatIn } from '../history/stats.js';
+import { finishedGames, byMode, byScope, playerStats, pctLabel, seatIn } from '../history/stats.js';
 import { MARKS, NOTE_MAX, noteOf, setNote } from '../history/notes.js';
 
 const dlg = () => $('#playerDlg');
 const DOTS = '<span class="dots"><i></i><i></i><i></i></span>';
-let P = null;   // 開いている人 { name, self, mode, roomId, saveT, timer }
+let P = null;   // 開いている人 { name, self, mode, friend, roomId, saveT, timer }
 
 // 数が無いとき（–）は単位を付けない
 const unitOf = (value, unit) => (unit && value !== '–' ? `<small>${unit}</small>` : '');
@@ -45,7 +45,7 @@ export function openPlayer(s) {
   flush();
   if (P) clearInterval(P.timer);
   const self = s === v.seat, name = v.names[s];
-  P = { name, self, mode: v.config.mode, roomId: table.activeId(), saveT: 0, timer: 0 };
+  P = { name, self, mode: v.config.mode, friend: v.room?.kind === 'friend', roomId: table.activeId(), saveT: 0, timer: 0 };
   const note = self ? null : noteOf(name);
   $('#playerBody').innerHTML = `<div class="gd-head">${head(`PLAYER ・ ${esc(modeLabel(P.mode))}`, `<i class="gem pd-gem${self ? ' me' : ` mk${note.mark}`}"></i><span class="pd-nm">${self ? 'YOU' : esc(name)}</span><button class="pd-turn" id="pdTurn" type="button" hidden><i></i>YOUR TURN</button>`, 'pd-h')}</div>
     <div class="gd-scroll pd-body" id="pdScroll" tabindex="-1">
@@ -95,7 +95,7 @@ async function load(p) {
   let st = { hands: 0, vpip: { n: 0, d: 0 }, pfr: { n: 0, d: 0 }, games: 0, survival: null };
   try {
     const who = p.self ? null : p.name;
-    const games = byMode(finishedGames(await store.allGames()), p.mode).filter(g => seatIn(g, who) >= 0);
+    const games = byMode(byScope(finishedGames(await store.allGames()), p.friend), p.mode).filter(g => seatIn(g, who) >= 0);
     if (!cur()) return;
     // 自分は（そのモードの）全試合なので 1 回でまとめて読む。相手は一緒に打った試合だけを並べて読む
     const hands = p.self ? await store.handsByRoom() : new Map(await Promise.all(games.map(async g => [g.roomId, await store.handsOf(g.roomId)])));

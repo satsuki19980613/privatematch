@@ -97,7 +97,7 @@ function recordFriend(R) {
   const room = R.room, at = Date.now();
   for (const x of friendResults(room, R.hands.map(h => h.rec))) {
     const name = room.names[room.members.indexOf(x.uid)];
-    rowsOf().push({ k: demoKey(x.uid === ME ? 'me' : name), name, mode: room.config.mode, at, place: x.place, pt: x.pt, hands: x.hands, vpip: x.vpip, pfr: x.pfr });
+    rowsOf().push({ k: demoKey(x.uid === ME ? 'me' : name), name, mode: room.config.mode, at, p: room.config.players, place: x.place, pt: x.pt, hands: x.hands, vpip: x.vpip, pfr: x.pfr });
   }
 }
 
