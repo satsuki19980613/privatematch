@@ -371,10 +371,13 @@ function tableHTML(rows, fc, seats) {
   return tableWrap(sortThHTML('name', '名前', sort) + cols.map(c => sortThHTML(c.key, c.label, sort)).join(''), '<tr class="avg-row">' + AVG_CELL + avgCells + '</tr>' + body);
 }
 // 自分の数字。すべての卓では 4 つ目を参加数にし、順位は人数ごとの表で出す。人数を選んだら平均順位と、その人数での順位の分布
+function fourthTile(mine, seats) {
+  if (!mine) return seats === ALL ? statTile('参加', '–') : statTile('平均順位', '–');
+  if (seats === ALL) return statTile('参加', String(mine.n), '戦', '生存T ' + fmtNum(mine.survival, 1));
+  return statTile('平均順位', fmtNum(mine.avgPlace), '位', '1位率 ' + fmtRate(mine.firstRate));
+}
 function youHTML(d, season, seats, mine, count) {
-  const fourth = seats === ALL
-    ? statTile('参加', mine ? String(mine.n) : '–', '戦', mine ? '生存T ' + fmtNum(mine.survival, 1) : '')
-    : statTile('平均順位', fmtNum(mine?.avgPlace ?? null), '位', mine ? '1位率 ' + fmtRate(mine.firstRate) : '');
+  const fourth = fourthTile(mine, seats);
   let places = EMPTY;
   if (seats === ALL) places = placeTableHTML(placeRows(d, d.me, season));
   else if (mine) {
