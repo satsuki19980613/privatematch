@@ -10,6 +10,7 @@ import { $, app, esc, head, openDlg, toast, fmtPt, localGet, localSet, statTile,
 import { paint, setPane, currentPane } from './menu.js';
 import { modeSegHTML, bindModeSeg } from './modeseg.js';
 import { lineChartHTML, bindLineChart } from './linechart.js';
+import { seatsSegHTML, bindSeatsSeg, placeTableHTML } from './seats.js';
 import {
   ALL, MAX_FOCUS, columnsFor, trendMetricsFor, seasonLabel, seasonShort, dayShort, memberRows, placeRows, totalOf, ranking, sortRows,
   cumulative, cumulativeSeasons, trend, toggleFocus, slotOf, parseFocus, fmtRate, fmtNum, dayOf, seatsOf, seatsLabel, parseSeats,
@@ -224,6 +225,8 @@ export function invalidate() { cache.clear(); S.data = null; S.gen++; S.loading 
 const seasonOf = d => (S.season === ALL ? ALL : d.season);
 // 表示する卓の人数（選んだ人数の記録がそのモードに無ければ、すべて）
 const seatsIn = d => (d && seatsOf(d).includes(S.seats) ? S.seats : ALL);
+// 卓の人数の選択（そのモードで打たれた人数だけ）
+const seatsSeg = d => seatsSegHTML(d ? seatsOf(d) : [], seatsIn(d));
 const toneOf = v => { if (v > 0) { return 'gain'; } return v < 0 ? 'loss' : ''; };
 const getFocus = d => focus ?? (d.me ? [{ k: d.me, slot: 0 }] : []);
 function loadFocus() { const raw = localGet(FOCUS_KEY); if (raw != null && focus == null) focus = parseFocus(raw); }
@@ -254,23 +257,7 @@ const CELL = {
   avgPlace: r => fmtNum(r.avgPlace), n: r => String(r.n), survival: r => fmtNum(r.survival, 1),
 };
 const metricCells = (r, cols) => cols.map(c => (c.key === 'pt' ? `<td class="${toneOf(r.pt)}">${fmtPt(r.pt)}</td>` : td(CELL[c.key](r)))).join('');
-// 卓の人数の選択（そのモードで打たれた人数だけ）
-const seatsBtnHTML = (p, cur) => `<button type="button" data-seats="${p}" aria-pressed="${cur === p}">${seatsLabel(p)}</button>`;
-function seatsSegHTML(d) {
-  const list = d ? seatsOf(d) : [], cur = seatsIn(d);
-  if (!list.length) return '';
-  const btns = [ALL, ...list].map(p => seatsBtnHTML(p, cur)).join('');
-  return `<div class="seg fr-seats" role="group" aria-label="卓の人数">${btns}</div>`;
-}
-// 人数ごとの順位の表（行 = 卓の人数。色の濃さはその人数での割合）。hi = 強調する人数
-function placeTableHTML(list, hi = ALL) {
-  if (!list.length) return EMPTY;
-  const places = Array.from({ length: Math.max(...list.map(r => r.p)) }, (_, i) => i);
-  const cell = (r, i) => (i < r.p ? `<td class="pm-c" style="--h:${(r.dist[i] / r.n).toFixed(3)}">${r.dist[i]}</td>` : '<td></td>');
-  const row = r => `<tr${r.p === hi ? ' class="hi"' : ''}>${td(seatsLabel(r.p))}${td(String(r.n))}${places.map(i => cell(r, i)).join('')}${td(fmtNum(r.avgPlace))}${td(fmtRate(r.firstRate))}</tr>`;
-  return tableWrap(th('人数') + th('戦') + places.map(i => `<th class="pm-h">${i + 1}位</th>`).join('') + th('平均') + th('1位率'), list.map(row).join(''), 'pm-tbl');
-}
-const tableWrap = (headCells, bodyRows, extra = '') => `<div class="tbl-scroll"><table class="${cls('tbl fr-tbl', extra)}"><thead><tr>${headCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
+const tableWrap = (headCells, bodyRows) => `<div class="tbl-scroll"><table class="tbl fr-tbl"><thead><tr>${headCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`;
 
 function seasonSelHTML(d) {
   // 新しいシーズンが上、通算はいちばん下
@@ -280,7 +267,7 @@ function seasonSelHTML(d) {
 function bindCommon(el) {
   bindBack(el);
   bindModeSeg(el, () => S.mode, m => { S.mode = m; localSet(MODE_KEY, m); S.season = S.season === ALL ? ALL : null; refresh(); });
-  el.querySelectorAll('[data-seats]').forEach(b => b.onclick = () => { S.seats = parseSeats(b.dataset.seats); localSet(SEATS_KEY, String(S.seats)); rerender(); });
+  bindSeatsSeg(el, p => { S.seats = p; localSet(SEATS_KEY, String(p)); rerender(); });
   const sel = el.querySelector('#seasonSel');
   if (sel) sel.onchange = () => { S.season = sel.value; refresh(); };
   el.querySelectorAll('[data-member]').forEach(b => b.onclick = () => openMember(b.dataset.member));
@@ -306,7 +293,7 @@ function rankPaneHTML() {
     <div class="panel hs-panel fr-panel">
       <div class="hs-head"><span class="hs-title">RANKING</span><span class="hs-total">${esc(modeLabel(S.mode))}</span></div>
       <div class="hs-modes">${modeSegHTML(S.mode)}</div>
-      ${seasonSelHTML(d)}${seatsSegHTML(d)}
+      ${seasonSelHTML(d)}${seatsSeg(d)}
       ${d ? rankListHTML(ranking(memberRows(d, seasonOf(d), seats)), seats) : bodyWait()}
     </div>`;
 }
@@ -327,7 +314,7 @@ function statsPaneHTML() {
       <div class="hs-head"><span class="hs-title">FRIEND STATS</span><span class="hs-total">${esc(modeLabel(S.mode))}</span></div>
       <div class="hs-modes">${modeSegHTML(S.mode)}</div>
       <div class="seg fr-view">${VIEWS.map(viewBtnHTML).join('')}</div>
-      ${S.view === 'season' ? seasonSelHTML(d) : metricSelHTML(d)}${seatsSegHTML(d)}
+      ${S.view === 'season' ? seasonSelHTML(d) : metricSelHTML(d)}${seatsSeg(d)}
     </div>${statsBodyHTML(d)}`;
 }
 

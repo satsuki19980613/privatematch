@@ -50,6 +50,31 @@ export function summarize(results) {
     totalPt, placeDist, maxPlayers, firstPlayedAt: n ? results[0].endedAt : null, lastPlayedAt: n ? results[n - 1].endedAt : null,
   };
 }
+/* ---------- 卓の人数（順位は人数の違う卓どうしでは比べられないので、人数ごとに見る。FRIEND MATCH の STATS も同じ） ---------- */
+/** すべての人数 */
+export const ALL = 'all';
+/** 卓の人数 */
+export const SEATS = [2, 3, 4, 5, 6];
+/** 人数の表示（ALL は 'すべて'） */
+export const seatsLabel = p => (p === ALL ? 'すべて' : `${p}人`);
+/** 端末に覚えた人数を読み直す（知らない値は ALL） */
+export const parseSeats = raw => (SEATS.includes(Number(raw)) ? Number(raw) : ALL);
+/** 試合の卓の人数（再戦は残った人数） */
+const seatsOfGame = g => g.config?.players;
+/** その試合たちの卓の人数（小さい順） */
+export const seatsOfGames = games => SEATS.filter(p => games.some(g => seatsOfGame(g) === p));
+/** 卓の人数で絞る（ALL はそのまま） */
+export const bySeats = (games, seats) => (seats === ALL ? games : games.filter(g => seatsOfGame(g) === seats));
+/**
+ * 人数ごとの順位（入力は終わった試合）。=> [{ p, n, first, dist（1〜p 位の回数）, firstRate, avgPlace }]（人数の小さい順。打っていない人数は含めない）
+ */
+export function placeRowsOf(games) {
+  return seatsOfGames(games).map(p => {
+    const s = summarize(bySeats(games, p));
+    return { p, n: s.games, first: s.firstRate.n, dist: s.placeDist.slice(0, p), firstRate: s.firstRate.n / s.games, avgPlace: s.avgPlace };
+  });
+}
+
 /** 比率の表示（小数 1 桁の %。分母 0 は –） */
 export const pctLabel = r => (r.d ? ((r.n / r.d) * 100).toFixed(1) : '–');
 
