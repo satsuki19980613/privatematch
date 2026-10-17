@@ -1138,6 +1138,15 @@ dialog.glass-dlg.pd-kb{margin-bottom:auto}
 .fr-dist{grid-template-columns:2.6em minmax(0,1fr) 5.4em}
 .fr-dist .spd-count small{color:var(--muted)}
 .fr-recs{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px}
-.fr-recs li{display:grid;grid-template-columns:4em 3em 1fr;gap:10px;font-family:var(--f-num);font-size:13px;font-variant-numeric:tabular-nums;padding:4px 0;border-bottom:1px solid var(--hair)}
+.fr-recs li{display:grid;grid-template-columns:4em 2.4em 3em 1fr;gap:10px;font-family:var(--f-num);font-size:13px;font-variant-numeric:tabular-nums;padding:4px 0;border-bottom:1px solid var(--hair)}
 .fr-recs li b{color:var(--ink)}
 #gateBody .btns .btn{flex:1}
+/* 卓の人数の選択と、人数ごとの順位の表（色の濃さ = その人数での割合。人数より大きい順位は空ける） */
+.fr-seats button{font-family:var(--f-ui);font-size:12px;padding:8px 4px}
+.fr-tbl.pm-tbl{width:100%}
+.pm-tbl th,.pm-tbl td{padding:6px 3px;letter-spacing:0}
+.pm-tbl td{font-size:12px}
+.pm-tbl th.pm-h,.pm-tbl td.pm-c{text-align:center}
+.pm-tbl td.pm-c{background:color-mix(in srgb,var(--you) calc(var(--h) * 60%),transparent);color:var(--ink)}
+.pm-tbl tr.hi td{color:var(--ink);font-weight:700}
+.pm-tbl tr.hi td:first-child{color:var(--you-text)}

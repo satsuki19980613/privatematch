@@ -1,7 +1,7 @@
-// 卓のプレイヤーのモーダルと STATS の集計（src/history/stats.js の byMode / playerStats / survivalTurns）と、メモ（src/history/notes.js）。
+// 卓のプレイヤーのモーダルと STATS の集計（src/history/stats.js の byMode / byScope / playerStats / survivalTurns）と、メモ（src/history/notes.js）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { byMode, latestMode, nameKey, playerStats, survivalTurns, handStats, seatIn, gameHandStats, mergeStats } from '../src/history/stats.js';
+import { byMode, byScope, latestMode, nameKey, playerStats, survivalTurns, handStats, seatIn, gameHandStats, mergeStats } from '../src/history/stats.js';
 
 // localStorage の代役（notes.js は最初に使うときに読む）
 const mem = new Map();
@@ -75,6 +75,15 @@ test('byMode / latestMode：モードで分ける・既定は最後に終わっ�
   assert.equal(latestMode(gs), 'rank-4');   // 中止の試合は数えない
   assert.equal(latestMode([]), 'club');
   assert.equal(nameKey('  Kenta '), 'kenta'); assert.equal(nameKey('KENTA'), 'kenta');
+});
+
+test('byScope：FRIEND MATCH の試合と、それ以外（PRIVATE / FREE MATCH）を混ぜない', () => {
+  const gs = [{ ...game('p', 'club', ['x'], 0, 1), kind: 'private' }, { ...game('f', 'club', ['x'], 0, 2), kind: 'friend' },
+    { ...game('o', 'club', ['x'], 0, 3), kind: 'free' }, { ...game('g', 'rank-4', ['x'], 0, 4), kind: 'friend' }];
+  assert.deepEqual(byScope(gs, false).map(g => g.roomId), ['p', 'o']);
+  assert.deepEqual(byScope(gs, true).map(g => g.roomId), ['f', 'g']);
+  assert.deepEqual(byMode(byScope(gs, true), 'club').map(g => g.roomId), ['f']);
+  assert.equal(latestMode(byScope(gs, false)), 'club');   // 最後に終わった FRIEND MATCH（rank-4）は既定に使わない
 });
 
 test('メモ：印とメモを保存し、空にすると消える。名前は大文字小文字を無視', () => {

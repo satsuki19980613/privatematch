@@ -77,6 +77,11 @@ export function handStats(hands, seatOf) {
   return { hands: n, vpip: { n: vpip, d: n }, pfr: { n: pfr, d: n }, won: { n: won, d: n }, netBb };
 }
 
+/**
+ * FRIEND MATCH の試合と、それ以外（PRIVATE / FREE MATCH）を分ける（friend = FRIEND MATCH の方）。
+ * 端末の STATS は FRIEND MATCH を含めない（FRIEND MATCH のスタッツはサーバーに残した結果から。src/friend.js）
+ */
+export const byScope = (games, friend) => games.filter(g => (g.kind === 'friend') === friend);
 /** ゲームモードで絞る（pt も生存ターンもモードをまたいで混ぜない） */
 export const byMode = (games, mode) => games.filter(g => g.config && g.config.mode === mode);
 /** 集計に使うモードの既定：最後に終わった試合のモード（無ければ・知らないモードなら club） */
