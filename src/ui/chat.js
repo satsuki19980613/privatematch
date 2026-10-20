@@ -414,7 +414,7 @@ function place(b, placed) {
     };
     list.forEach((sh, i) => spots(sh, (side, X, Y, pen) => {
       if (!inside(X, Y, sh.w, sh.h)) return;
-      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, X, Y);
+      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, X + sh.w / 2, Y + sh.h / 2);
       if (score < bestScore) { bestScore = score; pick = { i, side, x: X, y: Y }; }
     }));
     if (pick) { const [bx, by] = base(pick.side); pick.rx = pick.x - bx; pick.ry = pick.y - by; }
@@ -428,10 +428,12 @@ function place(b, placed) {
     el.classList.toggle('tk', !!sh.tk);
     if (sh.tk) ticker(el);
   }
-  // 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）
-  if (moved && !REDUCE) b.slide = { dx: b.at.x - pick.x + (b.slide ? b.slide.dx * slideLeft(b.slide) : 0), dy: b.at.y - pick.y + (b.slide ? b.slide.dy * slideLeft(b.slide) : 0), t0: performance.now() };
+  // 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）。
+  // 形が変わっても跳ばないように、吹き出しの真ん中どうしで合わせる（b.at = 行き先の真ん中）
+  const mx = pick.x + sh.w / 2, my = pick.y + sh.h / 2;
+  if (moved && !REDUCE) b.slide = { dx: b.at.x - mx + (b.slide ? b.slide.dx * slideLeft(b.slide) : 0), dy: b.at.y - my + (b.slide ? b.slide.dy * slideLeft(b.slide) : 0), t0: performance.now() };
   const k = b.slide ? slideLeft(b.slide) : 0; if (b.slide && !k) b.slide = null;
-  b.at = { x: pick.x, y: pick.y };
+  b.at = { x: mx, y: my };
   const x = Math.round(pick.x), y = Math.round(pick.y), vx = Math.round(pick.x + (k ? b.slide.dx * k : 0)), vy = Math.round(pick.y + (k ? b.slide.dy * k : 0));
   const dir = pick.side[0];
   if (b.side !== dir) { b.side = dir; el.classList.toggle('sl', dir === 'l'); el.classList.toggle('sr', dir === 'r'); el.classList.toggle('sd', dir === 'd'); }
