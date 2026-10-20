@@ -465,15 +465,17 @@ function loop() {
   raf = 0; if (!live.length) return;
   const placed = [], now = performance.now();
   for (const b of live) place(b, placed);
-  const calm = !settling();   // 縮む・戻る途中の一時的な重なりでは消さない
-  if (!calm) for (const p of placed) p.b0.clash = 0;
-  for (let i = 0; calm && i < placed.length; i++) {
+  if (settling()) for (const p of placed) p.b0.clash = 0;   // 縮む・戻る途中の一時的な重なりでは消さない
+  else clashes(placed, now);
+  raf = requestAnimationFrame(loop);
+}
+function clashes(placed, now) {
+  for (let i = 0; i < placed.length; i++) {
     const p = placed[i]; let hit = false;
     for (let j = i + 1; j < placed.length; j++) { const q = placed[j]; if (Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1) { hit = true; break; } }
     const b = p.b0;
     if (!hit) b.clash = 0; else if (!b.clash) b.clash = now; else if (now - b.clash > 250) retire(b, true);
   }
-  raf = requestAnimationFrame(loop);
 }
 const kick = () => { if (!raf && live.length) raf = requestAnimationFrame(loop); };
 function retire(b, quick) {
