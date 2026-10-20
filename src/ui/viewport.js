@@ -45,16 +45,30 @@ let anim = null, baseW = 0, baseH = 0, lastW = 0, preKbCw = 0, t0h = 0;
 const PRED_MS = 1100;
 let pred = null, predT = 0;
 export const gliding = () => !!anim;
+// the layout is still moving for the keyboard (a glide, the predicted keyboard still on its way, or just after one): chat.js keeps
+// the bubbles where they are relative to their speakers until it has settled, instead of looking for new spots every frame
+const CALM_MS = 180;
+let calmAt = 0;
+export const settling = () => !!anim || (!!pred && performance.now() < pred.until) || performance.now() < calmAt;
 // the layout before the keyboard: card size, the table's height (kept while it is scaled) and the header padding (the kb rules
 // interpolate from it). Taken when the chat input is about to get focus, i.e. before the keyboard changes anything.
 let snap = false;
 export function snapshot() {
   if (document.body.classList.contains('kb') || anim) return;
   preKbCw = cwNow();
+  if (preKbCw) root.style.setProperty('--cw0', preKbCw + 'px');   // the bubbles keep the font size they had before the keyboard
   t0h = document.getElementById('table')?.clientHeight || 0;
   const top = document.querySelector('.top');
   if (top) { const cs = getComputedStyle(top); root.style.setProperty('--tp0', cs.paddingTop); root.style.setProperty('--tb0', cs.paddingBottom); }
   snap = true;
+}
+/** how much smaller the table is drawn than before the keyboard (1 = the same): the card size and, when the table is scaled down
+ *  (kbmin), that scale. chat.js draws the bubbles at least this much smaller (fitting them where they were) */
+export function kbScale() {
+  const b = document.body;
+  if (!b.classList.contains('kb') || !preKbCw) return 1;
+  const s = b.classList.contains('kbmin') ? 1 - (1 - (Number.parseFloat(root.style.getPropertyValue('--ts1')) || 1)) * cur.kbm : 1;
+  return Math.min(1, (cwNow() || preKbCw) / preKbCw) * s;
 }
 const stage = () => document.getElementById('stage');
 const cwNow = () => Number.parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
@@ -118,7 +132,7 @@ function glide(h1, kb) {
   anim = { raf: requestAnimationFrame(step), to };
 }
 function finish(to) {
-  anim = null;
+  anim = null; calmAt = performance.now() + CALM_MS;
   setVars(to.h, to.cw, to.kbp, to.kbm, to.lw);
   if (!to.kbp) document.body.classList.remove('kb');
   if (!to.kbm) document.body.classList.remove('kbmin');
