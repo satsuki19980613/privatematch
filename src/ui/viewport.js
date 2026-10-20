@@ -45,6 +45,11 @@ let anim = null, baseW = 0, baseH = 0, lastW = 0, preKbCw = 0, t0h = 0;
 const PRED_MS = 1100;
 let pred = null, predT = 0;
 export const gliding = () => !!anim;
+// the layout is still moving for the keyboard (a glide, the predicted keyboard still on its way, or just after one): chat.js keeps
+// the bubbles where they are relative to their speakers until it has settled, instead of looking for new spots every frame
+const CALM_MS = 180;
+let calmAt = 0;
+export const settling = () => !!anim || (!!pred && performance.now() < pred.until) || performance.now() < calmAt;
 // the layout before the keyboard: card size, the table's height (kept while it is scaled) and the header padding (the kb rules
 // interpolate from it). Taken when the chat input is about to get focus, i.e. before the keyboard changes anything.
 let snap = false;
@@ -118,7 +123,7 @@ function glide(h1, kb) {
   anim = { raf: requestAnimationFrame(step), to };
 }
 function finish(to) {
-  anim = null;
+  anim = null; calmAt = performance.now() + CALM_MS;
   setVars(to.h, to.cw, to.kbp, to.kbm, to.lw);
   if (!to.kbp) document.body.classList.remove('kb');
   if (!to.kbm) document.body.classList.remove('kbmin');

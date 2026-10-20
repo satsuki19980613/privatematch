@@ -2,7 +2,7 @@
 // table.js から start / stop / onPoll / onView を呼ぶ。fitTable は入力ボタンを fitLane / fitsLane で衝突判定に入れる。
 // ヘッダの履歴ボタン（#chatLogBtn）とモーダルは ingame.js（chatEnabled / messages / subscribe / unread / markRead を使う）。
 import { $, app, esc, toast, REDUCE, EASE } from './util.js';
-import { settleSoon, snapshot, expectKeyboard } from './viewport.js';
+import { settleSoon, snapshot, expectKeyboard, settling } from './viewport.js';
 import { CHAT_MAX_UNITS, CHAT_MIN_INTERVAL_MS, chatUnits, clipChat, normalizeChat, splitChat } from '../chat.js';
 
 const S = {
@@ -317,29 +317,32 @@ function shapes(b, a, R, BL, BR) {
     [Math.max(a.pw * 1.6, 170), 300],
   ];
   const out = [];
-  for (const f of small < fs - .4 ? [fs, small] : [fs]) for (const [c, pen] of caps) {
+  for (const f of small < fs - .4 ? [fs, small] : [fs]) caps.forEach(([c, pen], ci) => {
     const cap = Math.round(Math.min(room, c));
-    if (out.some(o => o.cap === cap && o.fs === f)) continue;
+    if (out.some(o => o.cap === cap && o.fs === f)) return;
     el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = f === fs ? '' : f + 'px';
     const cin = el.querySelector('.cb-in');
-    if (cin.scrollHeight > cin.clientHeight + 1) continue;   // 4 行に収まらない（切れる）形は使わない
-    out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: pen + (f === fs ? 0 : 600) });
-  }
+    if (cin.scrollHeight > cin.clientHeight + 1) return;   // 4 行に収まらない（切れる）形は使わない
+    out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: pen + (f === fs ? 0 : 600), kind: ci + (f === fs ? '' : 's') });
+  });
   // 札の横の狭い空きに入る細い形（小さい文字。4 行に収まるときだけ）
   if (gap >= 90 && gap < Math.min(...out.map(o => o.cap))) {
     const cap = Math.round(gap), f = small, cin = el.querySelector('.cb-in');
     el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = f + 'px';
-    if (cin.scrollHeight <= cin.clientHeight + 1) out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: 1000 });
+    if (cin.scrollHeight <= cin.clientHeight + 1) out.push({ cap, fs: f, w: el.offsetWidth, h: el.offsetHeight, pen: 1000, kind: 'gap' });
   }
   // 最後の手段：1 行の帯（長い文は横に流して全部読ませる）。とても狭い卓（小さい画面の 5〜6 人・キーボードで縮小表示）用
   el.classList.add('tk');
-  for (const c of new Set([Math.round(Math.max(a.pw * .95, 96)), Math.round(Math.max(Math.min(gap, a.pw), 84))])) {
+  [...new Set([Math.round(Math.max(a.pw * .95, 96)), Math.round(Math.max(Math.min(gap, a.pw), 84))])].forEach((c, ci) => {
     const cap = Math.min(room, c);
     el.style.setProperty('--cbw', cap + 'px'); el.style.fontSize = small + 'px';
-    out.push({ cap, fs: small, w: el.offsetWidth, h: el.offsetHeight, pen: 1400, tk: true });
-  }
+    out.push({ cap, fs: small, w: el.offsetWidth, h: el.offsetHeight, pen: 1400, tk: true, kind: 'tk' + ci });
+  });
   el.classList.remove('tk');
-  b.key = key; b.shapes = out; b.cur = null; b.applied = -1;   // 測るときに形を変えたので、選んだ形を付け直させる
+  // 測り直しても、いまの置き方は同じ種類の形のまま引き継ぐ（席の大きさが少し変わっただけで置き場所を探し直さない）
+  const kind = b.cur && b.shapes?.[b.cur.i]?.kind, ni = kind ? out.findIndex(o => o.kind === kind) : -1;
+  b.cur = ni >= 0 ? { ...b.cur, i: ni } : null;
+  b.key = key; b.shapes = out; b.applied = -1;   // 測るときに形を変えたので、選んだ形を付け直させる
   return out;
 }
 // 帯の文が入りきらなければ、往復で横に流す（読む速さ：1 秒に約 40px。端で少し止まる）
@@ -364,7 +367,9 @@ function place(b, placed) {
   // 吹き出しとしっぽ（上なら下に、横なら席の側に）の分を合わせた箱で重なりを数える
   const cost = (side, X, Y, w, h) => side === 'up' ? area(X, Y, w, h + TAIL) : side[0] === 'd' ? area(X, Y - TAIL, w, h + TAIL) : side[0] === 'l' ? area(X, Y, w + TAIL, h) : area(X - TAIL, Y, w + TAIL, h);
   const inside = (X, Y, w, h) => X >= BL - .5 && X + w <= BR + .5 && Y >= TOP - .5 && Y + h <= BOT + .5;
-  const list = shapes(b, a, R, BL, BR);
+  // キーボードで卓が縮む・戻る途中は、形も席からの位置もそのまま（毎フレーム探し直すと左右に跳ぶ）。落ち着いてから一度だけ見直す
+  const hold = !!(b.cur && b.shapes?.[b.cur.i]) && settling();
+  const list = hold ? b.shapes : shapes(b, a, R, BL, BR);
   // 候補の位置（形 i ごと）：上（元の位置・少し上へ・相手は札とプレートの上まで下へ）、席の左右（しっぽは横向き）
   const spots = (sh, fn) => {
     const y0 = Math.round(Math.max(TOP, at - sh.h - TAIL - 2));
@@ -392,49 +397,67 @@ function place(b, placed) {
   const tgt = side => a.sides[+side[1]] || a.sides[0];
   const base = side => { if (side === 'up') { return [cx, at]; } const t = tgt(side); return side[0] === 'd' ? [(t.l + t.r) / 2 - R.left, t.b - R.top] : [(side[0] === 'l' ? t.l : t.r) - R.left, t.cy - R.top]; };
   let pick = null;
-  if (b.cur && list[b.cur.i]) {
+  if (hold) {
+    const [bx, by] = base(b.cur.side), w = el.offsetWidth, h = el.offsetHeight;   // 文字の大きさが卓に合わせて変わる途中なので、いまの大きさで
+    pick = { ...b.cur, x: Math.max(BL, Math.min(BR - w, bx + b.cur.rx)), y: Math.max(TOP, Math.min(BOT - h, by + b.cur.ry)), w, h };
+  } else if (b.cur && list[b.cur.i]) {
     const sh = list[b.cur.i], [bx, by] = base(b.cur.side), X = bx + b.cur.rx, Y = by + b.cur.ry;
     if ((b.cur.side === 'up' || a.sides[+b.cur.side[1]]) && inside(X, Y, sh.w, sh.h) && cost(b.cur.side, X, Y, sh.w, sh.h) === 0) pick = { ...b.cur, x: X, y: Y };
   }
   if (!pick) {
     let bestScore = Infinity;
+    // 置き直すときは、いまの場所の近く・同じ向きを選びやすくする（反対側へ大きく動かさない）
+    const near = (side, X, Y) => {
+      if (!b.cur || !b.at) return 0;
+      const turn = side[0] === b.cur.side[0] ? 0 : 400;
+      return turn + (Math.abs(X - b.at.x) + Math.abs(Y - b.at.y)) * .6;
+    };
     list.forEach((sh, i) => spots(sh, (side, X, Y, pen) => {
       if (!inside(X, Y, sh.w, sh.h)) return;
-      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen;
+      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, X, Y);
       if (score < bestScore) { bestScore = score; pick = { i, side, x: X, y: Y }; }
     }));
     if (pick) { const [bx, by] = base(pick.side); pick.rx = pick.x - bx; pick.ry = pick.y - by; }
   }
   if (!pick) { el.style.visibility = 'hidden'; return; }
-  b.cur = pick;
-  const sh = list[pick.i];
+  const moved = !hold && b.at && b.cur && (b.cur.side !== pick.side || b.cur.i !== pick.i || Math.abs(b.cur.rx - pick.rx) + Math.abs(b.cur.ry - pick.ry) > 2);
+  if (!hold) b.cur = pick;
+  const sh = hold ? { ...list[pick.i], w: pick.w, h: pick.h } : list[pick.i];
   if (b.applied !== pick.i) {
     b.applied = pick.i; el.style.setProperty('--cbw', sh.cap + 'px'); el.style.fontSize = sh.fs === list[0].fs ? '' : sh.fs + 'px';
     el.classList.toggle('tk', !!sh.tk);
     if (sh.tk) ticker(el);
   }
-  const x = Math.round(pick.x), y = Math.round(pick.y);
+  // 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）
+  if (moved && !REDUCE) b.slide = { dx: b.at.x - pick.x + (b.slide ? b.slide.dx * slideLeft(b.slide) : 0), dy: b.at.y - pick.y + (b.slide ? b.slide.dy * slideLeft(b.slide) : 0), t0: performance.now() };
+  const k = b.slide ? slideLeft(b.slide) : 0; if (b.slide && !k) b.slide = null;
+  b.at = { x: pick.x, y: pick.y };
+  const x = Math.round(pick.x), y = Math.round(pick.y), vx = Math.round(pick.x + (k ? b.slide.dx * k : 0)), vy = Math.round(pick.y + (k ? b.slide.dy * k : 0));
   const dir = pick.side[0];
   if (b.side !== dir) { b.side = dir; el.classList.toggle('sl', dir === 'l'); el.classList.toggle('sr', dir === 'r'); el.classList.toggle('sd', dir === 'd'); }
   el.style.visibility = '';
-  el.style.translate = `${x}px ${y}px`;
+  el.style.translate = `${vx}px ${vy}px`;
   if (dir === 'd') {
     const [ex, ey] = base(pick.side);
-    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, ex - x))) + 'px');
-    el.style.setProperty('--stem', Math.max(0, Math.round(y - ey - TAIL - 2)) + 'px');
+    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, ex - vx))) + 'px');
+    el.style.setProperty('--stem', Math.max(0, Math.round(vy - ey - TAIL - 2)) + 'px');
   } else if (pick.side === 'up') {
-    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, cx - x))) + 'px');
+    el.style.setProperty('--tx', Math.round(Math.max(10, Math.min(sh.w - 10, cx - vx))) + 'px');
     // 上にずらしたときは、しっぽの柄を伸ばして席までつなぐ
-    el.style.setProperty('--stem', Math.max(0, Math.round(at - (y + sh.h) - TAIL - 2)) + 'px');
+    el.style.setProperty('--stem', Math.max(0, Math.round(at - (vy + sh.h) - TAIL - 2)) + 'px');
   } else {
     const [ex, ey] = base(pick.side);
-    el.style.setProperty('--ty', Math.round(Math.max(10, Math.min(sh.h - 10, ey - y))) + 'px');
-    el.style.setProperty('--stem', Math.max(0, Math.round(dir === 'l' ? ex - (x + sh.w) - TAIL - 2 : x - ex - TAIL - 2)) + 'px');
+    el.style.setProperty('--ty', Math.round(Math.max(10, Math.min(sh.h - 10, ey - vy))) + 'px');
+    el.style.setProperty('--stem', Math.max(0, Math.round(dir === 'l' ? ex - (vx + sh.w) - TAIL - 2 : vx - ex - TAIL - 2)) + 'px');
   }
+  // ほかの吹き出しがよけるのは、滑っている途中の場所ではなく行き先
   if (placed && !b.gone) placed.push(pick.side === 'up' ? { l: x, r: x + sh.w, t: y, b: y + sh.h + TAIL, k: 4, b0: b }
     : dir === 'd' ? { l: x, r: x + sh.w, t: y - TAIL, b: y + sh.h, k: 4, b0: b }
     : { l: dir === 'l' ? x : x - TAIL, r: dir === 'l' ? x + sh.w + TAIL : x + sh.w, t: y, b: y + sh.h, k: 4, b0: b });
 }
+const SLIDE_MS = 260;
+/** 滑らせる残り（1 → 0。ease-out） */
+function slideLeft(sl) { const p = Math.min(1, (performance.now() - sl.t0) / SLIDE_MS); return (1 - p) ** 3; }
 // 吹き出しがある間だけ毎フレーム席に合わせる（キーボードでの縮小・配り直し・向きの変化にそのまま付いていく）。
 // それでも吹き出しどうしが重なったまま（0.25 秒）なら、古い方を先に消す（発言は履歴に残っている）
 let raf = 0;
@@ -442,7 +465,9 @@ function loop() {
   raf = 0; if (!live.length) return;
   const placed = [], now = performance.now();
   for (const b of live) place(b, placed);
-  for (let i = 0; i < placed.length; i++) {
+  const calm = !settling();   // 縮む・戻る途中の一時的な重なりでは消さない
+  if (!calm) for (const p of placed) p.b0.clash = 0;
+  for (let i = 0; calm && i < placed.length; i++) {
     const p = placed[i]; let hit = false;
     for (let j = i + 1; j < placed.length; j++) { const q = placed[j]; if (Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1) { hit = true; break; } }
     const b = p.b0;
