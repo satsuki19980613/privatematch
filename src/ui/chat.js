@@ -408,19 +408,19 @@ function place(b, placed) {
     let bestScore = Infinity;
     // 置き直すときは、いまの場所の近く・同じ向きを選びやすくする（反対側へ大きく動かさない）
     const near = (side, X, Y) => {
-      if (!b.cur || !b.at) return 0;
-      const turn = side[0] === b.cur.side[0] ? 0 : 400;
+      if (!b.at) return 0;
+      const turn = side[0] === b.at.side ? 0 : 400;
       return turn + (Math.abs(X - b.at.x) + Math.abs(Y - b.at.y)) * .6;
     };
     list.forEach((sh, i) => spots(sh, (side, X, Y, pen) => {
       if (!inside(X, Y, sh.w, sh.h)) return;
-      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, X + sh.w / 2, Y + sh.h / 2);
+      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, ...tailAt(side, X, Y, sh));
       if (score < bestScore) { bestScore = score; pick = { i, side, x: X, y: Y }; }
     }));
     if (pick) { const [bx, by] = base(pick.side); pick.rx = pick.x - bx; pick.ry = pick.y - by; }
   }
   if (!pick) { el.style.visibility = 'hidden'; return; }
-  const moved = !hold && b.at && b.cur && (b.cur.side !== pick.side || b.cur.i !== pick.i || Math.abs(b.cur.rx - pick.rx) + Math.abs(b.cur.ry - pick.ry) > 2);
+  const moved = !hold && b.at && (!b.cur || b.cur.side !== pick.side || b.cur.i !== pick.i || Math.abs(b.cur.rx - pick.rx) + Math.abs(b.cur.ry - pick.ry) > 2);
   if (!hold) b.cur = pick;
   const sh = hold ? { ...list[pick.i], w: pick.w, h: pick.h } : list[pick.i];
   if (b.applied !== pick.i) {
@@ -429,11 +429,14 @@ function place(b, placed) {
     if (sh.tk) ticker(el);
   }
   // 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）。
-  // 形が変わっても跳ばないように、吹き出しの真ん中どうしで合わせる（b.at = 行き先の真ん中）
-  const mx = pick.x + sh.w / 2, my = pick.y + sh.h / 2;
-  if (moved && !REDUCE) b.slide = { dx: b.at.x - mx + (b.slide ? b.slide.dx * slideLeft(b.slide) : 0), dy: b.at.y - my + (b.slide ? b.slide.dy * slideLeft(b.slide) : 0), t0: performance.now() };
+  // 同じ向きのまま形が変わるときはしっぽの付け根どうし、向きが変わるときは吹き出しの真ん中どうしで合わせる（b.at = 行き先）
+  const [mx, my] = tailAt(pick.side, pick.x, pick.y, sh), mcx = pick.x + sh.w / 2, mcy = pick.y + sh.h / 2;
+  if (moved && !REDUCE) {
+    const same = b.at.side === pick.side[0], left = b.slide ? slideLeft(b.slide) : 0;
+    b.slide = { dx: (same ? b.at.x - mx : b.at.cx - mcx) + (left ? b.slide.dx * left : 0), dy: (same ? b.at.y - my : b.at.cy - mcy) + (left ? b.slide.dy * left : 0), t0: performance.now() };
+  }
   const k = b.slide ? slideLeft(b.slide) : 0; if (b.slide && !k) b.slide = null;
-  b.at = { x: mx, y: my };
+  b.at = { x: mx, y: my, cx: mcx, cy: mcy, side: pick.side[0] };
   const x = Math.round(pick.x), y = Math.round(pick.y), vx = Math.round(pick.x + (k ? b.slide.dx * k : 0)), vy = Math.round(pick.y + (k ? b.slide.dy * k : 0));
   const dir = pick.side[0];
   if (b.side !== dir) { b.side = dir; el.classList.toggle('sl', dir === 'l'); el.classList.toggle('sr', dir === 'r'); el.classList.toggle('sd', dir === 'd'); }
@@ -456,6 +459,12 @@ function place(b, placed) {
   if (placed && !b.gone) placed.push(pick.side === 'up' ? { l: x, r: x + sh.w, t: y, b: y + sh.h + TAIL, k: 4, b0: b }
     : dir === 'd' ? { l: x, r: x + sh.w, t: y - TAIL, b: y + sh.h, k: 4, b0: b }
     : { l: dir === 'l' ? x : x - TAIL, r: dir === 'l' ? x + sh.w + TAIL : x + sh.w, t: y, b: y + sh.h, k: 4, b0: b });
+}
+/** しっぽの付け根（上なら下の辺・下なら上の辺・横なら席の側の辺の真ん中） */
+function tailAt(side, X, Y, sh) {
+  if (side === 'up') return [X + sh.w / 2, Y + sh.h];
+  if (side[0] === 'd') return [X + sh.w / 2, Y];
+  return [side[0] === 'l' ? X + sh.w : X, Y + sh.h / 2];
 }
 const SLIDE_MS = 260;
 /** 滑らせる残り（1 → 0。ease-out） */
