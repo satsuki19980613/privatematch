@@ -357,144 +357,211 @@ function ticker(el) {
   el.style.setProperty('--tdur', over > 2 ? (2.4 + over / 40).toFixed(2) + 's' : '0s');
   el.classList.toggle('run', over > 2 && !REDUCE);
 }
-// zc：キーボードが出ている間に吹き出しを描く倍率（loop が全部の吹き出しで揃えて決める）。probe：重ならずに描ける一番大きい倍率を
-// 返すだけ（置かない）
-function place(b, placed, zc = 1, probe = false) {
-  const L = layer(), a = anchorOf(b.seat), el = b.el;
-  if (!L || !a) { if (!probe) { el.style.visibility = 'hidden'; } return; }
+// 1 フレーム分の、置ける範囲とよけたいもの（画面の上の px。#chatBubbles の左上が 0,0）
+function frameOf(b, a, L, placed) {
   const R = L.getBoundingClientRect(), tb = $('#table'), ti = $('#tInfo'), land = document.body.classList.contains('land');
   // 置ける範囲：横向きは卓の列だけ（右の列のドック・情報に出ない）。縦向きは情報の行より下
   const BL = land && tb ? Math.max(M, tb.offsetLeft) : M, BR = land && tb ? Math.min(R.width - M, tb.offsetLeft + tb.offsetWidth) : R.width - M;
   const TOP = !land && ti?.offsetHeight ? Math.max(M, ti.offsetTop + ti.offsetHeight + 2) : M, BOT = R.height - M;
-  const mine = b.seat === S.v?.seat, cx = (a.left + a.right) / 2 - R.left, at = a.top - R.top;
-  // キーボードが出ている間は、出す前の置き方（向き・形・席からの位置）のまま小さく描く（keep。置き直さない）。
-  // z = その倍率。ここから下の大きさ・位置は画面の上の px（形の w・h・しっぽの長さ T も z 倍したもの）
-  const keep = document.body.classList.contains('kb') && !!(b.cur && b.shapes?.[b.cur.i]);
-  let z = 1, T = TAIL;
   // 2px の余白を取って縁が触れないようにする
-  const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left - 2, r: r.right - R.left + 2, t: r.top - R.top - 2, b: r.bottom - R.top + 2, k })).concat((placed || []).map(o => ({ ...o, l: o.l - 2, r: o.r + 2, t: o.t - 2, b: o.b + 2 })));
-  const area = (X, Y, w, h, hard) => { let c = 0; for (const o of obs) { if (hard && o.k < 1) { continue; } const dx = Math.min(o.r, X + w) - Math.max(o.l, X); if (dx <= 0) { continue; } const dy = Math.min(o.b, Y + h) - Math.max(o.t, Y); if (dy > 0) c += o.k * dx * dy; } return c; };
-  // 吹き出しとしっぽ（上なら下に、横なら席の側に）の分を合わせた箱で重なりを数える
-  const cost = (side, X, Y, w, h, t = T, hard = false) => side === 'up' ? area(X, Y, w, h + t, hard) : side[0] === 'd' ? area(X, Y - t, w, h + t, hard) : side[0] === 'l' ? area(X, Y, w + t, h, hard) : area(X - t, Y, w + t, h, hard);
-  const inside = (X, Y, w, h) => X >= BL - .5 && X + w <= BR + .5 && Y >= TOP - .5 && Y + h <= BOT + .5;
-  const clampIn = (X, Y, sh) => [Math.max(BL, Math.min(BR - sh.w, X)), Math.max(TOP, Math.min(BOT - sh.h, Y))];
-  // キーボードで卓が縮む・戻る途中は、形も席からの位置もそのまま（毎フレーム探し直すと左右に跳ぶ）。落ち着いてから一度だけ見直す
-  const hold = !!(b.cur && b.shapes?.[b.cur.i]) && settling();
-  const raw = hold || keep ? b.shapes : shapes(b, a, R, BL, BR);
-  // 候補の位置（形 i ごと）：上（元の位置・少し上へ・相手は札とプレートの上まで下へ）、席の左右（しっぽは横向き）
-  const spots = (sh, fn) => {
-    const y0 = Math.round(Math.max(TOP, at - sh.h - T - 2));
-    const lo = Math.max(BL, cx - sh.w + 14), hi = Math.min(BR - sh.w, cx - 14), mid = Math.max(BL, Math.min(BR - sh.w, cx - sh.w / 2));
-    const st = sh.tk ? 2 : 4, sx = sh.tk ? 3 : 5;   // 帯は小さいので細かく探す
-    const ys = [y0];
-    for (let d = st; d <= 40 && y0 - d >= TOP; d += st) ys.push(y0 - d);
-    if (!mine) for (let d = st; d <= a.hh + 34; d += st) ys.push(y0 + d);
-    const xs = [mid]; for (let X = lo; X <= hi; X += sx) xs.push(X);
-    for (const Y of ys) for (const X of xs) fn('up', X, Y, (Y < y0 ? (y0 - Y) * 10 : (Y - y0) * 8) + Math.abs(X - mid) * .5);
-    // 横：札の横（無理ならプレートの横）。しっぽの高さ（的の真ん中）が吹き出しの縦の範囲に入るように、上下にずらしながら
-    a.sides.forEach((t, k) => {
-      const tl = t.l - R.left, tr = t.r - R.left, ty = t.cy - R.top, ty0 = Math.round(ty - sh.h / 2);
-      for (const side of ['l', 'r']) for (let g = 0; g <= 24; g += 6) {
-        const X = side === 'l' ? Math.round(tl - T - 2 - g - sh.w) : Math.round(tr + T + 2 + g);
-        for (let d = 0; d <= sh.h / 2 - 12; d += 5) for (const Y of d ? [ty0 - d, ty0 + d] : [ty0]) fn(side + k, X, Y, 500 + k * 150 + g * 6 + d * 2);
-      }
-      // 最後の手段：的の下（しっぽは上向き）。自分の吹き出しは自分の札の下＝自分のプレートの上
-      const tcx = (t.l + t.r) / 2 - R.left, tb = t.b - R.top;
-      const lo = Math.max(BL, tcx - sh.w + 14), hi = Math.min(BR - sh.w, tcx - 14), md = Math.max(BL, Math.min(BR - sh.w, tcx - sh.w / 2));
-      for (let g = 0; g <= 24; g += 6) { const Y = Math.round(tb + T + 2 + g); for (let X = lo; X <= hi; X += 5) fn('d' + k, X, Y, 900 + k * 150 + g * 6 + Math.abs(X - md) * .5); }
-    });
-  };
-  // いまの置き方（席からの相対位置。rx・ry は z で割った吹き出し自身の大きさで持つ）がまだ何にも重ならなければそのまま
-  // （毎フレームの探し直しをしない・ちらつかせない。キーボードで縮んでも同じ置き方のまま縮める）
-  const tgt = side => a.sides[+side[1]] || a.sides[0];
-  const base = side => { if (side === 'up') { return [cx, at]; } const t = tgt(side); return side[0] === 'd' ? [(t.l + t.r) / 2 - R.left, t.b - R.top] : [(side[0] === 'l' ? t.l : t.r) - R.left, t.cy - R.top]; };
-  let pick = null;
-  if (keep) {
-    const zt = kbScale(), floor = Math.max(Z_MIN, zt * .6);
-    z = fitScale(b, raw[b.cur.i], base(b.cur.side), clampIn, cost, probe ? 1 : Math.max(floor, zc), floor, !probe);
+  const obs = obstacles(b.seat).map(([r, k]) => ({ l: r.left - R.left - 2, r: r.right - R.left + 2, t: r.top - R.top - 2, b: r.bottom - R.top + 2, k }))
+    .concat((placed || []).map(o => ({ ...o, l: o.l - 2, r: o.r + 2, t: o.t - 2, b: o.b + 2 })));
+  return { a, R, BL, BR, TOP, BOT, obs, mine: b.seat === S.v?.seat, cx: (a.left + a.right) / 2 - R.left, at: a.top - R.top };
+}
+// 重なりの面積 × 重み。hard：発言した人自身のプレート（重み 1 未満）は数えない
+function areaOf(F, X, Y, w, h, hard) {
+  let c = 0;
+  for (const o of F.obs) {
+    if (hard && o.k < 1) continue;
+    const dx = Math.min(o.r, X + w) - Math.max(o.l, X), dy = Math.min(o.b, Y + h) - Math.max(o.t, Y);
+    if (dx > 0 && dy > 0) c += o.k * dx * dy;
   }
-  if (probe) return keep ? z : undefined;
-  b.z = z; T = TAIL * z;
-  const list = z === 1 ? raw : raw.map(o => ({ ...o, w: o.w * z, h: o.h * z }));
-  if (b.cur && list[b.cur.i]) {
-    // 枠からはみ出す分だけは内側へ寄せる
-    const sh = list[b.cur.i], [bx, by] = base(b.cur.side), [X, Y] = clampIn(bx + b.cur.rx * z, by + b.cur.ry * z, sh);
-    if (hold || keep || ((b.cur.side === 'up' || a.sides[+b.cur.side[1]]) && inside(X, Y, sh.w, sh.h) && cost(b.cur.side, X, Y, sh.w, sh.h) === 0)) pick = { ...b.cur, x: X, y: Y };
+  return c;
+}
+// 吹き出し（左上 X・Y、大きさ sh.w × sh.h）としっぽ（長さ t。上なら下に、下なら上に、横なら席の側に）の分を合わせた箱で重なりを数える
+function costOf(F, side, X, Y, sh, t, hard = false) {
+  const w = sh.w, h = sh.h;
+  if (side === 'up') return areaOf(F, X, Y, w, h + t, hard);
+  if (side[0] === 'd') return areaOf(F, X, Y - t, w, h + t, hard);
+  if (side[0] === 'l') return areaOf(F, X, Y, w + t, h, hard);
+  return areaOf(F, X - t, Y, w + t, h, hard);
+}
+const insideOf = (F, X, Y, w, h) => X >= F.BL - .5 && X + w <= F.BR + .5 && Y >= F.TOP - .5 && Y + h <= F.BOT + .5;
+// 枠からはみ出す分だけ内側へ寄せる
+const clampOf = (F, X, Y, sh) => [Math.max(F.BL, Math.min(F.BR - sh.w, X)), Math.max(F.TOP, Math.min(F.BOT - sh.h, Y))];
+// 置き方の基準点（上：席の箱の上辺の真ん中、横：的の左右の辺の真ん中、下：的の下辺の真ん中）
+function baseOf(F, side) {
+  if (side === 'up') return [F.cx, F.at];
+  const t = F.a.sides[+side[1]] || F.a.sides[0];
+  if (side[0] === 'd') return [(t.l + t.r) / 2 - F.R.left, t.b - F.R.top];
+  return [(side[0] === 'l' ? t.l : t.r) - F.R.left, t.cy - F.R.top];
+}
+// 候補の位置（形 sh ごと）：上（元の位置・少し上へ・相手は札とプレートの上まで下へ）
+function spotsUp(F, sh, T, fn) {
+  const y0 = Math.round(Math.max(F.TOP, F.at - sh.h - T - 2));
+  const lo = Math.max(F.BL, F.cx - sh.w + 14), hi = Math.min(F.BR - sh.w, F.cx - 14), mid = Math.max(F.BL, Math.min(F.BR - sh.w, F.cx - sh.w / 2));
+  const st = sh.tk ? 2 : 4, sx = sh.tk ? 3 : 5;   // 帯は小さいので細かく探す
+  const ys = [y0];
+  for (let d = st; d <= 40 && y0 - d >= F.TOP; d += st) ys.push(y0 - d);
+  if (!F.mine) for (let d = st; d <= F.a.hh + 34; d += st) ys.push(y0 + d);
+  const xs = [mid]; for (let X = lo; X <= hi; X += sx) xs.push(X);
+  for (const Y of ys) {
+    const pen = Y < y0 ? (y0 - Y) * 10 : (Y - y0) * 8;
+    for (const X of xs) fn('up', X, Y, pen + Math.abs(X - mid) * .5);
   }
-  if (!pick) {
-    let bestScore = Infinity;
-    // 置き直すときは、いまの場所の近く・同じ向きを選びやすくする（反対側へ大きく動かさない）
-    const near = (side, X, Y) => {
-      if (!b.at) return 0;
-      const turn = side[0] === b.at.side ? 0 : 400;
-      return turn + (Math.abs(X - b.at.x) + Math.abs(Y - b.at.y)) * .6;
-    };
-    list.forEach((sh, i) => spots(sh, (side, X, Y, pen) => {
-      if (!inside(X, Y, sh.w, sh.h)) return;
-      const score = cost(side, X, Y, sh.w, sh.h) * 1000 + sh.pen + pen + near(side, ...tailAt(side, X, Y, sh));
+}
+// 横：的 t（札。無理ならプレート）の横。しっぽの高さ（的の真ん中）が吹き出しの縦の範囲に入るように、上下にずらしながら
+function spotsSide(F, sh, T, t, k, fn) {
+  if (sh.h / 2 < 12) return;
+  const tl = t.l - F.R.left, tr = t.r - F.R.left, ty0 = Math.round(t.cy - F.R.top - sh.h / 2);
+  for (const side of ['l', 'r']) for (let g = 0; g <= 24; g += 6) {
+    const X = side === 'l' ? Math.round(tl - T - 2 - g - sh.w) : Math.round(tr + T + 2 + g);
+    fn(side + k, X, ty0, 500 + k * 150 + g * 6);
+    for (let d = 5; d <= sh.h / 2 - 12; d += 5) {
+      fn(side + k, X, ty0 - d, 500 + k * 150 + g * 6 + d * 2);
+      fn(side + k, X, ty0 + d, 500 + k * 150 + g * 6 + d * 2);
+    }
+  }
+}
+// 最後の手段：的 t の下（しっぽは上向き）。自分の吹き出しは自分の札の下＝自分のプレートの上
+function spotsBelow(F, sh, T, t, k, fn) {
+  const tcx = (t.l + t.r) / 2 - F.R.left, tb = t.b - F.R.top;
+  const lo = Math.max(F.BL, tcx - sh.w + 14), hi = Math.min(F.BR - sh.w, tcx - 14), md = Math.max(F.BL, Math.min(F.BR - sh.w, tcx - sh.w / 2));
+  for (let g = 0; g <= 24; g += 6) {
+    const Y = Math.round(tb + T + 2 + g);
+    for (let X = lo; X <= hi; X += 5) fn('d' + k, X, Y, 900 + k * 150 + g * 6 + Math.abs(X - md) * .5);
+  }
+}
+// 置き直すときは、いまの場所の近く・同じ向きを選びやすくする（反対側へ大きく動かさない）
+function nearOf(b, side, X, Y) {
+  if (!b.at) return 0;
+  const turn = side[0] === b.at.side ? 0 : 400;
+  return turn + (Math.abs(X - b.at.x) + Math.abs(Y - b.at.y)) * .6;
+}
+// いちばん重ならない置き方を探す
+function searchSpot(F, b, list, T, z) {
+  let pick = null, bestScore = Infinity;
+  list.forEach((sh, i) => {
+    const fn = (side, X, Y, pen) => {
+      if (!insideOf(F, X, Y, sh.w, sh.h)) return;
+      const score = costOf(F, side, X, Y, sh, T) * 1000 + sh.pen + pen + nearOf(b, side, ...tailAt(side, X, Y, sh));
       if (score < bestScore) { bestScore = score; pick = { i, side, x: X, y: Y }; }
-    }));
-    if (pick) { const [bx, by] = base(pick.side); pick.rx = (pick.x - bx) / z; pick.ry = (pick.y - by) / z; }
-  }
-  if (!pick) { el.style.visibility = 'hidden'; return; }
-  const moved = !hold && b.at && (!b.cur || b.cur.side !== pick.side || b.cur.i !== pick.i || Math.abs(b.cur.rx - pick.rx) + Math.abs(b.cur.ry - pick.ry) > 2);
+    };
+    spotsUp(F, sh, T, fn);
+    F.a.sides.forEach((t, k) => { spotsSide(F, sh, T, t, k, fn); spotsBelow(F, sh, T, t, k, fn); });
+  });
+  if (pick) { const [bx, by] = baseOf(F, pick.side); pick.rx = (pick.x - bx) / z; pick.ry = (pick.y - by) / z; }
+  return pick;
+}
+// いまの置き方（席からの相対位置。rx・ry は z で割った吹き出し自身の大きさで持つ）。stay でなければ、まだ何にも重ならないときだけ
+// （毎フレームの探し直しをしない・ちらつかせない。キーボードで縮んでも同じ置き方のまま縮める）
+function keptSpot(F, b, list, z, T, stay) {
+  const c = b.cur, sh = c && list[c.i]; if (!sh) return null;
+  const [bx, by] = baseOf(F, c.side), [X, Y] = clampOf(F, bx + c.rx * z, by + c.ry * z, sh);
+  if (stay) return { ...c, x: X, y: Y };
+  const ok = (c.side === 'up' || F.a.sides[+c.side[1]]) && insideOf(F, X, Y, sh.w, sh.h) && costOf(F, c.side, X, Y, sh, T) === 0;
+  return ok ? { ...c, x: X, y: Y } : null;
+}
+// zc：キーボードが出ている間に吹き出しを描く倍率（loop が全部の吹き出しで揃えて決める）。probe：重ならずに描ける一番大きい倍率を
+// 返すだけ（置かない）
+function place(b, placed, zc = 1, probe = false) {
+  const L = layer(), a = anchorOf(b.seat);
+  if (!L || !a) return hide(b, probe);
+  const F = frameOf(b, a, L, placed);
+  // キーボードが出ている間は、出す前の置き方（向き・形・席からの位置）のまま小さく描く（keep。置き直さない）。
+  // キーボードで卓が縮む・戻る途中も、形と席からの位置はそのまま（hold。毎フレーム探し直すと左右に跳ぶ）。落ち着いてから一度だけ見直す
+  const known = !!(b.cur && b.shapes?.[b.cur.i]);
+  const keep = known && document.body.classList.contains('kb'), hold = known && settling();
+  if (probe) return keep ? fitScale(F, b, b.shapes[b.cur.i], 1, zFloor(), false) : undefined;
+  const stay = hold || keep, raw = stay ? b.shapes : shapes(b, a, F.R, F.BL, F.BR);
+  // z = 描く倍率。ここから下の大きさ・位置は画面の上の px（形の w・h・しっぽの長さ T も z 倍したもの）
+  const z = keep ? fitScale(F, b, raw[b.cur.i], Math.max(zFloor(), zc), zFloor(), true) : 1;
+  const list = z === 1 ? raw : raw.map(o => ({ ...o, w: o.w * z, h: o.h * z })), T = TAIL * z;
+  b.z = z;
+  const pick = keptSpot(F, b, list, z, T, stay) || searchSpot(F, b, list, T, z);
+  if (!pick) return hide(b, false);
+  show(F, b, pick, list, z, hold, placed);
+}
+function hide(b, probe) { if (!probe) b.el.style.visibility = 'hidden'; }
+const zFloor = () => Math.max(Z_MIN, kbScale() * .6);
+// 選んだ置き方で見せる。ほかの吹き出しがよけるのは、滑っている途中の場所ではなく行き先
+function show(F, b, pick, list, z, hold, placed) {
+  const c = b.cur;
+  const moved = !hold && !!b.at && (!c || c.side !== pick.side || c.i !== pick.i || Math.abs(c.rx - pick.rx) + Math.abs(c.ry - pick.ry) > 2);
   if (!hold) b.cur = pick;
   const sh = list[pick.i];
-  if (b.applied !== pick.i) {
-    b.applied = pick.i; el.style.setProperty('--cbw', sh.cap + 'px'); el.style.fontSize = sh.fs === list[0].fs ? '' : sh.fs + 'px';
-    el.classList.toggle('tk', !!sh.tk);
-    if (sh.tk) ticker(el);
-  }
-  // 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）。
-  // 同じ向きのまま形が変わるときはしっぽの付け根どうし、向きが変わるときは吹き出しの真ん中どうしで合わせる（b.at = 行き先）
+  applyShape(b, sh, list[0].fs, pick.i);
+  const [vx, vy] = slideTo(b, pick, sh, moved);
+  drawAt(F, b, pick, sh, vx, vy, z);
+  if (placed && !b.gone) placed.push({ ...boxOf(pick.side, Math.round(pick.x), Math.round(pick.y), sh, TAIL * z), k: 4, b0: b });
+}
+// 選んだ形を付ける（文字の大きさ・幅・1 行の帯）
+function applyShape(b, sh, fs0, i) {
+  if (b.applied === i) return;
+  const el = b.el;
+  b.applied = i; el.style.setProperty('--cbw', sh.cap + 'px'); el.style.fontSize = sh.fs === fs0 ? '' : sh.fs + 'px';
+  el.classList.toggle('tk', !!sh.tk);
+  if (sh.tk) ticker(el);
+}
+// 置き直したときは、前に見えていた場所から滑らせる（席に付いていきながら、ずれを 0.26 秒で 0 にする）。
+// 同じ向きのまま形が変わるときはしっぽの付け根どうし、向きが変わるときは吹き出しの真ん中どうしで合わせる（b.at = 行き先）。
+// 返り値は、いま見せる左上
+function slideTo(b, pick, sh, moved) {
   const [mx, my] = tailAt(pick.side, pick.x, pick.y, sh), mcx = pick.x + sh.w / 2, mcy = pick.y + sh.h / 2;
   if (moved && !REDUCE) {
-    const same = b.at.side === pick.side[0], left = b.slide ? slideLeft(b.slide) : 0;
-    b.slide = { dx: (same ? b.at.x - mx : b.at.cx - mcx) + (left ? b.slide.dx * left : 0), dy: (same ? b.at.y - my : b.at.cy - mcy) + (left ? b.slide.dy * left : 0), t0: performance.now() };
+    const [rx, ry] = restOf(b), t0 = performance.now();
+    b.slide = b.at.side === pick.side[0] ? { dx: b.at.x - mx + rx, dy: b.at.y - my + ry, t0 } : { dx: b.at.cx - mcx + rx, dy: b.at.cy - mcy + ry, t0 };
   }
-  const sl = b.slide ? slideLeft(b.slide) : 0; if (b.slide && !sl) b.slide = null;
   b.at = { x: mx, y: my, cx: mcx, cy: mcy, side: pick.side[0] };
-  const x = Math.round(pick.x), y = Math.round(pick.y), vx = pick.x + (sl ? b.slide.dx * sl : 0), vy = pick.y + (sl ? b.slide.dy * sl : 0);
-  const dir = pick.side[0];
+  const [rx, ry] = restOf(b);
+  return [pick.x + rx, pick.y + ry];
+}
+// 滑らせている途中のずれの残り（滑り終われば 0,0）
+function restOf(b) {
+  const sl = b.slide ? slideLeft(b.slide) : 0;
+  if (!sl) { b.slide = null; return [0, 0]; }
+  return [b.slide.dx * sl, b.slide.dy * sl];
+}
+// 吹き出しを vx・vy（縮めた箱の左上）に z 倍で描く。しっぽ（--tx・--ty・柄の長さ --stem）は吹き出し自身の大きさで指定する
+// （画面の上の長さ ÷ z）。しっぽの付け根を中心に縮める
+function drawAt(F, b, pick, sh, vx, vy, z) {
+  const el = b.el, dir = pick.side[0], T = TAIL * z, wl = sh.w / z, hl = sh.h / z;
   if (b.side !== dir) { b.side = dir; el.classList.toggle('sl', dir === 'l'); el.classList.toggle('sr', dir === 'r'); el.classList.toggle('sd', dir === 'd'); }
   el.style.visibility = '';
-  // しっぽ（--tx・--ty・柄の長さ --stem）は吹き出し自身の大きさで指定する（画面の上の長さ ÷ z）
-  const wl = sh.w / z, hl = sh.h / z, lx = v => Math.round(Math.max(10, Math.min(wl - 10, v / z))), ly = v => Math.round(Math.max(10, Math.min(hl - 10, v / z)));
-  let ox, oy;   // しっぽの付け根（吹き出し自身の座標）。ここを中心に z 倍する
-  if (dir === 'd') {
-    const [ex, ey] = base(pick.side);
-    ox = lx(ex - vx); oy = 0;
-    el.style.setProperty('--stem', Math.max(0, Math.round((vy - ey - T - 2) / z)) + 'px');
-  } else if (pick.side === 'up') {
-    ox = lx(cx - vx); oy = hl;
-    // 上にずらしたときは、しっぽの柄を伸ばして席までつなぐ
-    el.style.setProperty('--stem', Math.max(0, Math.round((at - (vy + sh.h) - T - 2) / z)) + 'px');
-  } else {
-    const [ex, ey] = base(pick.side);
-    ox = dir === 'l' ? wl : 0; oy = ly(ey - vy);
-    el.style.setProperty('--stem', Math.max(0, Math.round((dir === 'l' ? ex - (vx + sh.w) - T - 2 : vx - ex - T - 2) / z)) + 'px');
-  }
-  el.style.setProperty(dir === 'l' || dir === 'r' ? '--ty' : '--tx', (dir === 'l' || dir === 'r' ? oy : ox) + 'px');
+  const lx = v => Math.round(Math.max(10, Math.min(wl - 10, v / z))), ly = v => Math.round(Math.max(10, Math.min(hl - 10, v / z)));
+  const [ex, ey] = baseOf(F, pick.side);
+  let ox = 0, oy = 0, stem;   // ox・oy：しっぽの付け根（吹き出し自身の座標）
+  if (dir === 'd') { ox = lx(ex - vx); stem = vy - ey - T - 2; }
+  else if (dir === 'u') { ox = lx(ex - vx); oy = hl; stem = ey - (vy + sh.h) - T - 2; }   // 上にずらしたときは、柄を伸ばして席までつなぐ
+  else if (dir === 'l') { ox = wl; oy = ly(ey - vy); stem = ex - (vx + sh.w) - T - 2; }
+  else { oy = ly(ey - vy); stem = vx - ex - T - 2; }
+  el.style.setProperty('--stem', Math.max(0, Math.round(stem / z)) + 'px');
+  if (dir === 'l' || dir === 'r') el.style.setProperty('--ty', oy + 'px');
+  else el.style.setProperty('--tx', ox + 'px');
   el.style.transformOrigin = `${ox}px ${oy}px`;
   el.style.scale = z === 1 ? '' : String(Math.round(z * 1000) / 1000);
   // 付け根を中心に縮めるので、その分だけ左上をずらす（縮めた箱の左上が vx・vy に来る）
   el.style.translate = `${Math.round((vx - (1 - z) * ox) * 10) / 10}px ${Math.round((vy - (1 - z) * oy) * 10) / 10}px`;
-  // ほかの吹き出しがよけるのは、滑っている途中の場所ではなく行き先
-  if (placed && !b.gone) placed.push(pick.side === 'up' ? { l: x, r: x + sh.w, t: y, b: y + sh.h + T, k: 4, b0: b }
-    : dir === 'd' ? { l: x, r: x + sh.w, t: y - T, b: y + sh.h, k: 4, b0: b }
-    : { l: dir === 'l' ? x : x - T, r: dir === 'l' ? x + sh.w + T : x + sh.w, t: y, b: y + sh.h, k: 4, b0: b });
+}
+// 吹き出しとしっぽを合わせた箱（ほかの吹き出しがよける）
+function boxOf(side, x, y, sh, T) {
+  if (side === 'up') return { l: x, r: x + sh.w, t: y, b: y + sh.h + T };
+  if (side[0] === 'd') return { l: x, r: x + sh.w, t: y - T, b: y + sh.h };
+  if (side[0] === 'l') return { l: x, r: x + sh.w + T, t: y, b: y + sh.h };
+  return { l: x - T, r: x + sh.w, t: y, b: y + sh.h };
 }
 // キーボードが出ている間の大きさ：出す前の置き方のまま、ほかの席・ベット・ボード・ドック・ほかの吹き出しに重ならない一番大きい倍率
 // （top から floor まで。発言した人自身のプレートと伏せた札にはかぶってよい）。どれでも重なるなら一番重ならない倍率。
 // steady：前のフレームの倍率と少ししか違わなければそのまま（ちらつかせない）
 const Z_MIN = .35, Z_STEP = .02;
-function fitScale(b, sh0, [bx, by], clampIn, cost, top, floor, steady) {
+function fitScale(F, b, sh0, top, floor, steady) {
+  const [bx, by] = baseOf(F, b.cur.side);
   let best = top, least = Infinity;
   for (let z = top; z >= floor - 1e-9; z -= Z_STEP) {
-    const sh = { w: sh0.w * z, h: sh0.h * z }, [X, Y] = clampIn(bx + b.cur.rx * z, by + b.cur.ry * z, sh);
-    const c = cost(b.cur.side, X, Y, sh.w, sh.h, TAIL * z, true);
-    if (c === 0) { best = z; least = 0; break; }
+    const sh = { w: sh0.w * z, h: sh0.h * z }, [X, Y] = clampOf(F, bx + b.cur.rx * z, by + b.cur.ry * z, sh);
+    const c = costOf(F, b.cur.side, X, Y, sh, TAIL * z, true);
     if (c < least) { least = c; best = z; }
+    if (c === 0) break;
   }
   return steady && b.z && b.z <= top && Math.abs(best - b.z) < Z_STEP * 1.5 ? b.z : best;
 }
@@ -518,8 +585,7 @@ function loop() {
   let zc = 1;
   if (kb) { let m = 1; for (const b of live) { const f = place(b, null, 1, true); if (f != null) m = Math.min(m, f); } zc = Math.max(kbScale(), m); }
   for (const b of live) place(b, placed, zc);
-  // 縮む・戻る途中の一時的な重なりや、キーボードが出ている間（置き方を変えない）は消さない
-  if (kb || settling()) for (const p of placed) p.b0.clash = 0;
+  if (settling()) for (const p of placed) p.b0.clash = 0;   // 縮む・戻る途中の一時的な重なりでは消さない
   else clashes(placed, now);
   raf = requestAnimationFrame(loop);
 }
