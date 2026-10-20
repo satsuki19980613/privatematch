@@ -833,12 +833,12 @@ dialog.glass-dlg:not([open])::backdrop{opacity:0;transition-duration:.16s}
 .t-you{--tone:var(--you);--tone-ink:#fff}
 .t-p1{--tone:var(--pc1);--tone-ink:var(--pc1-ink)}.t-p2{--tone:var(--pc2);--tone-ink:var(--pc2-ink)}.t-p3{--tone:var(--pc3);--tone-ink:var(--pc3-ink)}
 .t-p4{--tone:var(--pc4);--tone-ink:var(--pc4-ink)}.t-p5{--tone:var(--pc5);--tone-ink:var(--pc5-ink)}
-/* bubbles : a layer over the stage (outside #table, so they keep their size when the table is scaled down for the keyboard).
-   chat.js places each one right above its speaker's cards every frame while it is shown */
+/* bubbles : a layer over the stage. chat.js places each one right above its speaker's cards every frame while it is shown */
 .chat-bubbles{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden;--cf:clamp(12px,calc(var(--cw)*.3),14.5px)}
 .chat-bubbles[hidden]{display:none}
-/* the table is scaled down for the keyboard : the bubbles shrink a little with it, never below 11px */
-body.kbmin .chat-bubbles{--cf:max(11px,calc(clamp(12px,calc(var(--cw)*.3),14.5px)*(1 - (1 - var(--ts1,1))*var(--kbm,0))))}
+/* keyboard up : the font size stays the one from before the keyboard (--cw0); chat.js draws the bubbles smaller by the same factor
+   as the table (scale), so their line breaks and their places around the seats stay the same */
+body.kb .chat-bubbles{--cf:clamp(12px,calc(var(--cw0,var(--cw))*.3),14.5px)}
 .cb{position:absolute;left:0;top:0;width:max-content;max-width:min(var(--cbw,15.5em),calc(100% - 8px));color:var(--cb-ink);background:var(--cb-bg);
   border:1px solid var(--cb-edge);border-left:3px solid var(--tone,var(--cpu));box-shadow:var(--cb-shadow),inset 0 1px 0 var(--cb-edge);
   -webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);font-size:var(--cf);

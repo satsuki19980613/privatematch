@@ -56,10 +56,19 @@ let snap = false;
 export function snapshot() {
   if (document.body.classList.contains('kb') || anim) return;
   preKbCw = cwNow();
+  if (preKbCw) root.style.setProperty('--cw0', preKbCw + 'px');   // the bubbles keep the font size they had before the keyboard
   t0h = document.getElementById('table')?.clientHeight || 0;
   const top = document.querySelector('.top');
   if (top) { const cs = getComputedStyle(top); root.style.setProperty('--tp0', cs.paddingTop); root.style.setProperty('--tb0', cs.paddingBottom); }
   snap = true;
+}
+/** how much smaller the table is drawn than before the keyboard (1 = the same): the card size and, when the table is scaled down
+ *  (kbmin), that scale. chat.js draws the bubbles at least this much smaller (fitting them where they were) */
+export function kbScale() {
+  const b = document.body;
+  if (!b.classList.contains('kb') || !preKbCw) return 1;
+  const s = b.classList.contains('kbmin') ? 1 - (1 - (Number.parseFloat(root.style.getPropertyValue('--ts1')) || 1)) * cur.kbm : 1;
+  return Math.min(1, (cwNow() || preKbCw) / preKbCw) * s;
 }
 const stage = () => document.getElementById('stage');
 const cwNow = () => Number.parseFloat(stage()?.style.getPropertyValue('--cw')) || 0;
